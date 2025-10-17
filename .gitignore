@@ -194,6 +194,24 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Pre-commit
+.pre-commit-cache/
+
+# Secrets detection
+.secrets.baseline
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Test results
+.pytest_cache/
+test-results/
+junit.xml
+
 # Cursor
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data

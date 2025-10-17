@@ -4,7 +4,7 @@ from .server import (
     BaseServerHandler,
     ServerManager,
 )
-from .postgresql import PostgreSQLServer
+from .production.postgresql import PostgreSQLServer
 
 __all__ = [
     "BaseServerHandler",
