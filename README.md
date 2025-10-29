@@ -16,7 +16,7 @@ A powerful Discord bot that automatically records voice channel meetings and pro
 
 ### Prerequisites
 
-- Python 3.13+
+- Python 3.10
 - Discord Bot Token ([Create one here](https://discord.com/developers/applications))
 - PostgreSQL database (optional, for persistent storage)
 
