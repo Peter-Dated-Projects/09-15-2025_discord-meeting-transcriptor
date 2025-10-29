@@ -7,6 +7,7 @@ __pycache__/
 *.so
 
 **.key
+uv.lock
 
 # Distribution / packaging
 .Python

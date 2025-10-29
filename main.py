@@ -52,17 +52,23 @@ async def on_ready():
         print("Syncing to individual guilds for instant access...")
         for guild in bot.guilds:
             synced = await bot.tree.sync(guild=guild)
-            print(f"  ✓ Synced {len(synced)} command(s) to: {guild.name} (ID: {guild.id})")
+            print(
+                f"  ✓ Synced {len(synced)} command(s) to: {guild.name} (ID: {guild.id})"
+            )
 
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
 
-@bot.tree.command(name="transcribe", description="Join an active VC and begin transcription")
+@bot.tree.command(
+    name="transcribe", description="Join an active VC and begin transcription"
+)
 async def transcribe(ctx: discord.Interaction):
     """Join the user's current voice channel and start transcribing."""
     if not ctx.user.voice or not ctx.user.voice.channel:
-        await ctx.response.send_message("You must be in a voice channel to use this command.", ephemeral=True)
+        await ctx.response.send_message(
+            "You must be in a voice channel to use this command.", ephemeral=True
+        )
         return
 
     voice_channel = ctx.user.voice.channel
@@ -72,7 +78,9 @@ async def transcribe(ctx: discord.Interaction):
     else:
         await voice_channel.connect()
 
-    await ctx.response.send_message(f"Joined {voice_channel.name} and started transcribing!", ephemeral=True)
+    await ctx.response.send_message(
+        f"Joined {voice_channel.name} and started transcribing!", ephemeral=True
+    )
 
 
 # -------------------------------------------------------------- #
