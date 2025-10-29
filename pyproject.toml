@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A Discord bot for meeting transcription, summaries, and interactive notes"
 requires-python = ">=3.13"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 
 dependencies = [
     "discord.py>=2.6.4",
@@ -215,3 +215,6 @@ skips = ["B101", "B601"]  # B101: assert_used, B601: paramiko_calls
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["source", "cogs"]
