@@ -27,7 +27,10 @@ A powerful Discord bot that automatically records voice channel meetings and pro
 git clone https://github.com/Peter-Dated-Projects/09-15-2025_discord-meeting-transcriptor.git
 cd 09-15-2025_discord-meeting-transcriptor
 
-# Install dependencies
+# Install dependencies -- make sure to install uv python manager
+uv pip install .
+
+# or just use pip
 pip install -r requirements.txt
 
 # Copy environment template
@@ -38,8 +41,12 @@ cp .env.example .env
 ### Running the Bot
 
 ```bash
+
+# Spin up Whisper Transcription Server (windows)
+.\assets\Release\whisper-server.exe --port 7777 --host 0.0.0.0 --public .\assets\whisper-public\ -m .\assets\models\ggml-large-v2.bin -p 2
+
 # Basic run
-python main.py
+uv run main.py
 
 # Development mode (auto-reload on file changes)
 make dev
@@ -152,7 +159,7 @@ Please read [DEVELOPMENT.md](DEVELOPMENT.md) and [AGENT.md](AGENT.md) for code s
 
 - **Discord.py** - Discord bot framework
 - **PostgreSQL + asyncpg** - Database and async driver
-- **Python 3.13** - Core language
+- **Python 3.10** - Core language
 - **Ruff + Black** - Code formatting and linting
 - **MyPy** - Static type checking
 - **Pytest** - Testing framework

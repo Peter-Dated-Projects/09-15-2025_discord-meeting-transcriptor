@@ -6,10 +6,13 @@ from discord import app_commands
 from discord.ext import commands
 
 import dotenv
+import logging
 
 from source import utils
 
 dotenv.load_dotenv(dotenv_path=".env.local")
+
+logging.basicConfig(level=logging.INFO)
 
 # -------------------------------------------------------------- #
 # Discord Bot Setup
@@ -24,15 +27,13 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 
-# -------------------------------------------------------------- #
-# Load Cogs
-# -------------------------------------------------------------- #
-
-
 async def load_cogs():
     """Load all cog extensions."""
     await bot.load_extension("cogs.general")
     print("✓ Loaded cogs.general")
+
+    await bot.load_extension("cogs.voice")
+    print("✓ Loaded cogs.voice")
 
 
 # -------------------------------------------------------------- #
@@ -58,29 +59,6 @@ async def on_ready():
 
     except Exception as e:
         print(f"Failed to sync commands: {e}")
-
-
-@bot.tree.command(
-    name="transcribe", description="Join an active VC and begin transcription"
-)
-async def transcribe(ctx: discord.Interaction):
-    """Join the user's current voice channel and start transcribing."""
-    if not ctx.user.voice or not ctx.user.voice.channel:
-        await ctx.response.send_message(
-            "You must be in a voice channel to use this command.", ephemeral=True
-        )
-        return
-
-    voice_channel = ctx.user.voice.channel
-
-    if ctx.guild.voice_client:
-        await ctx.guild.voice_client.move_to(voice_channel)
-    else:
-        await voice_channel.connect()
-
-    await ctx.response.send_message(
-        f"Joined {voice_channel.name} and started transcribing!", ephemeral=True
-    )
 
 
 # -------------------------------------------------------------- #

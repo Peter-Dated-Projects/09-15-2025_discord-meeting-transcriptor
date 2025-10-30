@@ -229,4 +229,6 @@ __marimo__/
 
 **/.env*
 **.bin
-assets/models/ggml-large-v2.bin
+**.exe
+
+assets/Release
