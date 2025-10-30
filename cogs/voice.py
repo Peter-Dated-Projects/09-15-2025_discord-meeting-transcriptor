@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -58,10 +59,11 @@ class Voice(commands.Cog):
     )
     async def transcribe(self, interaction: discord.Interaction) -> None:
         voice_channel = self.find_user_vc(interaction)
+        await interaction.response.defer(ephemeral=True)
 
         if not voice_channel:
-            await interaction.response.send_message(
-                "You must be in a voice channel to use this command.", ephemeral=True
+            await interaction.edit_original_response(
+                content="You must be in a voice channel to use this command."
             )
             return None
 
@@ -69,19 +71,21 @@ class Voice(commands.Cog):
         voice_client = await self.get_bot_voice_client(interaction)
         if not voice_client:
             voice_client = await self.connect_to_vc(interaction, voice_channel)
-            await interaction.response.send_message(
-                f"Joined voice channel: {voice_channel.name}", ephemeral=True
+            await interaction.edit_original_response(
+                content=f"Joined voice channel: {voice_channel.name}"
             )
         else:
-            await interaction.response.send_message(
-                f"Already transcribing in {voice_channel.name}.", ephemeral=True
+            await interaction.edit_original_response(
+                content=f"Already transcribing in {voice_channel.name}."
             )
 
         # TODO - implement transcription logic + recording service
 
         # wait 5 seconds then dc
-        await discord.utils.sleep_until(
-            discord.utils.utcnow() + discord.utils.timedelta(seconds=5)
+        await asyncio.sleep(5)
+
+        await interaction.followup.send(
+            f"Stopping transcription and leaving voice channel.", ephemeral=True
         )
         await voice_client.disconnect()
 
