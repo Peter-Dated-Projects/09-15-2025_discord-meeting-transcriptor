@@ -61,29 +61,6 @@ async def on_ready():
         print(f"Failed to sync commands: {e}")
 
 
-@bot.tree.command(
-    name="transcribe", description="Join an active VC and begin transcription"
-)
-async def transcribe(ctx: discord.Interaction):
-    """Join the user's current voice channel and start transcribing."""
-    if not ctx.user.voice or not ctx.user.voice.channel:
-        await ctx.response.send_message(
-            "You must be in a voice channel to use this command.", ephemeral=True
-        )
-        return
-
-    voice_channel = ctx.user.voice.channel
-
-    if ctx.guild.voice_client:
-        await ctx.guild.voice_client.move_to(voice_channel)
-    else:
-        await voice_channel.connect()
-
-    await ctx.response.send_message(
-        f"Joined {voice_channel.name} and started transcribing!", ephemeral=True
-    )
-
-
 # -------------------------------------------------------------- #
 # Run Bot
 # -------------------------------------------------------------- #
