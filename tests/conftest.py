@@ -10,6 +10,9 @@ import asyncio
 from typing import Generator, AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock
 
+# Configure pytest-asyncio
+pytest_plugins = ("pytest_asyncio",)
+
 
 # ============================================================================
 # Pytest Configuration
