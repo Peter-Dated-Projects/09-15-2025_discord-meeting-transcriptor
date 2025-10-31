@@ -32,9 +32,10 @@ log_error() {
 }
 
 usage() {
-    echo "Usage: ./run_docker_compose.sh [--down [service]] [--restart <service>] [--list]"
+    echo "Usage: ./run_docker_compose.sh [--down [service]] [--restart <service|all>] [--list]"
     echo "  --down [service]      Stop and remove all containers, or only the specified service."
     echo "  --restart <service>   Restart the specified service/container from this compose file."
+    echo "  --restart all         Restart all services/containers from this compose file."
     echo "  --list                Show containers/services and their current status (with IP + ports if available)."
 }
 
@@ -133,24 +134,43 @@ if [ "$#" -gt 0 ]; then
         --restart)
             SERVICE="$2"
             if [ -z "$SERVICE" ]; then
-                log_error "Please specify a service to restart."
+                log_error "Please specify a service to restart or use 'all'."
                 usage
                 exit 1
             fi
-            log_info "Restarting service '$SERVICE'..."
-            if $docker_compose_cmd -f "$COMPOSE_FILE" restart "$SERVICE"; then
-                log_success "Service '$SERVICE' restarted successfully."
-                exit 0
-            else
-                # try other compose style just in case
-                if [ "$docker_compose_cmd" = "docker compose" ]; then
-                    if docker-compose -f "$COMPOSE_FILE" restart "$SERVICE"; then
-                        log_success "Service '$SERVICE' restarted successfully."
-                        exit 0
+            
+            if [ "$SERVICE" = "all" ]; then
+                log_info "Restarting all services..."
+                if $docker_compose_cmd -f "$COMPOSE_FILE" restart; then
+                    log_success "All services restarted successfully."
+                    exit 0
+                else
+                    # try other compose style just in case
+                    if [ "$docker_compose_cmd" = "docker compose" ]; then
+                        if docker-compose -f "$COMPOSE_FILE" restart; then
+                            log_success "All services restarted successfully."
+                            exit 0
+                        fi
                     fi
+                    log_error "Failed to restart all services."
+                    exit 1
                 fi
-                log_error "Failed to restart service '$SERVICE'."
-                exit 1
+            else
+                log_info "Restarting service '$SERVICE'..."
+                if $docker_compose_cmd -f "$COMPOSE_FILE" restart "$SERVICE"; then
+                    log_success "Service '$SERVICE' restarted successfully."
+                    exit 0
+                else
+                    # try other compose style just in case
+                    if [ "$docker_compose_cmd" = "docker compose" ]; then
+                        if docker-compose -f "$COMPOSE_FILE" restart "$SERVICE"; then
+                            log_success "Service '$SERVICE' restarted successfully."
+                            exit 0
+                        fi
+                    fi
+                    log_error "Failed to restart service '$SERVICE'."
+                    exit 1
+                fi
             fi
             ;;
 
