@@ -80,7 +80,10 @@ async def test_postgres_connect_success(postgres_server: PostgreSQLServer) -> No
     mock_pool = AsyncMock()
     mock_pool.close = AsyncMock()
 
-    with patch("asyncpg.create_pool", return_value=mock_pool) as mock_create:
+    async def mock_create_pool(*args, **kwargs):
+        return mock_pool
+
+    with patch("asyncpg.create_pool", side_effect=mock_create_pool) as mock_create:
         await postgres_server.connect()
 
         mock_create.assert_called_once()
@@ -152,11 +155,18 @@ async def test_postgres_disconnect_failure(postgres_server: PostgreSQLServer) ->
 @pytest.mark.asyncio
 async def test_postgres_health_check_healthy(postgres_server: PostgreSQLServer) -> None:
     """Test successful PostgreSQL health check."""
+    from contextlib import asynccontextmanager
+
     mock_connection = AsyncMock()
     mock_connection.fetchval = AsyncMock(return_value=1)
 
+    # Create a context manager that returns the connection
+    @asynccontextmanager
+    async def pool_acquire_context_manager():
+        yield mock_connection
+
     mock_pool = AsyncMock()
-    mock_pool.acquire = AsyncMock(return_value=mock_connection)
+    mock_pool.acquire = pool_acquire_context_manager
     postgres_server.pool = mock_pool
 
     result = await postgres_server.health_check()

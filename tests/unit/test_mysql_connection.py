@@ -80,7 +80,10 @@ async def test_mysql_connect_success(mysql_server: MySQLServer) -> None:
     mock_pool = AsyncMock()
     mock_pool.close = AsyncMock()
 
-    with patch("aiomysql.create_pool", return_value=mock_pool) as mock_create:
+    async def mock_create_pool(*args, **kwargs):
+        return mock_pool
+
+    with patch("aiomysql.create_pool", side_effect=mock_create_pool) as mock_create:
         await mysql_server.connect()
 
         mock_create.assert_called_once()
@@ -154,17 +157,28 @@ async def test_mysql_disconnect_failure(mysql_server: MySQLServer) -> None:
 @pytest.mark.asyncio
 async def test_mysql_health_check_healthy(mysql_server: MySQLServer) -> None:
     """Test successful MySQL health check."""
+    from contextlib import asynccontextmanager
+
     mock_cursor = AsyncMock()
     mock_cursor.execute = AsyncMock()
     mock_cursor.fetchone = AsyncMock(return_value=(1,))
 
     mock_connection = AsyncMock()
-    mock_connection.cursor = MagicMock(return_value=mock_cursor)
-    mock_connection.__aenter__ = AsyncMock(return_value=mock_connection)
-    mock_connection.__aexit__ = AsyncMock(return_value=None)
+
+    # Create a proper async context manager for cursor
+    @asynccontextmanager
+    async def cursor_context_manager():
+        yield mock_cursor
+
+    mock_connection.cursor = cursor_context_manager
+
+    # Create a context manager that returns the connection
+    @asynccontextmanager
+    async def pool_acquire_context_manager():
+        yield mock_connection
 
     mock_pool = AsyncMock()
-    mock_pool.acquire = AsyncMock(return_value=mock_connection)
+    mock_pool.acquire = pool_acquire_context_manager
     mysql_server.pool = mock_pool
 
     result = await mysql_server.health_check()

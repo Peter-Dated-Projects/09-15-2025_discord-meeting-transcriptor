@@ -13,6 +13,13 @@ from datetime import datetime
 
 
 @dataclass
+class TranscriptChunk:
+    """A chunk of transcript text with metadata."""
+
+    # TODO - define object
+
+
+@dataclass
 class SearchResult:
     """Result from semantic search."""
 
