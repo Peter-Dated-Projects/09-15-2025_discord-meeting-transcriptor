@@ -11,7 +11,18 @@ from typing import Optional, Any, Dict, List
 from contextlib import asynccontextmanager
 import aiomysql
 from aiomysql import Pool, Connection
-from sqlalchemy import insert, select, update, delete, text, MetaData, Table, Column, Integer, String
+from sqlalchemy import (
+    insert,
+    select,
+    update,
+    delete,
+    text,
+    MetaData,
+    Table,
+    Column,
+    Integer,
+    String,
+)
 from sqlalchemy.dialects import mysql
 from sqlalchemy.sql import Insert, Select, Update, Delete
 
@@ -184,7 +195,6 @@ class MySQLServer(SQLDatabase):
             metadata = MetaData()
             table_obj = Table(table, metadata, autoload_with=None)
             stmt = insert(table_obj).values(**data)
-            
             # Compile to MySQL dialect
             compiled = stmt.compile(dialect=mysql.dialect())
             query_str = str(compiled)
@@ -226,18 +236,16 @@ class MySQLServer(SQLDatabase):
             # Build UPDATE statement with SQLAlchemy
             metadata = MetaData()
             table_obj = Table(table, metadata, autoload_with=None)
-            
             # Build WHERE clause
             where_clause = None
             for key, value in conditions.items():
                 condition = table_obj.c[key] == value
                 where_clause = (
-                    condition if where_clause is None
-                    else where_clause & condition
+                    condition if where_clause is None else where_clause & condition
                 )
-            
+
             stmt = update(table_obj).where(where_clause).values(**data)
-            
+
             # Compile to MySQL dialect
             compiled = stmt.compile(dialect=mysql.dialect())
             query_str = str(compiled)
@@ -271,18 +279,16 @@ class MySQLServer(SQLDatabase):
             # Build DELETE statement with SQLAlchemy
             metadata = MetaData()
             table_obj = Table(table, metadata, autoload_with=None)
-            
             # Build WHERE clause
             where_clause = None
             for key, value in conditions.items():
                 condition = table_obj.c[key] == value
                 where_clause = (
-                    condition if where_clause is None
-                    else where_clause & condition
+                    condition if where_clause is None else where_clause & condition
                 )
-            
+
             stmt = delete(table_obj).where(where_clause)
-            
+
             # Compile to MySQL dialect
             compiled = stmt.compile(dialect=mysql.dialect())
             query_str = str(compiled)
