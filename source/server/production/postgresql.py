@@ -2,7 +2,7 @@
 PostgreSQL server handler for database operations.
 
 This module provides an object-oriented handler for managing connections
-and operations with PostgreSQL database.
+and operations with PostgreSQL database using SQLAlchemy Core for query building.
 """
 
 import os
@@ -11,6 +11,9 @@ from typing import Optional, Any, Dict, List
 from contextlib import asynccontextmanager
 import asyncpg
 from asyncpg import Pool, Connection
+from sqlalchemy import insert, select, update, delete, text, MetaData, Table, Column, Integer, String
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql import Insert, Select, Update, Delete
 
 from ..services import SQLDatabase
 
@@ -157,7 +160,7 @@ class PostgreSQLServer(SQLDatabase):
 
     async def insert(self, table: str, data: Dict[str, Any]) -> None:
         """
-        Insert data into a table.
+        Insert data into a table using SQLAlchemy query builder.
 
         Args:
             table: Table name
@@ -170,13 +173,19 @@ class PostgreSQLServer(SQLDatabase):
             raise ValueError("Insert data cannot be empty")
 
         try:
-            columns = ", ".join(data.keys())
-            placeholders = ", ".join(f"${i + 1}" for i in range(len(data)))
-            query = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
-            values = list(data.values())
+            # Build INSERT statement with SQLAlchemy
+            metadata = MetaData()
+            table_obj = Table(table, metadata, autoload_with=None)
+            stmt = insert(table_obj).values(**data)
+            
+            # Compile to PostgreSQL dialect with named parameters
+            compiled = stmt.compile(dialect=postgresql.dialect())
+            query_str = str(compiled)
+            params = compiled.params
+            param_values = list(params.values()) if params else list(data.values())
 
             async with self._get_connection() as connection:
-                await connection.execute(query, *values)
+                await connection.execute(query_str, *param_values)
                 logger.debug(f"[{self.name}] Inserted into {table}")
         except Exception as e:
             logger.error(f"[{self.name}] Insert error: {e}")
@@ -189,7 +198,7 @@ class PostgreSQLServer(SQLDatabase):
         conditions: Dict[str, Any],
     ) -> None:
         """
-        Update data in a table.
+        Update data in a table using SQLAlchemy query builder.
 
         Args:
             table: Table name
@@ -205,15 +214,29 @@ class PostgreSQLServer(SQLDatabase):
             raise ValueError("Update conditions cannot be empty")
 
         try:
-            set_clause = ", ".join(f"{k} = ${i + 1}" for i, k in enumerate(data.keys()))
-            where_clause = " AND ".join(
-                f"{k} = ${len(data) + i + 1}" for i, k in enumerate(conditions.keys())
-            )
-            query = f"UPDATE {table} SET {set_clause} WHERE {where_clause}"
-            values = list(data.values()) + list(conditions.values())
+            # Build UPDATE statement with SQLAlchemy
+            metadata = MetaData()
+            table_obj = Table(table, metadata, autoload_with=None)
+            
+            # Build WHERE clause
+            where_clause = None
+            for key, value in conditions.items():
+                condition = table_obj.c[key] == value
+                where_clause = (
+                    condition if where_clause is None
+                    else where_clause & condition
+                )
+            
+            stmt = update(table_obj).where(where_clause).values(**data)
+            
+            # Compile to PostgreSQL dialect
+            compiled = stmt.compile(dialect=postgresql.dialect())
+            query_str = str(compiled)
+            params = compiled.params
+            param_values = list(params.values())
 
             async with self._get_connection() as connection:
-                await connection.execute(query, *values)
+                await connection.execute(query_str, *param_values)
                 logger.debug(f"[{self.name}] Updated {table}")
         except Exception as e:
             logger.error(f"[{self.name}] Update error: {e}")
@@ -221,7 +244,7 @@ class PostgreSQLServer(SQLDatabase):
 
     async def delete(self, table: str, conditions: Dict[str, Any]) -> None:
         """
-        Delete data from a table.
+        Delete data from a table using SQLAlchemy query builder.
 
         Args:
             table: Table name
@@ -234,14 +257,29 @@ class PostgreSQLServer(SQLDatabase):
             raise ValueError("Delete conditions cannot be empty")
 
         try:
-            where_clause = " AND ".join(
-                f"{k} = ${i + 1}" for i, k in enumerate(conditions.keys())
-            )
-            query = f"DELETE FROM {table} WHERE {where_clause}"
-            values = list(conditions.values())
+            # Build DELETE statement with SQLAlchemy
+            metadata = MetaData()
+            table_obj = Table(table, metadata, autoload_with=None)
+            
+            # Build WHERE clause
+            where_clause = None
+            for key, value in conditions.items():
+                condition = table_obj.c[key] == value
+                where_clause = (
+                    condition if where_clause is None
+                    else where_clause & condition
+                )
+            
+            stmt = delete(table_obj).where(where_clause)
+            
+            # Compile to PostgreSQL dialect
+            compiled = stmt.compile(dialect=postgresql.dialect())
+            query_str = str(compiled)
+            params = compiled.params
+            param_values = list(params.values())
 
             async with self._get_connection() as connection:
-                await connection.execute(query, *values)
+                await connection.execute(query_str, *param_values)
                 logger.debug(f"[{self.name}] Deleted from {table}")
         except Exception as e:
             logger.error(f"[{self.name}] Delete error: {e}")

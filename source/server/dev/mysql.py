@@ -2,7 +2,7 @@
 MySQL server handler for database operations.
 
 This module provides an object-oriented handler for managing connections
-and operations with MySQL database.
+and operations with MySQL database using SQLAlchemy Core for query building.
 """
 
 import os
@@ -11,6 +11,9 @@ from typing import Optional, Any, Dict, List
 from contextlib import asynccontextmanager
 import aiomysql
 from aiomysql import Pool, Connection
+from sqlalchemy import insert, select, update, delete, text, MetaData, Table, Column, Integer, String
+from sqlalchemy.dialects import mysql
+from sqlalchemy.sql import Insert, Select, Update, Delete
 
 from ..services import SQLDatabase
 
@@ -164,7 +167,7 @@ class MySQLServer(SQLDatabase):
 
     async def insert(self, table: str, data: Dict[str, Any]) -> None:
         """
-        Insert data into a table.
+        Insert data into a table using SQLAlchemy query builder.
 
         Args:
             table: Table name
@@ -177,14 +180,20 @@ class MySQLServer(SQLDatabase):
             raise ValueError("Insert data cannot be empty")
 
         try:
-            columns = ", ".join(data.keys())
-            placeholders = ", ".join(["%s"] * len(data))
-            query = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
-            values = list(data.values())
+            # Build INSERT statement with SQLAlchemy
+            metadata = MetaData()
+            table_obj = Table(table, metadata, autoload_with=None)
+            stmt = insert(table_obj).values(**data)
+            
+            # Compile to MySQL dialect
+            compiled = stmt.compile(dialect=mysql.dialect())
+            query_str = str(compiled)
+            params = compiled.params
+            param_values = list(params.values()) if params else list(data.values())
 
             async with self._get_connection() as connection:
                 async with connection.cursor() as cursor:
-                    await cursor.execute(query, values)
+                    await cursor.execute(query_str, param_values)
                     await connection.commit()
                     logger.debug(f"[{self.name}] Inserted into {table}")
         except Exception as e:
@@ -198,7 +207,7 @@ class MySQLServer(SQLDatabase):
         conditions: Dict[str, Any],
     ) -> None:
         """
-        Update data in a table.
+        Update data in a table using SQLAlchemy query builder.
 
         Args:
             table: Table name
@@ -214,14 +223,30 @@ class MySQLServer(SQLDatabase):
             raise ValueError("Update conditions cannot be empty")
 
         try:
-            set_clause = ", ".join(f"{k} = %s" for k in data.keys())
-            where_clause = " AND ".join(f"{k} = %s" for k in conditions.keys())
-            query = f"UPDATE {table} SET {set_clause} WHERE {where_clause}"
-            values = list(data.values()) + list(conditions.values())
+            # Build UPDATE statement with SQLAlchemy
+            metadata = MetaData()
+            table_obj = Table(table, metadata, autoload_with=None)
+            
+            # Build WHERE clause
+            where_clause = None
+            for key, value in conditions.items():
+                condition = table_obj.c[key] == value
+                where_clause = (
+                    condition if where_clause is None
+                    else where_clause & condition
+                )
+            
+            stmt = update(table_obj).where(where_clause).values(**data)
+            
+            # Compile to MySQL dialect
+            compiled = stmt.compile(dialect=mysql.dialect())
+            query_str = str(compiled)
+            params = compiled.params
+            param_values = list(params.values())
 
             async with self._get_connection() as connection:
                 async with connection.cursor() as cursor:
-                    await cursor.execute(query, values)
+                    await cursor.execute(query_str, param_values)
                     await connection.commit()
                     logger.debug(f"[{self.name}] Updated {table}")
         except Exception as e:
@@ -230,7 +255,7 @@ class MySQLServer(SQLDatabase):
 
     async def delete(self, table: str, conditions: Dict[str, Any]) -> None:
         """
-        Delete data from a table.
+        Delete data from a table using SQLAlchemy query builder.
 
         Args:
             table: Table name
@@ -243,13 +268,30 @@ class MySQLServer(SQLDatabase):
             raise ValueError("Delete conditions cannot be empty")
 
         try:
-            where_clause = " AND ".join(f"{k} = %s" for k in conditions.keys())
-            query = f"DELETE FROM {table} WHERE {where_clause}"
-            values = list(conditions.values())
+            # Build DELETE statement with SQLAlchemy
+            metadata = MetaData()
+            table_obj = Table(table, metadata, autoload_with=None)
+            
+            # Build WHERE clause
+            where_clause = None
+            for key, value in conditions.items():
+                condition = table_obj.c[key] == value
+                where_clause = (
+                    condition if where_clause is None
+                    else where_clause & condition
+                )
+            
+            stmt = delete(table_obj).where(where_clause)
+            
+            # Compile to MySQL dialect
+            compiled = stmt.compile(dialect=mysql.dialect())
+            query_str = str(compiled)
+            params = compiled.params
+            param_values = list(params.values())
 
             async with self._get_connection() as connection:
                 async with connection.cursor() as cursor:
-                    await cursor.execute(query, values)
+                    await cursor.execute(query_str, param_values)
                     await connection.commit()
                     logger.debug(f"[{self.name}] Deleted from {table}")
         except Exception as e:
