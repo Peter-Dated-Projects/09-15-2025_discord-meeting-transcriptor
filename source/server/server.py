@@ -42,6 +42,10 @@ class BaseSQLServerHandler(ABC):
         """Check if currently connected to the server."""
         return self._connected
 
+    async def on_startup(self) -> None:
+        """Actions to perform on server startup."""
+        pass
+
 
 # -------------------------------------------------------------- #
 # Server Manager
