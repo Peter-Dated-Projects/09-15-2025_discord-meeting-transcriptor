@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: discord_meeting_mysql
+    restart: unless-stopped
+    env_file:
+      - .env.local
+    environment:
+      MYSQL_DATABASE: ${SQL_DATABASE:-discord_transcriptor}
+      MYSQL_USER: ${SQL_USER:-user}
+      MYSQL_PASSWORD: ${SQL_PASSWORD:-password}
+      MYSQL_ROOT_PASSWORD: ${SQL_ROOT_PASSWORD:-root}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u${MYSQL_USER:-user} -p${MYSQL_PASSWORD:-password}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:
+    name: discord_meeting_mysql_data
