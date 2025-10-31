@@ -8,16 +8,16 @@ services:
     env_file:
       - .env.local
     environment:
-      MYSQL_DATABASE: ${SQL_DATABASE:-discord_transcriptor}
-      MYSQL_USER: ${SQL_USER:-user}
-      MYSQL_PASSWORD: ${SQL_PASSWORD:-password}
-      MYSQL_ROOT_PASSWORD: ${SQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${SQL_DATABASE}
+      MYSQL_USER: ${SQL_USER}
+      MYSQL_PASSWORD: ${SQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${SQL_PASSWORD}
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u${MYSQL_USER:-user} -p${MYSQL_PASSWORD:-password}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u${MYSQL_USER} -p${MYSQL_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 5
