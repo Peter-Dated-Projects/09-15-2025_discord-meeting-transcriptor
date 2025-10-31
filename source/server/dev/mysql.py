@@ -1,16 +1,16 @@
 """
-PostgreSQL server handler for database operations.
+MySQL server handler for database operations.
 
 This module provides an object-oriented handler for managing connections
-and operations with PostgreSQL database.
+and operations with MySQL database.
 """
 
 import os
 import logging
 from typing import Optional, Any, Dict, List
 from contextlib import asynccontextmanager
-import asyncpg
-from asyncpg import Pool, Connection
+import aiomysql
+from aiomysql import Pool, Connection
 
 from ..services import SQLDatabase
 
@@ -19,16 +19,16 @@ logger = logging.getLogger(__name__)
 
 
 # -------------------------------------------------------------- #
-# PostgreSQL Server Handler
+# MySQL Server Handler
 # -------------------------------------------------------------- #
 
 
-class PostgreSQLServer(SQLDatabase):
-    """Handler for PostgreSQL database server operations."""
+class MySQLServer(SQLDatabase):
+    """Handler for MySQL database server operations."""
 
     def __init__(
         self,
-        name: str = "postgresql",
+        name: str = "mysql",
         host: Optional[str] = None,
         port: Optional[int] = None,
         user: Optional[str] = None,
@@ -37,82 +37,88 @@ class PostgreSQLServer(SQLDatabase):
         connection_string: Optional[str] = None,
     ):
         """
-        Initialize PostgreSQL server handler.
+        Initialize MySQL server handler.
 
         Args:
             name: Name of the server handler
-            host: PostgreSQL server host
-            port: PostgreSQL server port (default: 5432)
+            host: MySQL server host
+            port: MySQL server port (default: 3306)
             user: Database user
             password: Database password
             database: Database name
-            connection_string: Full connection string (overrides individual params)
+            connection_string: Full connection string (for compatibility)
         """
         if connection_string:
             super().__init__(name, connection_string)
         else:
-            # Build connection string from individual parameters
-            host = host or os.getenv("POSTGRES_HOST", "localhost")
-            port = port or int(os.getenv("POSTGRES_PORT", "5432"))
-            user = user or os.getenv("POSTGRES_USER", "postgres")
-            password = password or os.getenv("POSTGRES_PASSWORD", "")
-            database = database or os.getenv("POSTGRES_DB", "postgres")
+            # Build connection string info from individual parameters
+            host = host or os.getenv("MYSQL_HOST", "localhost")
+            port = port or int(os.getenv("MYSQL_PORT", "3306"))
+            user = user or os.getenv("MYSQL_USER", "root")
+            password = password or os.getenv("MYSQL_PASSWORD", "")
+            database = database or os.getenv("MYSQL_DB", "mysql")
 
-            connection_string = (
-                f"postgresql://{user}:{password}@{host}:{port}/{database}"
-            )
+            connection_string = f"mysql://{user}:{password}@{host}:{port}/{database}"
             super().__init__(name, connection_string)
 
         self.pool: Optional[Pool] = None
-        self.host = host or os.getenv("POSTGRES_HOST", "localhost")
-        self.port = port or int(os.getenv("POSTGRES_PORT", "5432"))
-        self.database = database or os.getenv("POSTGRES_DB", "postgres")
+        self.host = host or os.getenv("MYSQL_HOST", "localhost")
+        self.port = port or int(os.getenv("MYSQL_PORT", "3306"))
+        self.user = user or os.getenv("MYSQL_USER", "root")
+        self.password = password or os.getenv("MYSQL_PASSWORD", "")
+        self.database = database or os.getenv("MYSQL_DB", "mysql")
 
     # -------------------------------------------------------------- #
     # Connection Management
     # -------------------------------------------------------------- #
 
     async def connect(self) -> None:
-        """Establish connection pool to PostgreSQL server."""
+        """Establish connection pool to MySQL server."""
         try:
-            self.pool = await asyncpg.create_pool(
-                self.connection_string,
-                min_size=1,
-                max_size=10,
-                command_timeout=60,
+            self.pool = await aiomysql.create_pool(
+                host=self.host,
+                port=self.port,
+                user=self.user,
+                password=self.password,
+                db=self.database,
+                minsize=1,
+                maxsize=10,
             )
             self._connected = True
-            logger.info(f"[{self.name}] Connected to PostgreSQL")
+            logger.info(f"[{self.name}] Connected to MySQL")
         except Exception as e:
             logger.error(f"[{self.name}] Failed to connect: {e}")
             self._connected = False
             raise
 
     async def disconnect(self) -> None:
-        """Close connection pool to PostgreSQL server."""
+        """Close connection pool to MySQL server."""
         if self.pool:
             try:
-                await self.pool.close()
+                self.pool.close()
+                await self.pool.wait_closed()
                 self._connected = False
-                logger.info(f"[{self.name}] Disconnected from PostgreSQL")
+                logger.info(f"[{self.name}] Disconnected from MySQL")
             except Exception as e:
                 logger.error(f"[{self.name}] Failed to disconnect: {e}")
                 raise
 
     async def health_check(self) -> bool:
-        """Check if the PostgreSQL server is healthy and responding."""
+        """Check if the MySQL server is healthy and responding."""
         if not self.pool:
             return False
 
         try:
             async with self.pool.acquire() as connection:
-                result = await connection.fetchval("SELECT 1")
-                is_healthy = result == 1
-                if is_healthy:
-                    logger.debug(f"[{self.name}] Health check passed")
-                else:
-                    logger.warning(f"[{self.name}] Health check failed")
-                return is_healthy
+                async with connection.cursor() as cursor:
+                    await cursor.execute("SELECT 1")
+                    result = await cursor.fetchone()
+                    is_healthy = result is not None and result[0] == 1
+                    if is_healthy:
+                        logger.debug(f"[{self.name}] Health check passed")
+                    else:
+                        logger.warning(f"[{self.name}] Health check failed")
+                    return is_healthy
         except Exception as e:
             logger.error(f"[{self.name}] Health check error: {e}")
             return False
@@ -127,7 +133,7 @@ class PostgreSQLServer(SQLDatabase):
         try:
             yield connection
         finally:
-            await self.pool.release(connection)
+            self.pool.release(connection)
 
     # -------------------------------------------------------------- #
     # CRUD Operations
@@ -140,7 +146,7 @@ class PostgreSQLServer(SQLDatabase):
         Execute a SQL SELECT query.
 
         Args:
-            query: SQL query string with $1, $2, etc. for parameters
+            query: SQL query string with %(key)s for named parameters
             params: Optional parameters dictionary
 
         Returns:
@@ -148,9 +154,10 @@ class PostgreSQLServer(SQLDatabase):
         """
         try:
             async with self._get_connection() as connection:
-                param_values = list(params.values()) if params else []
-                rows = await connection.fetch(query, *param_values)
-                return [dict(row) for row in rows]
+                async with connection.cursor(aiomysql.DictCursor) as cursor:
+                    await cursor.execute(query, params)
+                    rows = await cursor.fetchall()
+                    return rows if rows else []
         except Exception as e:
             logger.error(f"[{self.name}] Query error: {e}")
             raise
@@ -171,13 +178,15 @@ class PostgreSQLServer(SQLDatabase):
 
         try:
             columns = ", ".join(data.keys())
-            placeholders = ", ".join(f"${i + 1}" for i in range(len(data)))
+            placeholders = ", ".join(["%s"] * len(data))
             query = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
             values = list(data.values())
 
             async with self._get_connection() as connection:
-                await connection.execute(query, *values)
-                logger.debug(f"[{self.name}] Inserted into {table}")
+                async with connection.cursor() as cursor:
+                    await cursor.execute(query, values)
+                    await connection.commit()
+                    logger.debug(f"[{self.name}] Inserted into {table}")
         except Exception as e:
             logger.error(f"[{self.name}] Insert error: {e}")
             raise
@@ -205,16 +214,16 @@ class PostgreSQLServer(SQLDatabase):
             raise ValueError("Update conditions cannot be empty")
 
         try:
-            set_clause = ", ".join(f"{k} = ${i + 1}" for i, k in enumerate(data.keys()))
-            where_clause = " AND ".join(
-                f"{k} = ${len(data) + i + 1}" for i, k in enumerate(conditions.keys())
-            )
+            set_clause = ", ".join(f"{k} = %s" for k in data.keys())
+            where_clause = " AND ".join(f"{k} = %s" for k in conditions.keys())
             query = f"UPDATE {table} SET {set_clause} WHERE {where_clause}"
             values = list(data.values()) + list(conditions.values())
 
             async with self._get_connection() as connection:
-                await connection.execute(query, *values)
-                logger.debug(f"[{self.name}] Updated {table}")
+                async with connection.cursor() as cursor:
+                    await cursor.execute(query, values)
+                    await connection.commit()
+                    logger.debug(f"[{self.name}] Updated {table}")
         except Exception as e:
             logger.error(f"[{self.name}] Update error: {e}")
             raise
@@ -234,15 +243,15 @@ class PostgreSQLServer(SQLDatabase):
             raise ValueError("Delete conditions cannot be empty")
 
         try:
-            where_clause = " AND ".join(
-                f"{k} = ${i + 1}" for i, k in enumerate(conditions.keys())
-            )
+            where_clause = " AND ".join(f"{k} = %s" for k in conditions.keys())
             query = f"DELETE FROM {table} WHERE {where_clause}"
             values = list(conditions.values())
 
             async with self._get_connection() as connection:
-                await connection.execute(query, *values)
-                logger.debug(f"[{self.name}] Deleted from {table}")
+                async with connection.cursor() as cursor:
+                    await cursor.execute(query, values)
+                    await connection.commit()
+                    logger.debug(f"[{self.name}] Deleted from {table}")
         except Exception as e:
             logger.error(f"[{self.name}] Delete error: {e}")
             raise

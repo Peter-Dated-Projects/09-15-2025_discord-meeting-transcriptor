@@ -10,12 +10,13 @@ from typing import Optional, Dict, List
 
 
 # -------------------------------------------------------------- #
-# Base Server Handler
+# Base Server Handlers
 # -------------------------------------------------------------- #
 
 
-class BaseServerHandler(ABC):
-    """Abstract base class for server handlers."""
+# Base SQL Server Handlers
+class BaseSQLServerHandler(ABC):
+    """Abstract base class for SQL server handlers."""
 
     def __init__(self, name: str):
         self.name = name
@@ -50,30 +51,13 @@ class BaseServerHandler(ABC):
 class ServerManager:
     """Manager for handling multiple server instances."""
 
-    def __init__(self):
-        self._servers: Dict[str, BaseServerHandler] = {}
+    def __init__(self, sql_client: BaseSQLServerHandler, vectordb_client=None):
+        self._sql_client = sql_client
+        # self._vectordb_client = vectordb_client
 
-    def register(self, server: BaseServerHandler) -> None:
-        """
-        Register a server handler.
-
-        Args:
-            server: Server handler instance to register
-        """
-        self._servers[server.name] = server
-        print(f"[ServerManager] Registered server: {server.name}")
-
-    def get(self, name: str) -> Optional[BaseServerHandler]:
-        """
-        Get a registered server by name.
-
-        Args:
-            name: Name of the server to retrieve
-
-        Returns:
-            Server handler instance or None
-        """
-        return self._servers.get(name)
+    # ------------------------------------------------------ #
+    # Server Management
+    # ------------------------------------------------------ #
 
     async def connect_all(self) -> None:
         """Connect all registered servers."""
