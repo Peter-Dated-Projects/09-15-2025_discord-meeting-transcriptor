@@ -33,6 +33,9 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
         if not os.path.exists(self.storage_path):
             os.makedirs(self.storage_path)
 
+        await self.services.logging_service.info(
+            f"RecordingFileManagerService initialized with storage path: {self.recording_storage_path}"
+        )
         return True
 
     async def on_close(self):
@@ -71,7 +74,11 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
     async def save_to_temp_file(self, filename: str, data: bytes) -> str:
         """Save data to a temporary file."""
         await self.services.file_service_manager.save_file(filename, data)
-        return os.path.join(self.temp_path, filename)
+        temp_path = os.path.join(self.temp_path, filename)
+        await self.services.logging_service.info(
+            f"Saved recording to temp file: {filename} ({len(data)} bytes)"
+        )
+        return temp_path
 
     async def move_temp_to_persistent(self, filename: str) -> str:
         """Move a file from temporary to persistent storage."""
@@ -79,14 +86,19 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
         persistent_file_path = os.path.join(self.storage_path, filename)
 
         os.rename(temp_file_path, persistent_file_path)
+        await self.services.logging_service.info(
+            f"Moved recording file to persistent storage: {filename}"
+        )
         return persistent_file_path
 
     async def delete_persistent_file(self, filename: str) -> None:
         """Delete a file from persistent storage."""
         persistent_file_path = os.path.join(self.storage_path, filename)
         await self.services.file_service_manager.delete_file(persistent_file_path)
+        await self.services.logging_service.info(f"Deleted persistent recording file: {filename}")
 
     async def delete_temp_file(self, filename: str) -> None:
         """Delete a file from temporary storage."""
         temp_file_path = os.path.join(self.temp_path, filename)
         await self.services.file_service_manager.delete_file(temp_file_path)
+        await self.services.logging_service.info(f"Deleted temporary recording file: {filename}")
