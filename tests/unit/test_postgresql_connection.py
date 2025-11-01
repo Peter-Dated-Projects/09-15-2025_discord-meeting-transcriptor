@@ -7,10 +7,9 @@ Tests verify that the PostgreSQL handler can:
 - Handle connection errors gracefully
 """
 
+from contextlib import asynccontextmanager
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from typing import AsyncGenerator
 
 from source.server.production.postgresql import PostgreSQLServer
 
@@ -155,8 +154,6 @@ async def test_postgres_disconnect_failure(postgres_server: PostgreSQLServer) ->
 @pytest.mark.asyncio
 async def test_postgres_health_check_healthy(postgres_server: PostgreSQLServer) -> None:
     """Test successful PostgreSQL health check."""
-    from contextlib import asynccontextmanager
-
     mock_connection = AsyncMock()
     mock_connection.fetchval = AsyncMock(return_value=1)
 

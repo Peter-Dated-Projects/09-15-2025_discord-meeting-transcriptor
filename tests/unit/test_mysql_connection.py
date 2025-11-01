@@ -7,10 +7,9 @@ Tests verify that the MySQL handler can:
 - Handle connection errors gracefully
 """
 
+from contextlib import asynccontextmanager
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from typing import AsyncGenerator
 
 from source.server.dev.mysql import MySQLServer
 
@@ -157,8 +156,6 @@ async def test_mysql_disconnect_failure(mysql_server: MySQLServer) -> None:
 @pytest.mark.asyncio
 async def test_mysql_health_check_healthy(mysql_server: MySQLServer) -> None:
     """Test successful MySQL health check."""
-    from contextlib import asynccontextmanager
-
     mock_cursor = AsyncMock()
     mock_cursor.execute = AsyncMock()
     mock_cursor.fetchone = AsyncMock(return_value=(1,))
