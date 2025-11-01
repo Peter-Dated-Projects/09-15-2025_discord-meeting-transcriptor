@@ -13,7 +13,7 @@ load_dotenv(dotenv_path=".env.local")
 
 
 def load_sql_client() -> MySQLServer:
-    """Load and return the SQL client for production."""
+    """Load and return the SQL client for development."""
     host = os.getenv("SQL_HOST")
     port = int(os.getenv("SQL_PORT", "3306"))
     user = os.getenv("SQL_USER")
