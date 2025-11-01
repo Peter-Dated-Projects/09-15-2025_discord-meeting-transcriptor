@@ -1,7 +1,6 @@
 import enum
 
-from sqlalchemy import Column, DateTime, String, Enum
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base
 
@@ -56,12 +55,14 @@ class JobsStatusModel(Base):
 
     id = Column(String(16), primary_key=True, index=True)
     type = Column(Enum(JobsType, name="jobs_type_enum"), nullable=False)
+
+
 class RecordingModel(Base):
     __tablename__ = "recordings"
 
     id = Column(String(16), primary_key=True, index=True)
     created_at = Column(DateTime, nullable=False)
     duration_in_ms = Column(Integer, nullable=False)
-    meeting_id = Column(String(16), ForeignKey('meetings.id'), nullable=False, index=True)
+    meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
     sha256 = Column(String(64), nullable=False, unique=True)
     recording_filename = Column(String, nullable=False)
