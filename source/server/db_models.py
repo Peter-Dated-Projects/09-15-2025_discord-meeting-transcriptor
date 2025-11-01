@@ -2,11 +2,11 @@ from pydantic import RootModel, field_validator
 
 from source.server.sql_models import (
     GuildAdminWhitelistModel,
+    JobsStatusErrorLogModel,
     JobsStatusModel,
     MeetingModel,
     RecordingModel,
     TranscriptsModel,
-    JobsStatusErrorLogModel,
 )
 
 # -------------------------------------------------------------- #
