@@ -20,7 +20,7 @@ dependencies = [
     "pytest-asyncio>=1.2.0",
     "ruff>=0.14.3",
     "setuptools>=80.9.0",
-    "sqlalchemy>=2.0.44",
+    "sqlalchemy[asyncio]>=2.0.44",
     "wheel>=0.45.1",
 ]
 
