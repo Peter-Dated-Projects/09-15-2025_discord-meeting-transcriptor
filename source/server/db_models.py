@@ -1,4 +1,4 @@
-from pydantic import BaseModel, RootModel, field_validator
+from pydantic import RootModel, field_validator
 
 from source.server.sql_models import JobsStatusModel, MeetingModel, RecordingModel
 
