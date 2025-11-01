@@ -39,6 +39,22 @@ class JobsStatus(enum.Enum):
 
 
 class MeetingModel(Base):
+    """
+    ID = Meeting ID
+    Guild ID = Discord Guild (Server) ID
+    Channel ID = Discord Channel ID
+    Started At = Timestamp when meeting started
+    Ended At = Timestamp when meeting ended
+    Updated At = Timestamp when meeting was last updated
+    Status = Current status of the meeting (scheduled, recording, processing, cleaning, completed)
+    Requested By = Discord User ID of the user who requested the meeting
+    Participants = List of participant Discord User IDs
+    Recording Files = List of recording file metadata
+        - {user_id: recording_id, ...}
+    Transcript IDs = List of associated transcript IDs
+        - {user_id: transcript_id, ...}
+    """
+
     __tablename__ = "meetings"
 
     id = Column(String(16), primary_key=True, index=True)
@@ -59,6 +75,15 @@ class MeetingModel(Base):
 
 
 class RecordingModel(Base):
+    """
+    ID = Recording ID
+    Created At = Timestamp when recording was created
+    Duration in ms = Duration of the recording in milliseconds
+    Meeting ID = Foreign Key to associated Meeting ID
+    SHA256 = SHA256 hash of the recording file
+    Recording Filename = Filename of the recording file
+    """
+
     __tablename__ = "recordings"
 
     id = Column(String(16), primary_key=True, index=True)
