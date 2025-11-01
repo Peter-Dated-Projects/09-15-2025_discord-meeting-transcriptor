@@ -147,3 +147,19 @@ class TranscriptsModel(Base):
     user_id = Column(String(20), nullable=False)
     sha256 = Column(String(64), nullable=False, unique=True)
     transcript_filename = Column(String, nullable=False)
+
+
+class GuildAdminWhitelistModel(Base):
+    """
+    ID = Whitelist Entry ID
+    Guild ID = Discord Guild (Server) ID
+    Whitelist User ID = Discord User ID of the user to whitelist
+    Created_At = Timestamp when the whitelist entry was created
+    """
+
+    __tablename__ = "guild_admin_whitelist"
+
+    id = Column(String(16), primary_key=True, index=True)
+    guild_id = Column(String(20), nullable=False, unique=True, index=True)
+    whitelist_user_id = Column(String(20), nullable=False)
+    created_at = Column(DateTime, nullable=False)
