@@ -5,14 +5,14 @@ from contextlib import asynccontextmanager
 import aiofiles
 
 from source.server.server import ServerManager
-from source.services.manager import FileServiceManagerBase
+from source.services.manager import BaseFileServiceManager
 
 # -------------------------------------------------------------- #
 # File Manager Service
 # -------------------------------------------------------------- #
 
 
-class FileManagerService(FileServiceManagerBase):
+class FileManagerService(BaseFileServiceManager):
     """Service for managing file storage and retrieval."""
 
     def __init__(self, server: ServerManager, storage_path: str):

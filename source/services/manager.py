@@ -15,10 +15,10 @@ class ServicesManager:
     def __init__(
         self,
         server: ServerManager,
-        file_service_manager: FileServiceManager,
-        recording_file_service_manager: RecordingFileServiceManager,
-        transcription_file_service_manager: TranscriptionFileServiceManager,
-        ffmpeg_service_manager: FFmpegServiceManager,
+        file_service_manager: BaseFileServiceManager,
+        recording_file_service_manager: BaseRecordingFileServiceManager,
+        transcription_file_service_manager: BaseTranscriptionFileServiceManager,
+        ffmpeg_service_manager: BaseFFmpegServiceManager,
     ):
         self.server = server
 
@@ -72,7 +72,7 @@ class Manager:
 # -------------------------------------------------------------- #
 
 
-class FileServiceManagerBase(Manager):
+class BaseFileServiceManager(Manager):
     """Specialized manager for file services."""
 
     def __init__(self, server):
@@ -119,14 +119,7 @@ class FileServiceManagerBase(Manager):
         pass
 
 
-class FFmpegManagerBase(Manager):
-    """Specialized manager for FFmpeg services."""
-
-    def __init__(self, server):
-        super().__init__(server)
-
-
-class RecordingFileManagerBase(Manager):
+class BaseRecordingFileServiceManager(Manager):
     """Specialized manager for recording file services."""
 
     def __init__(self, server):
@@ -173,15 +166,22 @@ class RecordingFileManagerBase(Manager):
         pass
 
 
-class TranscriptionFileManagerBase(Manager):
-    """Specialized manager for transcription file services."""
+class BaseSQLLoggingServiceManager(Manager):
+    """Specialized manager for SQL logging services."""
 
     def __init__(self, server):
         super().__init__(server)
 
 
-class SQLLoggingManagerBase(Manager):
-    """Specialized manager for SQL logging services."""
+class BaseFFmpegServiceManager(Manager):
+    """Specialized manager for FFmpeg services."""
+
+    def __init__(self, server):
+        super().__init__(server)
+
+
+class BaseTranscriptionFileServiceManager(Manager):
+    """Specialized manager for transcription file services."""
 
     def __init__(self, server):
         super().__init__(server)
