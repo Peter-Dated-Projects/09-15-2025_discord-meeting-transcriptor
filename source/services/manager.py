@@ -3,7 +3,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from source.server.server import ServerManager
-from source.services.logger import AsyncLoggingService
 
 # -------------------------------------------------------------- #
 # Services Manager Class
@@ -20,7 +19,7 @@ class ServicesManager:
         recording_file_service_manager: BaseRecordingFileServiceManager,
         transcription_file_service_manager: BaseTranscriptionFileServiceManager,
         ffmpeg_service_manager: BaseFFmpegServiceManager,
-        logging_service: AsyncLoggingService,
+        logging_service: BaseAsyncLoggingService,
     ):
         self.server = server
 
@@ -167,6 +166,43 @@ class BaseRecordingFileServiceManager(Manager):
     @abstractmethod
     def get_filename_from_temporary_path(self, temporary_path: str) -> str:
         """Get the filename from a temporary storage path."""
+        pass
+
+
+class BaseAsyncLoggingService(Manager):
+    """Specialized manager for asynchronous logging services."""
+
+    def __init__(self, server):
+        super().__init__(server)
+
+    @abstractmethod
+    async def log(self, message: str) -> None:
+        """Log a message asynchronously."""
+        pass
+
+    @abstractmethod
+    async def debug(self, message: str) -> None:
+        """Log an error message asynchronously."""
+        pass
+
+    @abstractmethod
+    async def info(self, message: str) -> None:
+        """Log an info message asynchronously."""
+        pass
+
+    @abstractmethod
+    async def warning(self, message: str) -> None:
+        """Log a warning message asynchronously."""
+        pass
+
+    @abstractmethod
+    async def error(self, message: str) -> None:
+        """Log an error message asynchronously."""
+        pass
+
+    @abstractmethod
+    async def critical(self, message: str) -> None:
+        """Log a critical message asynchronously."""
         pass
 
 
