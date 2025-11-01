@@ -1,6 +1,6 @@
 import enum
 
-from sqlalchemy import Column, DateTime, String
+from sqlalchemy import Column, DateTime, String, Enum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base
 
@@ -19,6 +19,17 @@ class MeetingStatus(enum.Enum):
     COMPLETED = "completed"
 
 
+class JobsType(enum.Enum):
+    TRANSCODING = "transcoding"
+    TRANSCRIBING = "transcribing"
+    CLEANING = "cleaning"
+
+
+# -------------------------------------------------------------- #
+# Meeting Model
+# -------------------------------------------------------------- #
+
+
 class MeetingModel(Base):
     __tablename__ = "meetings"
 
@@ -28,8 +39,19 @@ class MeetingModel(Base):
     started_at = Column(DateTime, nullable=False)
     ended_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=True)
-    status = Column(String, nullable=False, default=MeetingStatus.SCHEDULED.value)
+    status = Column(
+        Enum(MeetingStatus, name="meetings_status_enum"),
+        nullable=False,
+        default=MeetingStatus.SCHEDULED.value,
+    )
     requested_by = Column(String(20), nullable=False)
     participants = Column(JSONB, nullable=False)
     recording_files = Column(JSONB, nullable=False)
     transcript_ids = Column(JSONB, nullable=False)
+
+
+class JobsStatusModel(Base):
+    __tablename__ = "jobs_status"
+
+    id = Column(String(16), primary_key=True, index=True)
+    type = Column(Enum(JobsType, name="jobs_type_enum"), nullable=False)
