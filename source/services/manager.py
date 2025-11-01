@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 from source.server.server import ServerManager
 
@@ -41,7 +41,7 @@ class ServicesManager:
 # -------------------------------------------------------------- #
 
 
-class Manager:
+class Manager(ABC):
     """Base class for all manager services."""
 
     def __init__(self, server: ServerManager):
