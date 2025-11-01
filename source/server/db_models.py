@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, RootModel, field_validator
 
 from source.server.sql_models import JobsStatusModel, MeetingModel, RecordingModel
 
@@ -14,15 +14,15 @@ SQL_DATABASE_MODELS = [MeetingModel, RecordingModel, JobsStatusModel]
 # -------------------------------------------------------------- #
 
 
-class RecordingFilesMapping(BaseModel):
+class RecordingFilesMapping(RootModel[dict[str, str]]):
     """
     Represents the structure: {user_id: recording_id}
     where user_id is a Discord User ID (string) and recording_id is a Recording ID (string)
     """
 
-    __root__: dict[str, str]  # Maps user_id -> recording_id
+    root: dict[str, str]  # Maps user_id -> recording_id
 
-    @field_validator("__root__")
+    @field_validator("root")
     def validate_format(cls, v: dict[str, str]) -> dict[str, str]:
         if not isinstance(v, dict):
             raise ValueError("Must be a dictionary")
@@ -34,15 +34,15 @@ class RecordingFilesMapping(BaseModel):
         return v
 
 
-class TranscriptIdsMapping(BaseModel):
+class TranscriptIdsMapping(RootModel[dict[str, str]]):
     """
     Represents the structure: {user_id: transcript_id}
     where user_id is a Discord User ID (string) and transcript_id is a Transcript ID (string)
     """
 
-    __root__: dict[str, str]  # Maps user_id -> transcript_id
+    root: dict[str, str]  # Maps user_id -> transcript_id
 
-    @field_validator("__root__")
+    @field_validator("root")
     def validate_format(cls, v: dict[str, str]) -> dict[str, str]:
         if not isinstance(v, dict):
             raise ValueError("Must be a dictionary")
