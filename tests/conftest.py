@@ -166,6 +166,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
         if test_env == "prod" and "local" in item.keywords:
             item.add_marker(skip_marker)
 
+        # Apply timeout to all tests except those marked as slow
+        if "slow" not in item.keywords:
+            item.add_marker(pytest.mark.timeout(5))
+
 
 # ============================================================================
 # Pytest Configuration
