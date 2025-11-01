@@ -32,7 +32,7 @@ def load_sql_client() -> PostgreSQLServer:
 
 
 def construct_server_manager(
-    manager_type: ServerManagerType = ServerManagerType.PRODUCTION, storage_path: str = "./data"
+    manager_type: ServerManagerType = ServerManagerType.PRODUCTION,
 ) -> ServerManager:
     """
     Construct and return a ServerManager instance for production.

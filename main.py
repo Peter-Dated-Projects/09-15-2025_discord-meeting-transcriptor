@@ -79,12 +79,14 @@ async def main():
     print("Syncing services...")
 
     # init server manager
-    servers_manager = construct_server_manager(ServerManagerType.DEVELOPMENT, storage_path="./data")
+    servers_manager = construct_server_manager(ServerManagerType.DEVELOPMENT)
     await servers_manager.connect_all()
     print("[OK] Connected all servers.")
 
     services_manager = construct_services_manager(
-        ServerManagerType.DEVELOPMENT, storage_path="./data"
+        ServerManagerType.DEVELOPMENT,
+        server=servers_manager,
+        storage_path=os.path.join("assets", "data"),
     )
     await services_manager.initialize_all()
     print("[OK] Initialized all services.")

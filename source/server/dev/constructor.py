@@ -2,9 +2,9 @@ import os
 
 from dotenv import load_dotenv
 
+from source.constructor import ServerManagerType
 from source.server.dev.mysql import MySQLServer
 from source.server.server import ServerManager
-from source.constructor import ServerManagerType
 
 load_dotenv(dotenv_path=".env.local")
 
@@ -30,7 +30,7 @@ def load_sql_client() -> MySQLServer:
 
 
 def construct_server_manager(
-    manager_type: ServerManagerType = ServerManagerType.DEVELOPMENT, storage_path: str = "./data"
+    manager_type: ServerManagerType = ServerManagerType.DEVELOPMENT,
 ) -> ServerManager:
     """
     Construct and return a ServerManager instance.

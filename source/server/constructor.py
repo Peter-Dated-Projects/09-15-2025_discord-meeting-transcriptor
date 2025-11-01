@@ -6,7 +6,7 @@ from source.server.server import ServerManager
 # -------------------------------------------------------------- #
 
 
-def construct_server_manager(client_type: ServerManagerType, storage_path: str) -> "ServerManager":
+def construct_server_manager(client_type: ServerManagerType) -> "ServerManager":
     """Construct and return a ServerManager instance with given SQL handler and file storage path."""
 
     if client_type == ServerManagerType.DEVELOPMENT:

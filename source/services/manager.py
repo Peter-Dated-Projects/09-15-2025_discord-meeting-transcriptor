@@ -50,4 +50,4 @@ class ServicesManager:
     async def initialize_all(self) -> None:
         """Initialize all service managers."""
         await self.file_service_manager.on_start()
-        await self.ffmpeg_service_manager.on_start()
+        # await self.ffmpeg_service_manager.on_start()
