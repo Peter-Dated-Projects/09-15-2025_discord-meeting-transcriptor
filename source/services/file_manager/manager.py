@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 import aiofiles
 
 from source.server.server import ServerManager
-from source.services.manager import Manager
+from source.services.manager import Manager, ServicesManager
 
 # -------------------------------------------------------------- #
 # File Manager Service
@@ -15,8 +15,8 @@ from source.services.manager import Manager
 class FileManagerService(Manager):
     """Service for managing file storage and retrieval."""
 
-    def __init__(self, server: ServerManager, storage_path: str):
-        super().__init__(server)
+    def __init__(self, server: ServerManager, services: ServicesManager, storage_path: str):
+        super().__init__(server, services)
 
         self.storage_path = storage_path
 
@@ -77,18 +77,22 @@ class FileManagerService(Manager):
         if os.path.exists(os.path.join(self.storage_path, filename)):
             raise FileExistsError(f"File {filename} already exists.")
 
-        async with self._acquire_file_lock(filename):
-            async with aiofiles.open(os.path.join(self.storage_path, filename), "wb") as f:
-                await f.write(data)
+        async with (
+            self._acquire_file_lock(filename),
+            aiofiles.open(os.path.join(self.storage_path, filename), "wb") as f,
+        ):
+            await f.write(data)
 
     async def read_file(self, filename: str) -> bytes:
         """Read a file from the storage path."""
         if not os.path.exists(os.path.join(self.storage_path, filename)):
             raise FileNotFoundError(f"File {filename} does not exist.")
 
-        async with self._acquire_file_lock(filename):
-            async with aiofiles.open(os.path.join(self.storage_path, filename), "rb") as f:
-                return await f.read()
+        async with (
+            self._acquire_file_lock(filename),
+            aiofiles.open(os.path.join(self.storage_path, filename), "rb") as f,
+        ):
+            return await f.read()
 
     async def delete_file(self, filename: str) -> None:
         """Delete a file from the storage path."""
@@ -103,9 +107,11 @@ class FileManagerService(Manager):
         if not os.path.exists(os.path.join(self.storage_path, filename)):
             raise FileNotFoundError(f"File {filename} does not exist.")
 
-        async with self._acquire_file_lock(filename):
-            async with aiofiles.open(os.path.join(self.storage_path, filename), "wb") as f:
-                await f.write(data)
+        async with (
+            self._acquire_file_lock(filename),
+            aiofiles.open(os.path.join(self.storage_path, filename), "wb") as f,
+        ):
+            await f.write(data)
 
     async def get_folder_contents(self) -> list[str]:
         """Get a list of files in the storage path."""

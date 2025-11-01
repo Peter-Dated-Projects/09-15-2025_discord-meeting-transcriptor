@@ -1,34 +1,6 @@
+from __future__ import annotations
+
 from source.server.server import ServerManager
-
-# -------------------------------------------------------------- #
-# Base Service Manager Class
-# -------------------------------------------------------------- #
-
-
-class Manager:
-    """Base class for all manager services."""
-
-    def __init__(self, server: ServerManager):
-        self.server = server
-
-        # check if server has been initialized
-        if not self.server._initialized:
-            raise RuntimeError(
-                "ServerManager must be initialized before creating Manager instances."
-            )
-
-    # -------------------------------------------------------------- #
-    # Manager Methods
-    # -------------------------------------------------------------- #
-
-    async def on_start(self) -> None:
-        """Actions to perform on manager start."""
-        pass
-
-    async def on_close(self) -> None:
-        """Actions to perform on manager close."""
-        pass
-
 
 # -------------------------------------------------------------- #
 # Services Manager Class
@@ -51,3 +23,34 @@ class ServicesManager:
         """Initialize all service managers."""
         await self.file_service_manager.on_start()
         # await self.ffmpeg_service_manager.on_start()
+
+
+# -------------------------------------------------------------- #
+# Base Service Manager Class
+# -------------------------------------------------------------- #
+
+
+class Manager:
+    """Base class for all manager services."""
+
+    def __init__(self, server: ServerManager, services: ServicesManager):
+        self.server = server
+        self.services = services
+
+        # check if server has been initialized
+        if not self.server._initialized:
+            raise RuntimeError(
+                "ServerManager must be initialized before creating Manager instances."
+            )
+
+    # -------------------------------------------------------------- #
+    # Manager Methods
+    # -------------------------------------------------------------- #
+
+    async def on_start(self) -> None:
+        """Actions to perform on manager start."""
+        pass
+
+    async def on_close(self) -> None:
+        """Actions to perform on manager close."""
+        pass

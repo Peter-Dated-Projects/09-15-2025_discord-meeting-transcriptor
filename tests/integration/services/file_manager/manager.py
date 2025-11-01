@@ -1,14 +1,11 @@
 import asyncio
 import os
 import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from source.server.dev.constructor import construct_server_manager
 from source.services.file_manager.manager import FileManagerService
-
 
 # ============================================================================
 # Fixtures
@@ -16,7 +13,7 @@ from source.services.file_manager.manager import FileManagerService
 
 
 @pytest.fixture
-async def dev_server(test_environment: str):
+async def dev_server(_test_environment: str):
     """
     Create a dev environment server manager.
 
@@ -24,7 +21,7 @@ async def dev_server(test_environment: str):
     It connects all servers and ensures proper cleanup.
 
     Args:
-        test_environment: Test environment from conftest (local or prod)
+        _test_environment: Test environment from conftest (local or prod)
     """
     try:
         server = construct_server_manager()
@@ -264,7 +261,7 @@ class TestFileManagerServiceLockSystem:
                 assert final_read == updated_data
                 results["reads"] += 1
 
-            except Exception as e:
+            except Exception:
                 results["success"] = False
                 raise
 
