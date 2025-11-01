@@ -62,10 +62,6 @@ class MeetingModel(Base):
         CheckConstraint(
             "jsonb_typeof(recording_files) = 'object'", name="recording_files_jsonb_object"
         ),
-        CheckConstraint(
-            "recording_files ?| ARRAY(SELECT id FROM recordings) OR recording_files = '{}'::jsonb",
-            name="recording_files_valid_ids",
-        ),
         # define constraints for transcript_ids: {user_id: transcript_id, ...}
         CheckConstraint(
             "jsonb_typeof(transcript_ids) = 'object'", name="transcript_ids_jsonb_object"
