@@ -6,6 +6,7 @@ from source.server.sql_models import (
     MeetingModel,
     RecordingModel,
     TranscriptsModel,
+    JobsStatusErrorLogModel,
 )
 
 # -------------------------------------------------------------- #
@@ -18,6 +19,7 @@ SQL_DATABASE_MODELS = [
     JobsStatusModel,
     TranscriptsModel,
     GuildAdminWhitelistModel,
+    JobsStatusErrorLogModel,
 ]
 
 
