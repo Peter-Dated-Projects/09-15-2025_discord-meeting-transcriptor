@@ -32,7 +32,8 @@ class FileManagerService(BaseFileServiceManager):
         # check if folder exists
         if not os.path.exists(self.storage_path):
             os.makedirs(self.storage_path)
-
+        
+        await self.services.logging_service.info(f"FileManagerService initialized with storage path: {self.storage_path}")
         return True
 
     async def on_close(self):
@@ -82,6 +83,8 @@ class FileManagerService(BaseFileServiceManager):
             aiofiles.open(os.path.join(self.storage_path, filename), "wb") as f,
         ):
             await f.write(data)
+        
+        await self.services.logging_service.info(f"Saved file: {filename} ({len(data)} bytes)")
 
     async def read_file(self, filename: str) -> bytes:
         """Read a file from the storage path."""
@@ -92,7 +95,10 @@ class FileManagerService(BaseFileServiceManager):
             self._acquire_file_lock(filename),
             aiofiles.open(os.path.join(self.storage_path, filename), "rb") as f,
         ):
-            return await f.read()
+            data = await f.read()
+        
+        await self.services.logging_service.info(f"Read file: {filename} ({len(data)} bytes)")
+        return data
 
     async def delete_file(self, filename: str) -> None:
         """Delete a file from the storage path."""
@@ -101,6 +107,8 @@ class FileManagerService(BaseFileServiceManager):
 
         async with self._acquire_file_lock(filename):
             os.remove(os.path.join(self.storage_path, filename))
+        
+        await self.services.logging_service.info(f"Deleted file: {filename}")
 
     async def update_file(self, filename: str, data: bytes) -> None:
         """Update a file in the storage path."""
@@ -112,6 +120,8 @@ class FileManagerService(BaseFileServiceManager):
             aiofiles.open(os.path.join(self.storage_path, filename), "wb") as f,
         ):
             await f.write(data)
+        
+        await self.services.logging_service.info(f"Updated file: {filename} ({len(data)} bytes)")
 
     async def get_folder_contents(self) -> list[str]:
         """Get a list of files in the storage path."""

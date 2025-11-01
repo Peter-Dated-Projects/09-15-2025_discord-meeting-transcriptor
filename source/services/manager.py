@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from source.server.server import ServerManager
+from source.services.logger import AsyncLoggingService
 
 # -------------------------------------------------------------- #
 # Services Manager Class
@@ -19,6 +20,7 @@ class ServicesManager:
         recording_file_service_manager: BaseRecordingFileServiceManager,
         transcription_file_service_manager: BaseTranscriptionFileServiceManager,
         ffmpeg_service_manager: BaseFFmpegServiceManager,
+        logging_service: AsyncLoggingService,
     ):
         self.server = server
 
@@ -27,11 +29,13 @@ class ServicesManager:
         self.recording_file_service_manager = recording_file_service_manager
         self.transcription_file_service_manager = transcription_file_service_manager
         self.ffmpeg_service_manager = ffmpeg_service_manager
+        self.logging_service = logging_service
 
     async def initialize_all(self) -> None:
         """Initialize all service managers."""
         await self.file_service_manager.on_start(self)
         await self.recording_file_service_manager.on_start(self)
+        await self.logging_service.on_start(self)
         # await self.transcription_file_service_manager.on_start(self)
         # await self.ffmpeg_service_manager.on_start(self)
 
