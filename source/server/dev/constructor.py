@@ -8,7 +8,7 @@ from source.server.server import ServerManager
 load_dotenv(dotenv_path=".env.local")
 
 # -------------------------------------------------------------- #
-# Constructor for Production Server Manager
+# Constructor for Development Server Manager
 # -------------------------------------------------------------- #
 
 
