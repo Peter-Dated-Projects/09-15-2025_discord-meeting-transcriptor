@@ -1,6 +1,6 @@
 import enum
 
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, Column, DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base
 
@@ -57,6 +57,21 @@ class MeetingModel(Base):
 
     __tablename__ = "meetings"
 
+    __table_args__ = (
+        # define constraints for recording_files: {user_id: recording_id, ...}
+        CheckConstraint(
+            "jsonb_typeof(recording_files) = 'object'", name="recording_files_jsonb_object"
+        ),
+        CheckConstraint(
+            "recording_files ?| ARRAY(SELECT id FROM recordings) OR recording_files = '{}'::jsonb",
+            name="recording_files_valid_ids",
+        ),
+        # define constraints for transcript_ids: {user_id: transcript_id, ...}
+        CheckConstraint(
+            "jsonb_typeof(transcript_ids) = 'object'", name="transcript_ids_jsonb_object"
+        ),
+    )
+
     id = Column(String(16), primary_key=True, index=True)
     guild_id = Column(String(20), nullable=False, index=True)
     channel_id = Column(String(20), nullable=False)
@@ -69,9 +84,9 @@ class MeetingModel(Base):
         default=MeetingStatus.SCHEDULED.value,
     )
     requested_by = Column(String(20), nullable=False)
-    participants = Column(JSONB, nullable=False)
-    recording_files = Column(JSONB, nullable=False)
-    transcript_ids = Column(JSONB, nullable=False)
+    participants = Column(JSONB, nullable=False, default=dict)
+    recording_files = Column(JSONB, nullable=False, default=dict)
+    transcript_ids = Column(JSONB, nullable=False, default=dict)
 
 
 class RecordingModel(Base):
