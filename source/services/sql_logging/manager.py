@@ -20,7 +20,8 @@ class SQLLoggingManagerService(BaseSQLLoggingServiceManager):
     # Manager Methods
     # -------------------------------------------------------------- #
 
-    async def on_start(self):
+    async def on_start(self, services):
+        await super().on_start(services)
         await self.services.logging_service.info("SQLLoggingManagerService initialized")
         return True
 

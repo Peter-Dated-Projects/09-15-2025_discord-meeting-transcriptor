@@ -24,7 +24,8 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
     # Manager Methods
     # -------------------------------------------------------------- #
 
-    async def on_start(self):
+    async def on_start(self, services):
+        await super().on_start(services)
         # check if folder exists
         if not os.path.exists(self.recording_storage_path):
             os.makedirs(self.recording_storage_path)

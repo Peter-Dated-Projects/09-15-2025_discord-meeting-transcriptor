@@ -28,7 +28,8 @@ class FileManagerService(BaseFileServiceManager):
     # Manager Methods
     # -------------------------------------------------------------- #
 
-    async def on_start(self):
+    async def on_start(self, services):
+        await super().on_start(services)
         # check if folder exists
         if not os.path.exists(self.storage_path):
             os.makedirs(self.storage_path)
