@@ -146,7 +146,9 @@ class MySQLServer(SQLDatabase):
     # CRUD Operations
     # -------------------------------------------------------------- #
 
-    async def query(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    async def query(
+        self, query: str, params: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """
         Execute a SQL SELECT query.
 
@@ -194,7 +196,10 @@ class MySQLServer(SQLDatabase):
             params = compiled.params
             param_values = list(params.values()) if params else list(data.values())
 
-            async with self._get_connection() as connection, connection.cursor() as cursor:
+            async with (
+                self._get_connection() as connection,
+                connection.cursor() as cursor,
+            ):
                 await cursor.execute(query_str, param_values)
                 await connection.commit()
                 logger.debug(f"[{self.name}] Inserted into {table}")
@@ -232,7 +237,9 @@ class MySQLServer(SQLDatabase):
             where_clause = None
             for key, value in conditions.items():
                 condition = table_obj.c[key] == value
-                where_clause = condition if where_clause is None else where_clause & condition
+                where_clause = (
+                    condition if where_clause is None else where_clause & condition
+                )
 
             stmt = update(table_obj).where(where_clause).values(**data)
 
@@ -242,7 +249,10 @@ class MySQLServer(SQLDatabase):
             params = compiled.params
             param_values = list(params.values())
 
-            async with self._get_connection() as connection, connection.cursor() as cursor:
+            async with (
+                self._get_connection() as connection,
+                connection.cursor() as cursor,
+            ):
                 await cursor.execute(query_str, param_values)
                 await connection.commit()
                 logger.debug(f"[{self.name}] Updated {table}")
@@ -272,7 +282,9 @@ class MySQLServer(SQLDatabase):
             where_clause = None
             for key, value in conditions.items():
                 condition = table_obj.c[key] == value
-                where_clause = condition if where_clause is None else where_clause & condition
+                where_clause = (
+                    condition if where_clause is None else where_clause & condition
+                )
 
             stmt = delete(table_obj).where(where_clause)
 
@@ -282,7 +294,10 @@ class MySQLServer(SQLDatabase):
             params = compiled.params
             param_values = list(params.values())
 
-            async with self._get_connection() as connection, connection.cursor() as cursor:
+            async with (
+                self._get_connection() as connection,
+                connection.cursor() as cursor,
+            ):
                 await cursor.execute(query_str, param_values)
                 await connection.commit()
                 logger.debug(f"[{self.name}] Deleted from {table}")
