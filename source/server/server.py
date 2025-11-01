@@ -54,7 +54,9 @@ class ServerManager:
     """Manager for handling multiple server instances."""
 
     def __init__(self, sql_client: BaseSQLServerHandler):
+        self._initialized = False
         self._sql_client = sql_client
+        self._servers = {"sql": sql_client}
 
     # ------------------------------------------------------ #
     # Server Management
@@ -66,8 +68,11 @@ class ServerManager:
         for name, server in self._servers.items():
             try:
                 await server.connect()
+                print(f"[ServerManager] Connected {name}")
             except Exception as e:
                 print(f"[ServerManager] Failed to connect {name}: {e}")
+                raise
+        self._initialized = True
 
     async def disconnect_all(self) -> None:
         """Disconnect all registered servers."""
@@ -75,6 +80,7 @@ class ServerManager:
         for name, server in self._servers.items():
             try:
                 await server.disconnect()
+                print(f"[ServerManager] Disconnected {name}")
             except Exception as e:
                 print(f"[ServerManager] Failed to disconnect {name}: {e}")
 
@@ -93,3 +99,13 @@ class ServerManager:
     def list_servers(self) -> list[str]:
         """Get list of all registered server names."""
         return list(self._servers.keys())
+
+    @property
+    def sql_client(self) -> BaseSQLServerHandler:
+        """Get the SQL client."""
+        return self._sql_client
+
+    @property
+    def is_initialized(self) -> bool:
+        """Check if the server manager is initialized."""
+        return self._initialized

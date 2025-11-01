@@ -7,6 +7,10 @@ import discord
 import dotenv
 from discord.ext import commands
 
+from source.constructor import ServerManagerType
+from source.server.constructor import construct_server_manager
+from source.services.constructor import construct_services_manager
+
 dotenv.load_dotenv(dotenv_path=".env.local")
 
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +50,10 @@ async def on_ready():
 
     # Sync slash commands with Discord
     try:
+        # -------------------------------------------------------------- #
+        # Sync Slash Commands
+        # -------------------------------------------------------------- #
+
         # Sync in call guilds for instant access
         print("Syncing to individual guilds for instant access...")
         for guild in bot.guilds:
@@ -63,6 +71,30 @@ async def on_ready():
 
 async def main():
     """Main function to load cogs and start the bot."""
+    # -------------------------------------------------------------- #
+    # Startup services
+    # -------------------------------------------------------------- #
+
+    print("=" * 40)
+    print("Syncing services...")
+
+    # init server manager
+    servers_manager = construct_server_manager(ServerManagerType.DEVELOPMENT)
+    await servers_manager.connect_all()
+    print("[OK] Connected all servers.")
+
+    services_manager = construct_services_manager(
+        ServerManagerType.DEVELOPMENT,
+        server=servers_manager,
+        storage_path=os.path.join("assets", "data"),
+    )
+    await services_manager.initialize_all()
+    print("[OK] Initialized all services.")
+
+    # -------------------------------------------------------------- #
+    # Start Discord Bot
+    # -------------------------------------------------------------- #
+
     async with bot:
         await load_cogs()
         token = os.getenv("DISCORD_API_TOKEN")
