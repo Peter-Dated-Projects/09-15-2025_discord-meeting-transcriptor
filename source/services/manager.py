@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from abc import abstractmethod
+
 from source.server.server import ServerManager
 
 # -------------------------------------------------------------- #
@@ -11,18 +13,27 @@ class ServicesManager:
     """Manager for handling multiple service instances."""
 
     def __init__(
-        self, server: ServerManager, file_service_manager: Manager, ffmpeg_service_manager: Manager
+        self,
+        server: ServerManager,
+        file_service_manager: FileServiceManager,
+        recording_file_service_manager: RecordingFileServiceManager,
+        transcription_file_service_manager: TranscriptionFileServiceManager,
+        ffmpeg_service_manager: FFmpegServiceManager,
     ):
         self.server = server
 
         # add service managers as attributes
         self.file_service_manager = file_service_manager
+        self.recording_file_service_manager = recording_file_service_manager
+        self.transcription_file_service_manager = transcription_file_service_manager
         self.ffmpeg_service_manager = ffmpeg_service_manager
 
     async def initialize_all(self) -> None:
         """Initialize all service managers."""
-        await self.file_service_manager.on_start()
-        # await self.ffmpeg_service_manager.on_start()
+        await self.file_service_manager.on_start(self)
+        await self.recording_file_service_manager.on_start(self)
+        # await self.transcription_file_service_manager.on_start(self)
+        # await self.ffmpeg_service_manager.on_start(self)
 
 
 # -------------------------------------------------------------- #
@@ -33,9 +44,9 @@ class ServicesManager:
 class Manager:
     """Base class for all manager services."""
 
-    def __init__(self, server: ServerManager, services: ServicesManager):
+    def __init__(self, server: ServerManager):
         self.server = server
-        self.services = services
+        self.services = None
 
         # check if server has been initialized
         if not self.server._initialized:
@@ -47,10 +58,123 @@ class Manager:
     # Manager Methods
     # -------------------------------------------------------------- #
 
-    async def on_start(self) -> None:
+    async def on_start(self, services: ServicesManager) -> None:
         """Actions to perform on manager start."""
-        pass
+        self.services = services
 
     async def on_close(self) -> None:
         """Actions to perform on manager close."""
         pass
+
+
+# -------------------------------------------------------------- #
+# Specialized Manager Classes
+# -------------------------------------------------------------- #
+
+
+class FileServiceManager(Manager):
+    """Specialized manager for file services."""
+
+    def __init__(self, server):
+        super().__init__(server)
+
+    @abstractmethod
+    def get_storage_path(self) -> str:
+        """Get the storage path."""
+        pass
+
+    @abstractmethod
+    def get_storage_absolute_path(self) -> str:
+        """Get the absolute storage path."""
+        pass
+
+    @abstractmethod
+    async def save_file(self, filename: str, data: bytes) -> str:
+        """Save data to a file."""
+        pass
+
+    @abstractmethod
+    async def read_file(self, filename: str) -> bytes:
+        """Read data from a file."""
+        pass
+
+    @abstractmethod
+    async def delete_file(self, filename: str) -> None:
+        """Delete a file."""
+        pass
+
+    @abstractmethod
+    async def update_file(self, filename: str, data: bytes) -> None:
+        """Update a file."""
+        pass
+
+    @abstractmethod
+    async def get_folder_contents(self, folder_path: str) -> list[str]:
+        """Get the contents of a folder."""
+        pass
+
+    @abstractmethod
+    async def file_exists(self, filename: str) -> bool:
+        """Check if a file exists."""
+        pass
+
+
+class FFmpegServiceManager(Manager):
+    """Specialized manager for FFmpeg services."""
+
+    def __init__(self, server):
+        super().__init__(server)
+
+
+class RecordingFileServiceManager(Manager):
+    """Specialized manager for recording file services."""
+
+    def __init__(self, server):
+        super().__init__(server)
+
+    @abstractmethod
+    def get_persistent_storage_path(self) -> str:
+        """Get the absolute storage path."""
+        pass
+
+    @abstractmethod
+    def get_temporary_storage_path(self) -> str:
+        """Get the absolute temporary storage path."""
+        pass
+
+    @abstractmethod
+    async def save_to_temp_file(self, filename: str, data: bytes) -> str:
+        """Save data to a temporary file."""
+        pass
+
+    @abstractmethod
+    async def move_temp_to_persistent(self, filename: str) -> str:
+        """Move a file from temporary to persistent storage."""
+        pass
+
+    @abstractmethod
+    async def delete_persistent_file(self, filename: str) -> None:
+        """Delete a file from persistent storage."""
+        pass
+
+    @abstractmethod
+    async def delete_temp_file(self, filename: str) -> None:
+        """Delete a file from temporary storage."""
+        pass
+
+    @abstractmethod
+    def get_filename_from_persistent_path(self, persistent_path: str) -> str:
+        """Get the filename from a persistent storage path."""
+        pass
+
+    @abstractmethod
+    def get_filename_from_temporary_path(self, temporary_path: str) -> str:
+        """Get the filename from a temporary storage path."""
+        pass
+
+
+class TranscriptionFileServiceManager(Manager):
+    """Specialized manager for transcription file services."""
+
+    def __init__(self, server):
+        super().__init__(server)

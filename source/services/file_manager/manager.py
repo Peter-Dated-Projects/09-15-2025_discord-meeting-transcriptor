@@ -5,18 +5,18 @@ from contextlib import asynccontextmanager
 import aiofiles
 
 from source.server.server import ServerManager
-from source.services.manager import Manager, ServicesManager
+from source.services.manager import FileServiceManager
 
 # -------------------------------------------------------------- #
 # File Manager Service
 # -------------------------------------------------------------- #
 
 
-class FileManagerService(Manager):
+class FileManagerService(FileServiceManager):
     """Service for managing file storage and retrieval."""
 
-    def __init__(self, server: ServerManager, services: ServicesManager, storage_path: str):
-        super().__init__(server, services)
+    def __init__(self, server: ServerManager, storage_path: str):
+        super().__init__(server)
 
         self.storage_path = storage_path
 

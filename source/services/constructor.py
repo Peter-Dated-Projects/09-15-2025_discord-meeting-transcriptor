@@ -13,6 +13,8 @@ def construct_services_manager(
     """Construct and return a service manager instance based on the service type."""
 
     file_service_manager = None
+    recording_file_service_manager = None
+    transcription_file_service_manager = None
     ffmpeg_service_manager = None
 
     # create file service manager
@@ -21,8 +23,12 @@ def construct_services_manager(
         or service_type == ServerManagerType.PRODUCTION
     ):
         from source.services.file_manager.manager import FileManagerService
+        from source.services.recording_file_manager.manager import (
+            RecordingFileManagerService,
+        )
 
         file_service_manager = FileManagerService(server=server, storage_path=storage_path)
+        recording_file_service_manager = RecordingFileManagerService(server=server)
 
     # TODO: https://www.notion.so/DISC-19-create-ffmpeg-service-29c5eca3b9df805a949fdcd5850eaf5a?source=copy_link
     # # create ffmpeg service manager
@@ -36,5 +42,7 @@ def construct_services_manager(
     return ServicesManager(
         server=server,
         file_service_manager=file_service_manager,
+        recording_file_service_manager=recording_file_service_manager,
+        transcription_file_service_manager=transcription_file_service_manager,
         ffmpeg_service_manager=ffmpeg_service_manager,
     )
