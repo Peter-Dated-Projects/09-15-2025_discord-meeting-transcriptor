@@ -52,6 +52,22 @@ uv run main.py
 make dev
 ```
 
+### Running Docker Containers
+
+#### Windows
+
+```bash
+# Start Docker containers
+docker compose -f docker-compose.local.yml --env-file .env.local up -d
+```
+
+#### Mac
+
+```bash
+# Start Docker containers
+./run_docker_compose.sh
+```
+
 ## 📚 Documentation
 
 - **[DEVELOPMENT.md](DEVELOPMENT.md)** - Complete development setup guide, tool installation, and workflow
