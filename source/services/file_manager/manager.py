@@ -32,6 +32,14 @@ class FileManagerService(Manager):
     async def on_close(self):
         return True
 
+    def get_storage_path(self) -> str:
+        """Get the storage path."""
+        return self.storage_path
+
+    def get_storage_absolute_path(self) -> str:
+        """Get the absolute storage path."""
+        return os.path.abspath(self.storage_path)
+
     # -------------------------------------------------------------- #
     # File Management Methods
     # -------------------------------------------------------------- #
