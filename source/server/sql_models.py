@@ -1,11 +1,8 @@
 import enum
-from typing import TypedDict
 
-from sqlalchemy import Column, String, Integer, DateTime, Boolean, Text
-from sqlalchemy.orm import declarative_base
-
+from sqlalchemy import Column, DateTime, String
 from sqlalchemy.dialects.postgresql import JSONB
-
+from sqlalchemy.orm import declarative_base
 
 # -------------------------------------------------------------- #
 # SQL Database Data Models

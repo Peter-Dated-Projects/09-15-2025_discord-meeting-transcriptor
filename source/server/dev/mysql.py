@@ -146,9 +146,7 @@ class MySQLServer(SQLDatabase):
     # CRUD Operations
     # -------------------------------------------------------------- #
 
-    async def query(
-        self, query: str, params: dict[str, Any] | None = None
-    ) -> list[dict[str, Any]]:
+    async def query(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """
         Execute a SQL SELECT query.
 
@@ -237,9 +235,7 @@ class MySQLServer(SQLDatabase):
             where_clause = None
             for key, value in conditions.items():
                 condition = table_obj.c[key] == value
-                where_clause = (
-                    condition if where_clause is None else where_clause & condition
-                )
+                where_clause = condition if where_clause is None else where_clause & condition
 
             stmt = update(table_obj).where(where_clause).values(**data)
 
@@ -282,9 +278,7 @@ class MySQLServer(SQLDatabase):
             where_clause = None
             for key, value in conditions.items():
                 condition = table_obj.c[key] == value
-                where_clause = (
-                    condition if where_clause is None else where_clause & condition
-                )
+                where_clause = condition if where_clause is None else where_clause & condition
 
             stmt = delete(table_obj).where(where_clause)
 
