@@ -6,8 +6,6 @@ and operations with external services.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, List
-
 
 # -------------------------------------------------------------- #
 # Base Server Handlers
@@ -55,9 +53,8 @@ class BaseSQLServerHandler(ABC):
 class ServerManager:
     """Manager for handling multiple server instances."""
 
-    def __init__(self, sql_client: BaseSQLServerHandler, vectordb_client=None):
+    def __init__(self, sql_client: BaseSQLServerHandler):
         self._sql_client = sql_client
-        # self._vectordb_client = vectordb_client
 
     # ------------------------------------------------------ #
     # Server Management
@@ -81,7 +78,7 @@ class ServerManager:
             except Exception as e:
                 print(f"[ServerManager] Failed to disconnect {name}: {e}")
 
-    async def health_check_all(self) -> Dict[str, bool]:
+    async def health_check_all(self) -> dict[str, bool]:
         """
         Check health of all registered servers.
 
@@ -93,6 +90,6 @@ class ServerManager:
             results[name] = await server.health_check()
         return results
 
-    def list_servers(self) -> List[str]:
+    def list_servers(self) -> list[str]:
         """Get list of all registered server names."""
         return list(self._servers.keys())

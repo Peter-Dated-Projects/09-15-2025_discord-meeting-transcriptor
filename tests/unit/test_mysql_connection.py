@@ -8,11 +8,11 @@ Tests verify that the MySQL handler can:
 """
 
 from contextlib import asynccontextmanager
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from source.server.dev.mysql import MySQLServer
+import pytest
 
+from source.server.dev.mysql import MySQLServer
 
 # ============================================================================
 # Fixtures
@@ -79,7 +79,7 @@ async def test_mysql_connect_success(mysql_server: MySQLServer) -> None:
     mock_pool = AsyncMock()
     mock_pool.close = AsyncMock()
 
-    async def mock_create_pool(*args, **kwargs):
+    async def mock_create_pool(*_args: object, **_kwargs: object) -> AsyncMock:
         return mock_pool
 
     with patch("aiomysql.create_pool", side_effect=mock_create_pool) as mock_create:

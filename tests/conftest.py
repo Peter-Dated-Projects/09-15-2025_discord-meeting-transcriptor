@@ -5,11 +5,12 @@ This file is automatically loaded by pytest and provides
 fixtures and configuration that can be used across all tests.
 """
 
-import pytest
 import asyncio
 import os
-from typing import Generator, AsyncGenerator, Optional
+from collections.abc import Generator
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 # Configure pytest-asyncio
 pytest_plugins = ("pytest_asyncio",)
@@ -20,7 +21,7 @@ pytest_plugins = ("pytest_asyncio",)
 # ============================================================================
 
 
-def get_test_env(config: Optional[pytest.Config] = None) -> str:
+def get_test_env(config: pytest.Config | None = None) -> str:
     """
     Determine the test environment (local or prod).
 
@@ -100,12 +101,8 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "unit: Unit tests")
     config.addinivalue_line("markers", "integration: Integration tests")
     config.addinivalue_line("markers", "slow: Slow running tests")
-    config.addinivalue_line(
-        "markers", "local: Local/dev environment tests (uses MySQL)"
-    )
-    config.addinivalue_line(
-        "markers", "prod: Production environment tests (uses PostgreSQL)"
-    )
+    config.addinivalue_line("markers", "local: Local/dev environment tests (uses MySQL)")
+    config.addinivalue_line("markers", "prod: Production environment tests (uses PostgreSQL)")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:

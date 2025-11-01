@@ -1,4 +1,5 @@
 import asyncio
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -14,9 +15,7 @@ class Voice(commands.Cog):
     # Utils
     # -------------------------------------------------------------- #
 
-    def find_user_vc(
-        self, interaction: discord.Interaction
-    ) -> discord.VoiceChannel | None:
+    def find_user_vc(self, interaction: discord.Interaction) -> discord.VoiceChannel | None:
         """Find a voice channel the user is in."""
         user = interaction.user
         channel = user.voice.channel
@@ -25,8 +24,6 @@ class Voice(commands.Cog):
     async def get_bot_voice_client(
         self,
         interaction: discord.Interaction,
-        timeout: float = 8.0,
-        reconnect: bool = True,
     ) -> discord.VoiceClient | None:
         """Get the bot's voice client in a guild, if connected."""
         if interaction.guild is None:
@@ -41,7 +38,6 @@ class Voice(commands.Cog):
 
     async def connect_to_vc(
         self,
-        interaction: discord.Interaction,
         channel: discord.VoiceChannel,
         timeout: float = 8.0,
         reconnect: bool = True,
@@ -54,9 +50,7 @@ class Voice(commands.Cog):
     # Slash Commands
     # -------------------------------------------------------------- #
 
-    @app_commands.command(
-        name="transcribe", description="Transcribe the current voice channel"
-    )
+    @app_commands.command(name="transcribe", description="Transcribe the current voice channel")
     async def transcribe(self, interaction: discord.Interaction) -> None:
         voice_channel = self.find_user_vc(interaction)
         await interaction.response.defer(ephemeral=True)
@@ -85,7 +79,7 @@ class Voice(commands.Cog):
         await asyncio.sleep(5)
 
         await interaction.followup.send(
-            f"Stopping transcription and leaving voice channel.", ephemeral=True
+            "Stopping transcription and leaving voice channel.", ephemeral=True
         )
         await voice_client.disconnect()
 

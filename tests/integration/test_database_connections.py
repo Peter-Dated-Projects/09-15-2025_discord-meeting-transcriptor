@@ -28,12 +28,12 @@ Running all integration tests without database:
     pytest tests/integration/ -m "integration and not (local or prod)"
 """
 
-import pytest
 import os
 
-from source.server.production.postgresql import PostgreSQLServer
-from source.server.dev.mysql import MySQLServer
+import pytest
 
+from source.server.dev.mysql import MySQLServer
+from source.server.production.postgresql import PostgreSQLServer
 
 # ============================================================================
 # Shared Comparison/Compatibility Tests

@@ -10,12 +10,11 @@ Or with helper script:
     ./run_tests_env.sh prod tests/integration/test_database_connections_prod.py
 """
 
-import pytest
 import os
-from typing import AsyncGenerator
+
+import pytest
 
 from source.server.production.postgresql import PostgreSQLServer
-
 
 # ============================================================================
 # PostgreSQL Real Connection Tests (Production)

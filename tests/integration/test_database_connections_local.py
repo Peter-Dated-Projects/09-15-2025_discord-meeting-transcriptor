@@ -10,12 +10,11 @@ Or with helper script:
     ./run_tests_env.sh local tests/integration/test_database_connections_local.py
 """
 
-import pytest
 import os
-from typing import AsyncGenerator
+
+import pytest
 
 from source.server.dev.mysql import MySQLServer
-
 
 # ============================================================================
 # MySQL Real Connection Tests (Local)

@@ -82,6 +82,9 @@ make type-check      # Run type checking
 make test            # Run tests
 make test-cov        # Tests with coverage report
 make dev             # Run bot with auto-reload
+
+# Or use the comprehensive linting script:
+uv run lint.py       # Run all linting checks (ruff, black, isort)
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed setup instructions.

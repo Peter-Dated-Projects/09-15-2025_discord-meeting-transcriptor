@@ -7,9 +7,7 @@ This module provides functionality for:
 - Context retrieval for LLM queries
 """
 
-from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
-from datetime import datetime
 
 
 @dataclass

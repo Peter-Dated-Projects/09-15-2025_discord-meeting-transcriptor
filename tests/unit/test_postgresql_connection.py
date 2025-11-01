@@ -8,11 +8,11 @@ Tests verify that the PostgreSQL handler can:
 """
 
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from source.server.production.postgresql import PostgreSQLServer
-
 
 # ============================================================================
 # Fixtures
@@ -79,7 +79,7 @@ async def test_postgres_connect_success(postgres_server: PostgreSQLServer) -> No
     mock_pool = AsyncMock()
     mock_pool.close = AsyncMock()
 
-    async def mock_create_pool(*args, **kwargs):
+    async def mock_create_pool(*_args: object, **_kwargs: object) -> AsyncMock:
         return mock_pool
 
     with patch("asyncpg.create_pool", side_effect=mock_create_pool) as mock_create:

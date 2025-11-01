@@ -5,29 +5,23 @@ This module provides an object-oriented handler for managing connections
 and operations with PostgreSQL database using SQLAlchemy Core for query building.
 """
 
-import os
 import logging
-from typing import Optional, Any, Dict, List
+import os
 from contextlib import asynccontextmanager
+from typing import Any
+
 import asyncpg
-from asyncpg import Pool, Connection
+from asyncpg import Pool
 from sqlalchemy import (
-    insert,
-    select,
-    update,
-    delete,
-    text,
     MetaData,
     Table,
-    Column,
-    Integer,
-    String,
+    delete,
+    insert,
+    update,
 )
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.sql import Insert, Select, Update, Delete
 
 from ..services import SQLDatabase
-
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +37,12 @@ class PostgreSQLServer(SQLDatabase):
     def __init__(
         self,
         name: str = "postgresql",
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        user: Optional[str] = None,
-        password: Optional[str] = None,
-        database: Optional[str] = None,
-        connection_string: Optional[str] = None,
+        host: str | None = None,
+        port: int | None = None,
+        user: str | None = None,
+        password: str | None = None,
+        database: str | None = None,
+        connection_string: str | None = None,
     ):
         """
         Initialize PostgreSQL server handler.
@@ -72,12 +66,10 @@ class PostgreSQLServer(SQLDatabase):
             password = password or os.getenv("POSTGRES_PASSWORD", "")
             database = database or os.getenv("POSTGRES_DB", "postgres")
 
-            connection_string = (
-                f"postgresql://{user}:{password}@{host}:{port}/{database}"
-            )
+            connection_string = f"postgresql://{user}:{password}@{host}:{port}/{database}"
             super().__init__(name, connection_string)
 
-        self.pool: Optional[Pool] = None
+        self.pool: Pool | None = None
         self.host = host or os.getenv("POSTGRES_HOST", "localhost")
         self.port = port or int(os.getenv("POSTGRES_PORT", "5432"))
         self.database = database or os.getenv("POSTGRES_DB", "postgres")
@@ -147,9 +139,7 @@ class PostgreSQLServer(SQLDatabase):
     # CRUD Operations
     # -------------------------------------------------------------- #
 
-    async def query(
-        self, query: str, params: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
+    async def query(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """
         Execute a SQL SELECT query.
 
@@ -169,7 +159,7 @@ class PostgreSQLServer(SQLDatabase):
             logger.error(f"[{self.name}] Query error: {e}")
             raise
 
-    async def insert(self, table: str, data: Dict[str, Any]) -> None:
+    async def insert(self, table: str, data: dict[str, Any]) -> None:
         """
         Insert data into a table using SQLAlchemy query builder.
 
@@ -205,8 +195,8 @@ class PostgreSQLServer(SQLDatabase):
     async def update(
         self,
         table: str,
-        data: Dict[str, Any],
-        conditions: Dict[str, Any],
+        data: dict[str, Any],
+        conditions: dict[str, Any],
     ) -> None:
         """
         Update data in a table using SQLAlchemy query builder.
@@ -233,9 +223,7 @@ class PostgreSQLServer(SQLDatabase):
             where_clause = None
             for key, value in conditions.items():
                 condition = table_obj.c[key] == value
-                where_clause = (
-                    condition if where_clause is None else where_clause & condition
-                )
+                where_clause = condition if where_clause is None else where_clause & condition
 
             stmt = update(table_obj).where(where_clause).values(**data)
 
@@ -252,7 +240,7 @@ class PostgreSQLServer(SQLDatabase):
             logger.error(f"[{self.name}] Update error: {e}")
             raise
 
-    async def delete(self, table: str, conditions: Dict[str, Any]) -> None:
+    async def delete(self, table: str, conditions: dict[str, Any]) -> None:
         """
         Delete data from a table using SQLAlchemy query builder.
 
@@ -275,9 +263,7 @@ class PostgreSQLServer(SQLDatabase):
             where_clause = None
             for key, value in conditions.items():
                 condition = table_obj.c[key] == value
-                where_clause = (
-                    condition if where_clause is None else where_clause & condition
-                )
+                where_clause = condition if where_clause is None else where_clause & condition
 
             stmt = delete(table_obj).where(where_clause)
 

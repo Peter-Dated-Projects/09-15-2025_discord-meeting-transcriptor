@@ -1,8 +1,7 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+from typing import Any
+
 from server import BaseSQLServerHandler
-
-from typing import Any, Dict, List, Optional
-
 
 # -------------------------------------------------------------- #
 # Base Service Structures
@@ -25,9 +24,7 @@ class SQLDatabase(BaseSQLServerHandler):
     # ------------------------------------------------------ #
 
     @abstractmethod
-    async def query(
-        self, query: str, params: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
+    async def query(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """
         Execute a SQL query.
 
@@ -41,7 +38,7 @@ class SQLDatabase(BaseSQLServerHandler):
         pass
 
     @abstractmethod
-    async def insert(self, table: str, data: Dict[str, Any]) -> None:
+    async def insert(self, table: str, data: dict[str, Any]) -> None:
         """
         Insert data into a table.
 
@@ -52,9 +49,7 @@ class SQLDatabase(BaseSQLServerHandler):
         pass
 
     @abstractmethod
-    async def update(
-        self, table: str, data: Dict[str, Any], conditions: Dict[str, Any]
-    ) -> None:
+    async def update(self, table: str, data: dict[str, Any], conditions: dict[str, Any]) -> None:
         """
         Update data in a table.
 
