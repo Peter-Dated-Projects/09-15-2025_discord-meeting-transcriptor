@@ -1,0 +1,34 @@
+{
+  // Python
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.isort": "explicit"
+    }
+  },
+
+  // Ruff
+  "ruff.line-length": 100,
+  "ruff.showNotifications": "always",
+
+  // Black
+  "black-formatter.args": [
+    "--line-length",
+    "100"
+  ],
+
+  // isort
+  "isort.args": [
+    "--profile",
+    "black",
+    "--line-length",
+    "100",
+    "--include-trailing-comma",
+    "--use-parentheses",
+    "--ensure-newline-before-comments",
+    "--skip-gitignore",
+    "--known-first-party=source,cogs"
+  ]
+}
