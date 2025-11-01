@@ -7,9 +7,9 @@ import discord
 import dotenv
 from discord.ext import commands
 
+from source.constructor import ServerManagerType
 from source.server.constructor import construct_server_manager
-from source.server.server import ServerManager
-from source.services.file_manager.manager import FileManagerService
+from source.services.constructor import construct_services_manager
 
 dotenv.load_dotenv(dotenv_path=".env.local")
 
@@ -50,31 +50,15 @@ async def on_ready():
 
     # Sync slash commands with Discord
     try:
+        # -------------------------------------------------------------- #
+        # Sync Slash Commands
+        # -------------------------------------------------------------- #
+
         # Sync in call guilds for instant access
         print("Syncing to individual guilds for instant access...")
         for guild in bot.guilds:
             synced = await bot.tree.sync(guild=guild)
             print(f"  ✓ Synced {len(synced)} command(s) to: {guild.name} (ID: {guild.id})")
-
-        # -------------------------------------------------------------- #
-        # Startup services
-        # -------------------------------------------------------------- #
-
-        print("=" * 40)
-        print("Syncing services...")
-
-        # init server manager
-        server_manager = construct_server_manager()
-
-        # -------------------------------------------------------------- #
-        # Managers
-        # -------------------------------------------------------------- #
-
-        # init file manager
-        file_manager = FileManagerService(server=server_manager, storage_path="./file_storage")
-
-        file_manager.on_start()
-        print("✓ FileManagerService started")
 
     except Exception as e:
         print(f"Failed to sync commands: {e}")
@@ -87,6 +71,28 @@ async def on_ready():
 
 async def main():
     """Main function to load cogs and start the bot."""
+    # -------------------------------------------------------------- #
+    # Startup services
+    # -------------------------------------------------------------- #
+
+    print("=" * 40)
+    print("Syncing services...")
+
+    # init server manager
+    servers_manager = construct_server_manager(ServerManagerType.DEVELOPMENT, storage_path="./data")
+    await servers_manager.connect_all()
+    print("[OK] Connected all servers.")
+
+    services_manager = construct_services_manager(
+        ServerManagerType.DEVELOPMENT, storage_path="./data"
+    )
+    await services_manager.initialize_all()
+    print("[OK] Initialized all services.")
+
+    # -------------------------------------------------------------- #
+    # Start Discord Bot
+    # -------------------------------------------------------------- #
+
     async with bot:
         await load_cogs()
         token = os.getenv("DISCORD_API_TOKEN")

@@ -56,23 +56,24 @@ class PostgreSQLServer(SQLDatabase):
             database: Database name
             connection_string: Full connection string (overrides individual params)
         """
-        if connection_string:
-            super().__init__(name, connection_string)
-        else:
-            # Build connection string from individual parameters
-            host = host or os.getenv("POSTGRES_HOST", "localhost")
-            port = port or int(os.getenv("POSTGRES_PORT", "5432"))
-            user = user or os.getenv("POSTGRES_USER", "postgres")
-            password = password or os.getenv("POSTGRES_PASSWORD", "")
-            database = database or os.getenv("POSTGRES_DB", "postgres")
-
-            connection_string = f"postgresql://{user}:{password}@{host}:{port}/{database}"
-            super().__init__(name, connection_string)
-
-        self.pool: Pool | None = None
+        # Store parameters first
         self.host = host or os.getenv("POSTGRES_HOST", "localhost")
         self.port = port or int(os.getenv("POSTGRES_PORT", "5432"))
+        self.user = user or os.getenv("POSTGRES_USER", "postgres")
+        self.password = password or os.getenv("POSTGRES_PASSWORD", "")
         self.database = database or os.getenv("POSTGRES_DB", "postgres")
+
+        # Build connection string
+        if connection_string:
+            conn_str = connection_string
+        else:
+            conn_str = (
+                f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+            )
+
+        super().__init__(name, conn_str)
+
+        self.pool: Pool | None = None
 
     # -------------------------------------------------------------- #
     # Connection Management

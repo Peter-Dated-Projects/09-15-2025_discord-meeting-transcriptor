@@ -1,6 +1,5 @@
 from source.server.server import ServerManager
 
-
 # -------------------------------------------------------------- #
 # Base Service Manager Class
 # -------------------------------------------------------------- #
@@ -22,11 +21,11 @@ class Manager:
     # Manager Methods
     # -------------------------------------------------------------- #
 
-    def on_start(self) -> None:
+    async def on_start(self) -> None:
         """Actions to perform on manager start."""
         pass
 
-    def on_close(self) -> None:
+    async def on_close(self) -> None:
         """Actions to perform on manager close."""
         pass
 
@@ -47,3 +46,8 @@ class ServicesManager:
         # add service managers as attributes
         self.file_service_manager = file_service_manager
         self.ffmpeg_service_manager = ffmpeg_service_manager
+
+    async def initialize_all(self) -> None:
+        """Initialize all service managers."""
+        await self.file_service_manager.on_start()
+        await self.ffmpeg_service_manager.on_start()

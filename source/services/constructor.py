@@ -1,5 +1,3 @@
-import os
-
 from source.constructor import ServerManagerType
 from source.services.manager import ServicesManager
 
@@ -8,7 +6,7 @@ from source.services.manager import ServicesManager
 # -------------------------------------------------------------- #
 
 
-def construct_service_manager(service_type: ServerManagerType, storage_path: str):
+def construct_services_manager(service_type: ServerManagerType, storage_path: str):
     """Construct and return a service manager instance based on the service type."""
 
     file_service_manager = None

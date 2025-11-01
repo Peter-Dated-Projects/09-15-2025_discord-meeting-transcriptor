@@ -56,25 +56,24 @@ class MySQLServer(SQLDatabase):
             database: Database name
             connection_string: Full connection string (for compatibility)
         """
-        if connection_string:
-            super().__init__(name, connection_string)
-        else:
-            # Build connection string info from individual parameters
-            host = host or os.getenv("MYSQL_HOST", "localhost")
-            port = port or int(os.getenv("MYSQL_PORT", "3306"))
-            user = user or os.getenv("MYSQL_USER", "root")
-            password = password or os.getenv("MYSQL_PASSWORD", "")
-            database = database or os.getenv("MYSQL_DB", "mysql")
-
-            connection_string = f"mysql://{user}:{password}@{host}:{port}/{database}"
-            super().__init__(name, connection_string)
-
-        self.pool: Pool | None = None
+        # Store parameters first
         self.host = host or os.getenv("MYSQL_HOST", "localhost")
         self.port = port or int(os.getenv("MYSQL_PORT", "3306"))
         self.user = user or os.getenv("MYSQL_USER", "root")
         self.password = password or os.getenv("MYSQL_PASSWORD", "")
         self.database = database or os.getenv("MYSQL_DB", "mysql")
+
+        # Build connection string
+        if connection_string:
+            conn_str = connection_string
+        else:
+            conn_str = (
+                f"mysql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+            )
+
+        super().__init__(name, conn_str)
+
+        self.pool: Pool | None = None
 
     # -------------------------------------------------------------- #
     # Connection Management
