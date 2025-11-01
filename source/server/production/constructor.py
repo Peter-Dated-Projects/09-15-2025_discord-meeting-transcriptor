@@ -36,7 +36,6 @@ def construct_server_manager() -> ServerManager:
 
     Args:
         manager_type: Type of server manager (PRODUCTION)
-        storage_path: Path for storing data (optional for SQL-based storage)
 
     Returns:
         Configured ServerManager instance
