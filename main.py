@@ -7,6 +7,10 @@ import discord
 import dotenv
 from discord.ext import commands
 
+from source.server.constructor import construct_server_manager
+from source.server.server import ServerManager
+from source.services.file_manager.manager import FileManagerService
+
 dotenv.load_dotenv(dotenv_path=".env.local")
 
 logging.basicConfig(level=logging.INFO)
@@ -51,6 +55,26 @@ async def on_ready():
         for guild in bot.guilds:
             synced = await bot.tree.sync(guild=guild)
             print(f"  ✓ Synced {len(synced)} command(s) to: {guild.name} (ID: {guild.id})")
+
+        # -------------------------------------------------------------- #
+        # Startup services
+        # -------------------------------------------------------------- #
+
+        print("=" * 40)
+        print("Syncing services...")
+
+        # init server manager
+        server_manager = construct_server_manager()
+
+        # -------------------------------------------------------------- #
+        # Managers
+        # -------------------------------------------------------------- #
+
+        # init file manager
+        file_manager = FileManagerService(server=server_manager, storage_path="./file_storage")
+
+        file_manager.on_start()
+        print("✓ FileManagerService started")
 
     except Exception as e:
         print(f"Failed to sync commands: {e}")

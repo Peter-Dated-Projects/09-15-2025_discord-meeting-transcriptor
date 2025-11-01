@@ -1,7 +1,8 @@
 from source.server.server import ServerManager
 
+
 # -------------------------------------------------------------- #
-# Base Manager Class
+# Base Service Manager Class
 # -------------------------------------------------------------- #
 
 
@@ -28,3 +29,21 @@ class Manager:
     def on_close(self) -> None:
         """Actions to perform on manager close."""
         pass
+
+
+# -------------------------------------------------------------- #
+# Services Manager Class
+# -------------------------------------------------------------- #
+
+
+class ServicesManager:
+    """Manager for handling multiple service instances."""
+
+    def __init__(
+        self, server: ServerManager, file_service_manager: Manager, ffmpeg_service_manager: Manager
+    ):
+        self.server = server
+
+        # add service managers as attributes
+        self.file_service_manager = file_service_manager
+        self.ffmpeg_service_manager = ffmpeg_service_manager
