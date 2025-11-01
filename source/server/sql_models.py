@@ -1,6 +1,6 @@
 import enum
 
-from sqlalchemy import Column, DateTime, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base
 
@@ -33,3 +33,14 @@ class MeetingModel(Base):
     participants = Column(JSONB, nullable=False)
     recording_files = Column(JSONB, nullable=False)
     transcript_ids = Column(JSONB, nullable=False)
+
+
+class RecordingModel(Base):
+    __tablename__ = "recordings"
+
+    id = Column(String(16), primary_key=True, index=True)
+    created_at = Column(DateTime, nullable=False)
+    duration_in_ms = Column(Integer, nullable=False)
+    meeting_id = Column(String(16), ForeignKey('meetings.id'), nullable=False, index=True)
+    sha256 = Column(String(64), nullable=False, unique=True)
+    recording_filename = Column(String, nullable=False)
