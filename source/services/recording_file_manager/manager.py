@@ -3,14 +3,14 @@ from __future__ import annotations
 import os
 
 from source.server.server import ServerManager
-from source.services.manager import RecordingFileServiceManager
+from source.services.manager import RecordingFileManagerBase
 
 # -------------------------------------------------------------- #
 # Recording File Manager Service
 # -------------------------------------------------------------- #
 
 
-class RecordingFileManagerService(RecordingFileServiceManager):
+class RecordingFileManagerService(RecordingFileManagerBase):
     """Service for managing recording files."""
 
     def __init__(self, server: ServerManager, recording_storage_path: str):

@@ -72,7 +72,7 @@ class Manager:
 # -------------------------------------------------------------- #
 
 
-class FileServiceManager(Manager):
+class FileServiceManagerBase(Manager):
     """Specialized manager for file services."""
 
     def __init__(self, server):
@@ -119,14 +119,14 @@ class FileServiceManager(Manager):
         pass
 
 
-class FFmpegServiceManager(Manager):
+class FFmpegManagerBase(Manager):
     """Specialized manager for FFmpeg services."""
 
     def __init__(self, server):
         super().__init__(server)
 
 
-class RecordingFileServiceManager(Manager):
+class RecordingFileManagerBase(Manager):
     """Specialized manager for recording file services."""
 
     def __init__(self, server):
@@ -173,8 +173,15 @@ class RecordingFileServiceManager(Manager):
         pass
 
 
-class TranscriptionFileServiceManager(Manager):
+class TranscriptionFileManagerBase(Manager):
     """Specialized manager for transcription file services."""
+
+    def __init__(self, server):
+        super().__init__(server)
+
+
+class SQLLoggingManagerBase(Manager):
+    """Specialized manager for SQL logging services."""
 
     def __init__(self, server):
         super().__init__(server)
