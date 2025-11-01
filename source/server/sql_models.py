@@ -127,3 +127,23 @@ class JobsStatusModel(Base):
     finished_at = Column(DateTime, nullable=True)
     status = Column(Enum(JobsStatus, name="jobs_status_enum"), nullable=False)
     error_log = Column(String(16), nullable=True)
+
+
+class TranscriptsModel(Base):
+    """
+    ID = Transcript ID
+    Created At = Timestamp when transcript was created
+    Meeting ID = Foreign Key to associated Meeting ID
+    User ID = Discord User ID of the participant
+    sha256 = SHA256 hash of the transcript file
+    Transcript Filename = Filename of the transcript file
+    """
+
+    __tablename__ = "transcripts"
+
+    id = Column(String(16), primary_key=True, index=True)
+    created_at = Column(DateTime, nullable=False)
+    meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
+    user_id = Column(String(20), nullable=False)
+    sha256 = Column(String(64), nullable=False, unique=True)
+    transcript_filename = Column(String, nullable=False)
