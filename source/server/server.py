@@ -54,6 +54,7 @@ class ServerManager:
     """Manager for handling multiple server instances."""
 
     def __init__(self, sql_client: BaseSQLServerHandler):
+        self._initialized = False
         self._sql_client = sql_client
 
     # ------------------------------------------------------ #
@@ -68,6 +69,7 @@ class ServerManager:
                 await server.connect()
             except Exception as e:
                 print(f"[ServerManager] Failed to connect {name}: {e}")
+        self._initialized = True
 
     async def disconnect_all(self) -> None:
         """Disconnect all registered servers."""
