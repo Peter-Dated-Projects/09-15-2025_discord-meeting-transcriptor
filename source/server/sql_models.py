@@ -163,3 +163,17 @@ class GuildAdminWhitelistModel(Base):
     guild_id = Column(String(20), nullable=False, unique=True, index=True)
     whitelist_user_id = Column(String(20), nullable=False)
     created_at = Column(DateTime, nullable=False)
+
+
+class JobsStatusErrorLogModel(Base):
+    """
+    ID = Error Log Entry ID
+    Job ID = Foreign Key to associated Job ID
+    Created At = Timestamp when the error log entry was created
+    """
+
+    __tablename__ = "jobs_status_error_logs"
+
+    id = Column(String(16), primary_key=True, index=True)
+    created_at = Column(DateTime, nullable=False)
+    log_file = Column(String, nullable=False)
