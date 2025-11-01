@@ -1,8 +1,8 @@
-from models import Meeting
+from source.server.sql_models import MeetingModel
 
 
 # -------------------------------------------------------------- #
 # SQL DB Models
 # -------------------------------------------------------------- #
 
-SQL_DATABASE_MODELS = [Meeting]
+SQL_DATABASE_MODELS = [MeetingModel]
