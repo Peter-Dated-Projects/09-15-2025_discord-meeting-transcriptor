@@ -1,7 +1,7 @@
 from abc import abstractmethod
 from typing import Any
 
-from server import BaseSQLServerHandler
+from .server import BaseSQLServerHandler
 
 # -------------------------------------------------------------- #
 # Base Service Structures

@@ -21,6 +21,36 @@ pytest_plugins = ("pytest_asyncio",)
 # ============================================================================
 
 
+# ---------------------------------------------------------------------------
+# Backwards-compatibility: map legacy SQL_* env vars to MYSQL_* and POSTGRES_*
+# If the repository .env or CI uses SQL_HOST/SQL_PORT/SQL_USER/SQL_PASSWORD/SQL_DB
+# we'll propagate those values to MYSQL_* and POSTGRES_* env vars so tests
+# (which read MYSQL_*/POSTGRES_*) work without editing many files.
+# ---------------------------------------------------------------------------
+
+
+def _map_sql_env_to_db_prefixes() -> None:
+    """Map SQL_* env vars to MYSQL_* and POSTGRES_* if not already present."""
+    keys = ["HOST", "PORT", "DB", "USER", "PASSWORD"]
+    for k in keys:
+        sql_key = f"SQL_{k}"
+        val = os.getenv(sql_key)
+        if val is None:
+            continue
+
+        mysql_key = f"MYSQL_{k}"
+        pg_key = f"POSTGRES_{k}"
+
+        # Only set if target not already defined (don't overwrite explicit values)
+        if os.getenv(mysql_key) is None:
+            os.environ[mysql_key] = val
+        if os.getenv(pg_key) is None:
+            os.environ[pg_key] = val
+
+
+_map_sql_env_to_db_prefixes()
+
+
 def get_test_env(config: pytest.Config | None = None) -> str:
     """
     Determine the test environment (local or prod).
