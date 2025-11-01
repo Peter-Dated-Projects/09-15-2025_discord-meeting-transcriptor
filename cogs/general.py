@@ -13,9 +13,7 @@ class General(commands.Cog):
     # Slash Commands
     # -------------------------------------------------------------- #
 
-    @app_commands.command(
-        name="whoami", description="Display information about the bot"
-    )
+    @app_commands.command(name="whoami", description="Display information about the bot")
     async def whoami(self, interaction: discord.Interaction):
         """Display bot information with an embed."""
 

@@ -1,4 +1,5 @@
 import asyncio
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -25,8 +26,6 @@ class Voice(commands.Cog):
     async def get_bot_voice_client(
         self,
         interaction: discord.Interaction,
-        timeout: float = 8.0,
-        reconnect: bool = True,
     ) -> discord.VoiceClient | None:
         """Get the bot's voice client in a guild, if connected."""
         if interaction.guild is None:
@@ -41,7 +40,6 @@ class Voice(commands.Cog):
 
     async def connect_to_vc(
         self,
-        interaction: discord.Interaction,
         channel: discord.VoiceChannel,
         timeout: float = 8.0,
         reconnect: bool = True,
@@ -85,7 +83,7 @@ class Voice(commands.Cog):
         await asyncio.sleep(5)
 
         await interaction.followup.send(
-            f"Stopping transcription and leaving voice channel.", ephemeral=True
+            "Stopping transcription and leaving voice channel.", ephemeral=True
         )
         await voice_client.disconnect()
 

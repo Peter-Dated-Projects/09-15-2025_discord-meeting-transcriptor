@@ -265,7 +265,37 @@ make lint            # Check code quality
 make type-check      # Run mypy
 make test            # Run tests
 make test-cov        # With coverage report
+
+# Comprehensive linting (recommended)
+uv run lint.py       # Runs ruff check, ruff format, black, and isort checks
 ```
+
+### Linting Script
+
+The project includes a comprehensive linting script (`lint.py`) that runs all code quality checks:
+
+**What it checks:**
+1. **Ruff Linting** - Code quality and best practices
+2. **Ruff Format** - Code style validation
+3. **Black** - Code formatting consistency
+4. **isort** - Import sorting and organization
+
+**Usage:**
+```bash
+# Run all linting checks
+uv run lint.py
+
+# Auto-fix issues
+uv run ruff check --fix .
+uv run black .
+uv run isort .
+```
+
+**Configuration:**
+All linting tools are configured in `pyproject.toml` with consistent settings:
+- Line length: 100 characters
+- Target: Python 3.10+
+- Profile: Black-compatible
 
 ### Pre-commit Hooks
 
@@ -348,20 +378,20 @@ pip install -r requirements-dev.txt
 
 ```bash
 # All tests
-pytest
+uv run pytest
 
 # Specific file
-pytest tests/unit/test_rag.py
+uv run pytest tests/unit/test_rag.py
 
 # Specific test
-pytest tests/unit/test_rag.py::TestRAGService::test_embed_text
+uv run pytest tests/unit/test_rag.py::TestRAGService::test_embed_text
 
 # With coverage
-pytest --cov --cov-report=html
+uv run pytest --cov --cov-report=html
 open htmlcov/index.html
 
 # Watch mode (rerun on file changes)
-pytest-watch
+uv run pytest-watch
 ```
 
 ---

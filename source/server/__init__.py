@@ -1,13 +1,13 @@
 """Services module for handling external server connections."""
 
+from .production.postgresql import PostgreSQLServer
 from .server import (
-    BaseServerHandler,
+    BaseSQLServerHandler,
     ServerManager,
 )
-from .production.postgresql import PostgreSQLServer
 
 __all__ = [
-    "BaseServerHandler",
+    "BaseSQLServerHandler",
     "PostgreSQLServer",
     "ServerManager",
 ]

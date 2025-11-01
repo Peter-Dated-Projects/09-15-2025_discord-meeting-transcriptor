@@ -1,14 +1,11 @@
 # Main File
 
-import os
-import discord
-from discord import app_commands
-from discord.ext import commands
-
-import dotenv
 import logging
+import os
 
-from source import utils
+import discord
+import dotenv
+from discord.ext import commands
 
 dotenv.load_dotenv(dotenv_path=".env.local")
 
@@ -53,9 +50,7 @@ async def on_ready():
         print("Syncing to individual guilds for instant access...")
         for guild in bot.guilds:
             synced = await bot.tree.sync(guild=guild)
-            print(
-                f"  ✓ Synced {len(synced)} command(s) to: {guild.name} (ID: {guild.id})"
-            )
+            print(f"  ✓ Synced {len(synced)} command(s) to: {guild.name} (ID: {guild.id})")
 
     except Exception as e:
         print(f"Failed to sync commands: {e}")

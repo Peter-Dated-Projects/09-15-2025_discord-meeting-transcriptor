@@ -1,8 +1,8 @@
 """
-PostgreSQL server handler for database operations.
+MySQL server handler for database operations.
 
 This module provides an object-oriented handler for managing connections
-and operations with PostgreSQL database using SQLAlchemy Core for query building.
+and operations with MySQL database using SQLAlchemy Core for query building.
 """
 
 import logging
@@ -10,8 +10,8 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
-import asyncpg
-from asyncpg import Pool
+import aiomysql
+from aiomysql import Pool
 from sqlalchemy import (
     MetaData,
     Table,
@@ -19,7 +19,7 @@ from sqlalchemy import (
     insert,
     update,
 )
-from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects import mysql
 
 from ..services import SQLDatabase
 
@@ -27,16 +27,16 @@ logger = logging.getLogger(__name__)
 
 
 # -------------------------------------------------------------- #
-# PostgreSQL Server Handler
+# MySQL Server Handler
 # -------------------------------------------------------------- #
 
 
-class PostgreSQLServer(SQLDatabase):
-    """Handler for PostgreSQL database server operations."""
+class MySQLServer(SQLDatabase):
+    """Handler for MySQL database server operations."""
 
     def __init__(
         self,
-        name: str = "postgresql",
+        name: str = "mysql",
         host: str | None = None,
         port: int | None = None,
         user: str | None = None,
@@ -45,75 +45,82 @@ class PostgreSQLServer(SQLDatabase):
         connection_string: str | None = None,
     ):
         """
-        Initialize PostgreSQL server handler.
+        Initialize MySQL server handler.
 
         Args:
             name: Name of the server handler
-            host: PostgreSQL server host
-            port: PostgreSQL server port (default: 5432)
+            host: MySQL server host
+            port: MySQL server port (default: 3306)
             user: Database user
             password: Database password
             database: Database name
-            connection_string: Full connection string (overrides individual params)
+            connection_string: Full connection string (for compatibility)
         """
         if connection_string:
             super().__init__(name, connection_string)
         else:
-            # Build connection string from individual parameters
-            host = host or os.getenv("POSTGRES_HOST", "localhost")
-            port = port or int(os.getenv("POSTGRES_PORT", "5432"))
-            user = user or os.getenv("POSTGRES_USER", "postgres")
-            password = password or os.getenv("POSTGRES_PASSWORD", "")
-            database = database or os.getenv("POSTGRES_DB", "postgres")
+            # Build connection string info from individual parameters
+            host = host or os.getenv("MYSQL_HOST", "localhost")
+            port = port or int(os.getenv("MYSQL_PORT", "3306"))
+            user = user or os.getenv("MYSQL_USER", "root")
+            password = password or os.getenv("MYSQL_PASSWORD", "")
+            database = database or os.getenv("MYSQL_DB", "mysql")
 
-            connection_string = f"postgresql://{user}:{password}@{host}:{port}/{database}"
+            connection_string = f"mysql://{user}:{password}@{host}:{port}/{database}"
             super().__init__(name, connection_string)
 
         self.pool: Pool | None = None
-        self.host = host or os.getenv("POSTGRES_HOST", "localhost")
-        self.port = port or int(os.getenv("POSTGRES_PORT", "5432"))
-        self.database = database or os.getenv("POSTGRES_DB", "postgres")
+        self.host = host or os.getenv("MYSQL_HOST", "localhost")
+        self.port = port or int(os.getenv("MYSQL_PORT", "3306"))
+        self.user = user or os.getenv("MYSQL_USER", "root")
+        self.password = password or os.getenv("MYSQL_PASSWORD", "")
+        self.database = database or os.getenv("MYSQL_DB", "mysql")
 
     # -------------------------------------------------------------- #
     # Connection Management
     # -------------------------------------------------------------- #
 
     async def connect(self) -> None:
-        """Establish connection pool to PostgreSQL server."""
+        """Establish connection pool to MySQL server."""
         try:
-            self.pool = await asyncpg.create_pool(
-                self.connection_string,
-                min_size=1,
-                max_size=10,
-                command_timeout=60,
+            self.pool = await aiomysql.create_pool(
+                host=self.host,
+                port=self.port,
+                user=self.user,
+                password=self.password,
+                db=self.database,
+                minsize=1,
+                maxsize=10,
             )
             self._connected = True
-            logger.info(f"[{self.name}] Connected to PostgreSQL")
+            logger.info(f"[{self.name}] Connected to MySQL")
         except Exception as e:
             logger.error(f"[{self.name}] Failed to connect: {e}")
             self._connected = False
             raise
 
     async def disconnect(self) -> None:
-        """Close connection pool to PostgreSQL server."""
+        """Close connection pool to MySQL server."""
         if self.pool:
             try:
-                await self.pool.close()
+                self.pool.close()
+                await self.pool.wait_closed()
                 self._connected = False
-                logger.info(f"[{self.name}] Disconnected from PostgreSQL")
+                logger.info(f"[{self.name}] Disconnected from MySQL")
             except Exception as e:
                 logger.error(f"[{self.name}] Failed to disconnect: {e}")
                 raise
 
     async def health_check(self) -> bool:
-        """Check if the PostgreSQL server is healthy and responding."""
+        """Check if the MySQL server is healthy and responding."""
         if not self.pool:
             return False
 
         try:
-            async with self.pool.acquire() as connection:
-                result = await connection.fetchval("SELECT 1")
-                is_healthy = result == 1
+            async with self.pool.acquire() as connection, connection.cursor() as cursor:
+                await cursor.execute("SELECT 1")
+                result = await cursor.fetchone()
+                is_healthy = result is not None and result[0] == 1
                 if is_healthy:
                     logger.debug(f"[{self.name}] Health check passed")
                 else:
@@ -133,28 +140,33 @@ class PostgreSQLServer(SQLDatabase):
         try:
             yield connection
         finally:
-            await self.pool.release(connection)
+            self.pool.release(connection)
 
     # -------------------------------------------------------------- #
     # CRUD Operations
     # -------------------------------------------------------------- #
 
-    async def query(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    async def query(
+        self, query: str, params: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """
         Execute a SQL SELECT query.
 
         Args:
-            query: SQL query string with $1, $2, etc. for parameters
+            query: SQL query string with %(key)s for named parameters
             params: Optional parameters dictionary
 
         Returns:
             List of result rows as dictionaries
         """
         try:
-            async with self._get_connection() as connection:
-                param_values = list(params.values()) if params else []
-                rows = await connection.fetch(query, *param_values)
-                return [dict(row) for row in rows]
+            async with (
+                self._get_connection() as connection,
+                connection.cursor(aiomysql.DictCursor) as cursor,
+            ):
+                await cursor.execute(query, params)
+                rows = await cursor.fetchall()
+                return rows if rows else []
         except Exception as e:
             logger.error(f"[{self.name}] Query error: {e}")
             raise
@@ -178,15 +190,18 @@ class PostgreSQLServer(SQLDatabase):
             metadata = MetaData()
             table_obj = Table(table, metadata, autoload_with=None)
             stmt = insert(table_obj).values(**data)
-
-            # Compile to PostgreSQL dialect with named parameters
-            compiled = stmt.compile(dialect=postgresql.dialect())
+            # Compile to MySQL dialect
+            compiled = stmt.compile(dialect=mysql.dialect())
             query_str = str(compiled)
             params = compiled.params
             param_values = list(params.values()) if params else list(data.values())
 
-            async with self._get_connection() as connection:
-                await connection.execute(query_str, *param_values)
+            async with (
+                self._get_connection() as connection,
+                connection.cursor() as cursor,
+            ):
+                await cursor.execute(query_str, param_values)
+                await connection.commit()
                 logger.debug(f"[{self.name}] Inserted into {table}")
         except Exception as e:
             logger.error(f"[{self.name}] Insert error: {e}")
@@ -218,23 +233,28 @@ class PostgreSQLServer(SQLDatabase):
             # Build UPDATE statement with SQLAlchemy
             metadata = MetaData()
             table_obj = Table(table, metadata, autoload_with=None)
-
             # Build WHERE clause
             where_clause = None
             for key, value in conditions.items():
                 condition = table_obj.c[key] == value
-                where_clause = condition if where_clause is None else where_clause & condition
+                where_clause = (
+                    condition if where_clause is None else where_clause & condition
+                )
 
             stmt = update(table_obj).where(where_clause).values(**data)
 
-            # Compile to PostgreSQL dialect
-            compiled = stmt.compile(dialect=postgresql.dialect())
+            # Compile to MySQL dialect
+            compiled = stmt.compile(dialect=mysql.dialect())
             query_str = str(compiled)
             params = compiled.params
             param_values = list(params.values())
 
-            async with self._get_connection() as connection:
-                await connection.execute(query_str, *param_values)
+            async with (
+                self._get_connection() as connection,
+                connection.cursor() as cursor,
+            ):
+                await cursor.execute(query_str, param_values)
+                await connection.commit()
                 logger.debug(f"[{self.name}] Updated {table}")
         except Exception as e:
             logger.error(f"[{self.name}] Update error: {e}")
@@ -258,23 +278,28 @@ class PostgreSQLServer(SQLDatabase):
             # Build DELETE statement with SQLAlchemy
             metadata = MetaData()
             table_obj = Table(table, metadata, autoload_with=None)
-
             # Build WHERE clause
             where_clause = None
             for key, value in conditions.items():
                 condition = table_obj.c[key] == value
-                where_clause = condition if where_clause is None else where_clause & condition
+                where_clause = (
+                    condition if where_clause is None else where_clause & condition
+                )
 
             stmt = delete(table_obj).where(where_clause)
 
-            # Compile to PostgreSQL dialect
-            compiled = stmt.compile(dialect=postgresql.dialect())
+            # Compile to MySQL dialect
+            compiled = stmt.compile(dialect=mysql.dialect())
             query_str = str(compiled)
             params = compiled.params
             param_values = list(params.values())
 
-            async with self._get_connection() as connection:
-                await connection.execute(query_str, *param_values)
+            async with (
+                self._get_connection() as connection,
+                connection.cursor() as cursor,
+            ):
+                await cursor.execute(query_str, param_values)
+                await connection.commit()
                 logger.debug(f"[{self.name}] Deleted from {table}")
         except Exception as e:
             logger.error(f"[{self.name}] Delete error: {e}")
