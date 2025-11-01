@@ -1,12 +1,12 @@
-from pydantic import BaseModel, RootModel, field_validator
+from pydantic import RootModel, field_validator
 
-from source.server.sql_models import JobsStatusModel, MeetingModel, RecordingModel
+from source.server.sql_models import JobsStatusModel, MeetingModel, RecordingModel, TranscriptsModel
 
 # -------------------------------------------------------------- #
 # SQL DB Models
 # -------------------------------------------------------------- #
 
-SQL_DATABASE_MODELS = [MeetingModel, RecordingModel, JobsStatusModel]
+SQL_DATABASE_MODELS = [MeetingModel, RecordingModel, JobsStatusModel, TranscriptsModel]
 
 
 # -------------------------------------------------------------- #
