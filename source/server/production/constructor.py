@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 
 from source.server.production.postgresql import PostgreSQLServer
 from source.server.server import ServerManager
-from source.constructor import ServerManagerType
 
 load_dotenv(dotenv_path=".env.local")
 
@@ -31,9 +30,7 @@ def load_sql_client() -> PostgreSQLServer:
     return sql_handler
 
 
-def construct_server_manager(
-    manager_type: ServerManagerType = ServerManagerType.PRODUCTION,
-) -> ServerManager:
+def construct_server_manager() -> ServerManager:
     """
     Construct and return a ServerManager instance for production.
 
