@@ -15,9 +15,7 @@ class Voice(commands.Cog):
     # Utils
     # -------------------------------------------------------------- #
 
-    def find_user_vc(
-        self, interaction: discord.Interaction
-    ) -> discord.VoiceChannel | None:
+    def find_user_vc(self, interaction: discord.Interaction) -> discord.VoiceChannel | None:
         """Find a voice channel the user is in."""
         user = interaction.user
         channel = user.voice.channel
@@ -52,9 +50,7 @@ class Voice(commands.Cog):
     # Slash Commands
     # -------------------------------------------------------------- #
 
-    @app_commands.command(
-        name="transcribe", description="Transcribe the current voice channel"
-    )
+    @app_commands.command(name="transcribe", description="Transcribe the current voice channel")
     async def transcribe(self, interaction: discord.Interaction) -> None:
         voice_channel = self.find_user_vc(interaction)
         await interaction.response.defer(ephemeral=True)
