@@ -124,6 +124,9 @@ class AsyncLoggingService(Manager):
         Args:
             message: The formatted log message to write
         """
+        # Print to console for all events
+        print(message, flush=True)
+
         async with self._write_lock:
             try:
                 async with aiofiles.open(self.log_path, mode="a") as f:
