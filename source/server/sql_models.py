@@ -1,7 +1,6 @@
 import enum
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Enum, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, Column, DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.orm import declarative_base
 
 # -------------------------------------------------------------- #
@@ -57,17 +56,6 @@ class MeetingModel(Base):
 
     __tablename__ = "meetings"
 
-    __table_args__ = (
-        # define constraints for recording_files: {user_id: recording_id, ...}
-        CheckConstraint(
-            "jsonb_typeof(recording_files) = 'object'", name="recording_files_jsonb_object"
-        ),
-        # define constraints for transcript_ids: {user_id: transcript_id, ...}
-        CheckConstraint(
-            "jsonb_typeof(transcript_ids) = 'object'", name="transcript_ids_jsonb_object"
-        ),
-    )
-
     id = Column(String(16), primary_key=True, index=True)
     guild_id = Column(String(20), nullable=False, index=True)
     channel_id = Column(String(20), nullable=False)
@@ -80,9 +68,9 @@ class MeetingModel(Base):
         default=MeetingStatus.SCHEDULED.value,
     )
     requested_by = Column(String(20), nullable=False)
-    participants = Column(JSONB, nullable=False, default=dict)
-    recording_files = Column(JSONB, nullable=False, default=dict)
-    transcript_ids = Column(JSONB, nullable=False, default=dict)
+    participants = Column(JSON, nullable=False, default=dict)
+    recording_files = Column(JSON, nullable=False, default=dict)
+    transcript_ids = Column(JSON, nullable=False, default=dict)
 
 
 class RecordingModel(Base):
@@ -102,7 +90,7 @@ class RecordingModel(Base):
     duration_in_ms = Column(Integer, nullable=False)
     meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
     sha256 = Column(String(64), nullable=False, unique=True)
-    recording_filename = Column(String, nullable=False)
+    filename = Column(String(512), nullable=False)
 
 
 class JobsStatusModel(Base):
@@ -146,7 +134,7 @@ class TranscriptsModel(Base):
     meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
     user_id = Column(String(20), nullable=False)
     sha256 = Column(String(64), nullable=False, unique=True)
-    transcript_filename = Column(String, nullable=False)
+    transcript_filename = Column(String(512), nullable=False)
 
 
 class GuildAdminWhitelistModel(Base):
@@ -176,4 +164,20 @@ class JobsStatusErrorLogModel(Base):
 
     id = Column(String(16), primary_key=True, index=True)
     created_at = Column(DateTime, nullable=False)
-    log_file = Column(String, nullable=False)
+    log_file = Column(String(512), nullable=False)
+
+
+class TempRecordingModel(Base):
+    """
+    ID = Temporary Recording ID
+    Created At = Timestamp when temporary recording was created
+    Meeting ID = Foreign Key to associated Meeting ID
+    Filename = Filename of the temporary recording file
+    """
+
+    __tablename__ = "temp_recordings"
+
+    id = Column(String(16), primary_key=True, index=True)
+    created_at = Column(DateTime, nullable=False)
+    meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
+    filename = Column(String(512), nullable=False)
