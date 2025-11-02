@@ -1,14 +1,11 @@
 import asyncio
 import os
 import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from source.server.dev.constructor import construct_server_manager
 from source.services.file_manager.manager import FileManagerService
-
 
 # ============================================================================
 # Fixtures
@@ -264,7 +261,7 @@ class TestFileManagerServiceLockSystem:
                 assert final_read == updated_data
                 results["reads"] += 1
 
-            except Exception as e:
+            except Exception:
                 results["success"] = False
                 raise
 
