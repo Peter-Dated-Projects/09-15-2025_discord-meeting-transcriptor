@@ -227,8 +227,13 @@ class BaseFFmpegServiceManager(Manager):
         pass
 
     @abstractmethod
-    async def convert_media(self, input_path: str, output_path: str, options: dict) -> bool:
-        """Convert media using FFmpeg."""
+    async def create_pcm_to_mp3_stream_handler(self) -> "FFmpegHandler":
+        """Create a PCM to MP3 stream handler."""
+        pass
+
+    @abstractmethod
+    async def queue_mp3_to_whisper_format_job(self, input_path: str, output_path: str) -> None:
+        """Convert an MP3 file to Whisper-compatible format."""
         pass
 
 

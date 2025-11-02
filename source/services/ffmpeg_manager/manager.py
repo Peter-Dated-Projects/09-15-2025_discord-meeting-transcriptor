@@ -1,5 +1,7 @@
 import subprocess
 
+from queue import Queue
+
 from source.server.server import ServerManager
 
 from source.services.manager import BaseFFmpegServiceManager
@@ -26,7 +28,10 @@ class FFmpegHandler:
                 timeout=5,
                 text=True,
             )
-            return result.returncode == 0
+            is_valid = result.returncode == 0
+            if is_valid:
+                version_info = result.stdout.split('\n')[0] if result.stdout else "Unknown version"
+            return is_valid
         except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
             return False
 
@@ -67,7 +72,10 @@ class FFmpegHandler:
                 text=True,
             )
 
-            return result.returncode == 0
+            success = result.returncode == 0
+            if success:
+                pass  # Logging will be done by FFmpegManagerService
+            return success
         except subprocess.TimeoutExpired:
             return False
         except Exception:
@@ -195,6 +203,9 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
         self.ffmpeg_path = ffmpeg_path
         self.handler = FFmpegHandler(ffmpeg_path)
 
+        self._jobs = Queue(maxsize=10)
+        self._processing = False
+
     # -------------------------------------------------------------- #
     # Manager Methods
     # -------------------------------------------------------------- #
@@ -202,11 +213,65 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
     async def on_start(self, services):
         await super().on_start(services)
         await self.services.logging_service.info("FFmpegManagerService initialized")
+        
+        # Validate FFmpeg installation
+        if self.handler.validate_ffmpeg():
+            await self.services.logging_service.info(f"FFmpeg validated at path: {self.ffmpeg_path}")
+        else:
+            await self.services.logging_service.warning(f"FFmpeg validation failed at path: {self.ffmpeg_path}")
         return True
 
     async def on_close(self):
         return True
 
+    async def _process_jobs(self):
+        while not self._jobs.empty():
+            input_path, output_path, options = await self._jobs.get()
+            await self.services.logging_service.info(
+                f"Processing FFmpeg conversion: {input_path} → {output_path}"
+            )
+            success = self.handler.convert_file(
+                input_path,
+                output_path,
+                options=options,
+            )
+            if success:
+                await self.services.logging_service.info(
+                    f"FFmpeg conversion completed: {input_path} → {output_path}"
+                )
+            else:
+                await self.services.logging_service.error(
+                    f"FFmpeg conversion failed for {input_path} to {output_path}"
+                )
+            self._jobs.task_done()
+        self._processing = False
+
     # -------------------------------------------------------------- #
     # FFmpeg Management Methods
     # -------------------------------------------------------------- #
+
+    def get_ffmpeg_path(self) -> str:
+        """Get the FFmpeg executable path."""
+        return self.ffmpeg_path
+
+    async def create_pcm_to_mp3_stream_handler(self):
+        return self.handler.create_pcm_to_mp3_stream_process()
+
+    async def queue_mp3_to_whisper_format_job(
+        self, input_path: str, output_path: str, options: dict
+    ) -> bool:
+        if self._jobs.full():
+            await self.services.logging_service.warning(
+                f"FFmpeg job queue is full, cannot queue job: {input_path}"
+            )
+            return False
+
+        await self._jobs.put((input_path, output_path, options))
+        await self.services.logging_service.info(
+            f"Queued FFmpeg job: {input_path} → {output_path} (queue size: {self._jobs.qsize()})"
+        )
+        if not self._processing:
+            self._processing = True
+            await self.services.logging_service.info("Starting FFmpeg job processor")
+            await self._process_jobs()
+        return True
