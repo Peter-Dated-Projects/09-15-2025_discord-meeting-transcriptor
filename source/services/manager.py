@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from source.server.server import ServerManager
 
@@ -232,7 +233,7 @@ class BaseFFmpegServiceManager(Manager):
         pass
 
     @abstractmethod
-    async def create_pcm_to_mp3_stream_handler(self) -> "FFmpegHandler":
+    async def create_pcm_to_mp3_stream_handler(self) -> Any:
         """Create a PCM to MP3 stream handler."""
         pass
 

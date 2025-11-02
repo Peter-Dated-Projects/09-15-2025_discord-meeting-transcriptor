@@ -1,9 +1,7 @@
 import subprocess
-
 from queue import Queue
 
 from source.server.server import ServerManager
-
 from source.services.manager import BaseFFmpegServiceManager
 
 # -------------------------------------------------------------- #
@@ -29,8 +27,6 @@ class FFmpegHandler:
                 text=True,
             )
             is_valid = result.returncode == 0
-            if is_valid:
-                version_info = result.stdout.split("\n")[0] if result.stdout else "Unknown version"
             return is_valid
         except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
             return False

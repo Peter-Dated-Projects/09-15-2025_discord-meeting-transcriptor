@@ -72,7 +72,7 @@ class SQLLoggingManagerService(BaseSQLLoggingServiceManager):
         await self.server.sql_client.insert(JobsStatusModel.__tablename__, job_status.dict())
         await self.server.logging_service.log(f"Logged job status event: {job_status.dict()}")
 
-    async def fetch_logs(self, limit: int = 100) -> list:
+    async def fetch_logs(self) -> list:
         """Fetch logs from the SQL database."""
         # Implement SQL fetching logic here
         return []
