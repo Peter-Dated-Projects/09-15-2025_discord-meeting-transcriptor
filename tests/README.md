@@ -1,6 +1,6 @@
 # Database Connection Tests
 
-This directory contains comprehensive pytest tests for verifying PostgreSQL and MySQL database connections.
+This directory contains comprehensive pytest tests for verifying PostgreSQL and MySQL database connections, as well as service integration tests.
 
 ## Test Structure
 
@@ -8,6 +8,8 @@ This directory contains comprehensive pytest tests for verifying PostgreSQL and 
 
 Located in `tests/unit/`:
 
+- **Fast, isolated tests with mocked dependencies**
+- **No external dependencies required (databases, services, etc.)**
 - **`test_postgresql_connection.py`** - Tests PostgreSQL connection handling
   - Initialization with various parameter combinations
   - Connection pool creation and management
@@ -22,9 +24,17 @@ Located in `tests/unit/`:
   - Error handling
   - Environment variable fallback
 
+- **`services/test_ffmpeg_manager.py`** - Tests FFmpeg Manager unit logic
+  - FFmpeg validation logic
+  - File conversion logic with mocked subprocess
+  - Timeout and error handling
+
 ### Integration Tests
 
 Located in `tests/integration/`:
+
+- **Tests with real external dependencies (databases, file systems, FFmpeg)**
+- **Require proper environment setup and configuration**
 
 - **`test_database_connections.py`** - Tests actual database connections
   - Real PostgreSQL connection (requires running instance)
@@ -33,12 +43,70 @@ Located in `tests/integration/`:
   - Connection failure scenarios
   - Independent connections for both databases
 
+- **`services/file_manager/manager.py`** - Tests File Manager service
+  - File CRUD operations with real file system
+  - Storage path management
+  - Integration with database server
+
+- **`services/ffmpeg_manager/test_manager.py`** - Tests FFmpeg Manager service
+  - Audio file format conversion (M4A/MP3 to WAV)
+  - FFmpeg installation validation
+  - Error handling with real files
+  - Large file conversion (marked as slow)
+
 ## Running the Tests
 
-### Run All Unit Tests (Mocked)
+### Run All Tests (Both Unit and Integration)
 
 ```bash
+# Requires --db-env flag
+pytest --db-env local -v
+```
+
+### Run Only Unit Tests
+
+```bash
+# Unit tests don't require --db-env
+pytest -m unit -v
+
+# Or by path
 pytest tests/unit/ -v
+```
+
+### Run Only Integration Tests
+
+```bash
+# Integration tests require --db-env
+pytest -m integration --db-env local -v
+
+# Or by path
+pytest tests/integration/ --db-env local -v
+```
+
+### Run Specific Test Suites
+
+```bash
+# Run only FFmpeg tests
+pytest tests/integration/services/ffmpeg_manager/ --db-env local -v
+
+# Run only file manager tests
+pytest tests/integration/services/file_manager/ --db-env local -v
+
+# Run only database tests
+pytest tests/integration/test_database_connections.py --db-env local -v
+```
+
+### Run Tests by Marker
+
+```bash
+# Run only local environment tests
+pytest -m local --db-env local -v
+
+# Run only production environment tests
+pytest -m prod --db-env prod -v
+
+# Run fast tests (exclude slow tests)
+pytest -m "not slow" --db-env local -v
 ```
 
 ### Run Only PostgreSQL Unit Tests

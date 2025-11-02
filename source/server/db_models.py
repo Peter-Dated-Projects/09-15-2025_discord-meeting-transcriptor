@@ -6,8 +6,8 @@ from source.server.sql_models import (
     JobsStatusModel,
     MeetingModel,
     RecordingModel,
-    TranscriptsModel,
     TempRecordingModel,
+    TranscriptsModel,
 )
 
 # -------------------------------------------------------------- #

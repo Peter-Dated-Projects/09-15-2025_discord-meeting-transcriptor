@@ -80,24 +80,23 @@ def get_test_env(config: pytest.Config | None = None) -> str:
     # Not found - raise error
     raise ValueError(
         "\n"
-        "❌ TEST ENVIRONMENT NOT SPECIFIED\n"
+        "❌ TEST ENVIRONMENT NOT SPECIFIED FOR INTEGRATION TESTS\n"
         "\n"
-        "You must specify which test environment to use. Choose one:\n"
+        "Integration tests require a database environment. Choose one:\n"
         "\n"
         "  Local (MySQL):\n"
-        "    pytest --db-env local\n"
+        "    pytest --db-env local tests/integration\n"
         "\n"
         "  Production (PostgreSQL):\n"
-        "    pytest --db-env prod\n"
+        "    pytest --db-env prod tests/integration\n"
         "\n"
         "Or use environment variables:\n"
-        "    TEST_ENV=local pytest\n"
-        "    TEST_ENV=prod pytest\n"
+        "    TEST_ENV=local pytest tests/integration\n"
+        "    TEST_ENV=prod pytest tests/integration\n"
         "\n"
-        "Examples:\n"
-        "  pytest --db-env local tests/unit\n"
-        "  pytest --db-env prod tests/integration\n"
-        "  TEST_ENV=local pytest -m 'not integration'\n"
+        "Note: Unit tests do not require --db-env:\n"
+        "    pytest tests/unit  # No --db-env needed\n"
+        "    pytest -m unit     # No --db-env needed\n"
     )
 
 
@@ -108,26 +107,27 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store",
         default=None,
         choices=["local", "prod"],
-        help="Required: Specify database environment. "
+        help="Specify database environment (required for integration tests). "
         "Choose 'local' (MySQL) or 'prod' (PostgreSQL). "
+        "Unit tests do not require this flag. "
         "Alternatively, set TEST_ENV environment variable.",
     )
 
 
 def pytest_configure(config: pytest.Config) -> None:
     """Configure pytest with custom settings and markers."""
-    # Validate that environment is specified
+    # Try to get environment, but don't fail here - will validate later for integration tests
     try:
         env = get_test_env(config)
+        config.db_env = env
+        config.db_env_error = None
     except ValueError as e:
-        # Store the error to raise it during collection
+        # Store the error but don't fail yet - we'll check in pytest_collection_modifyitems
+        # to see if we actually need the environment (i.e., if we have integration tests)
         config.db_env_error = str(e)
         config.db_env = None
-        return
 
-    config.db_env = env
-
-    # Register markers
+    # Register markers (always do this regardless of environment)
     config.addinivalue_line("markers", "unit: Unit tests")
     config.addinivalue_line("markers", "integration: Integration tests")
     config.addinivalue_line("markers", "slow: Slow running tests")
@@ -143,30 +143,52 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
     - --db-env local or TEST_ENV=local: Skip tests marked with @pytest.mark.prod
     - --db-env prod or TEST_ENV=prod: Skip tests marked with @pytest.mark.local
 
+    For unit tests (marked with @pytest.mark.unit), environment is optional.
+    For integration tests, environment is required.
+
     Raises:
-        pytest.UsageError: If environment is not specified
+        pytest.UsageError: If environment is not specified for integration tests
     """
-    # Check if environment was already validated and errored
+    # Check if any integration tests are in the collection
+    has_integration_tests = any("integration" in item.keywords for item in items)
+    has_only_unit_tests = all("unit" in item.keywords for item in items)
+
+    # If only unit tests are being run, environment is optional
+    if has_only_unit_tests:
+        # Apply timeout to all tests except those marked as slow
+        for item in items:
+            if "slow" not in item.keywords:
+                item.add_marker(pytest.mark.timeout(5))
+        return
+
+    # For integration tests or mixed tests, require environment
     if hasattr(config, "db_env_error") and config.db_env_error:
         raise pytest.UsageError(config.db_env_error)
 
     try:
         test_env = get_test_env(config)
     except ValueError as e:
-        raise pytest.UsageError(str(e))
+        # Only raise error if we have integration tests
+        if has_integration_tests:
+            raise pytest.UsageError(str(e))
+        else:
+            # No integration tests, environment not needed
+            test_env = None
 
-    skip_marker = pytest.mark.skip(reason=f"Skipped for {test_env} environment")
+    if test_env:
+        skip_marker = pytest.mark.skip(reason=f"Skipped for {test_env} environment")
 
+        for item in items:
+            # Skip prod tests when running local
+            if test_env == "local" and "prod" in item.keywords:
+                item.add_marker(skip_marker)
+
+            # Skip local tests when running prod
+            if test_env == "prod" and "local" in item.keywords:
+                item.add_marker(skip_marker)
+
+    # Apply timeout to all tests except those marked as slow
     for item in items:
-        # Skip prod tests when running local
-        if test_env == "local" and "prod" in item.keywords:
-            item.add_marker(skip_marker)
-
-        # Skip local tests when running prod
-        if test_env == "prod" and "local" in item.keywords:
-            item.add_marker(skip_marker)
-
-        # Apply timeout to all tests except those marked as slow
         if "slow" not in item.keywords:
             item.add_marker(pytest.mark.timeout(5))
 
@@ -181,13 +203,15 @@ def test_environment(request: pytest.FixtureRequest) -> str:
     """
     Get the current test environment (local or prod).
 
-    REQUIRED: Must be specified via --db-env or TEST_ENV
+    REQUIRED for integration tests, optional for unit tests.
     """
     try:
         env = get_test_env(request.config)
         return env
-    except ValueError as e:
-        pytest.fail(str(e))
+    except ValueError:
+        # If no environment is specified, default to 'local' for unit tests
+        # Integration tests will fail earlier in pytest_collection_modifyitems
+        return "local"
 
 
 # ============================================================================
@@ -410,3 +434,99 @@ def cleanup_after_test() -> Generator[None, None, None]:
     yield
     # Add any cleanup logic here if needed
     pass
+
+
+# ============================================================================
+# Shared Server and Services Fixtures (for integration tests)
+# ============================================================================
+
+
+@pytest.fixture
+def _test_environment(test_environment: str) -> str:
+    """
+    Internal fixture to pass test_environment to other fixtures.
+
+    This is a workaround for fixtures that need test_environment but
+    are used in integration tests. The underscore prefix indicates
+    it's an internal fixture.
+    """
+    return test_environment
+
+
+@pytest.fixture
+async def server_manager(_test_environment: str):
+    """
+    Create and connect a server manager for the current test environment.
+
+    This fixture provides a fully connected ServerManager instance
+    that can be used across integration tests. It automatically handles
+    cleanup on teardown.
+
+    Args:
+        _test_environment: The test environment (local or prod)
+
+    Yields:
+        ServerManager: Connected server manager instance
+    """
+    from source.constructor import ServerManagerType
+    from source.server.constructor import construct_server_manager
+
+    # Map test environment to ServerManagerType
+    server_type = (
+        ServerManagerType.DEVELOPMENT
+        if _test_environment == "local"
+        else ServerManagerType.PRODUCTION
+    )
+
+    server = construct_server_manager(server_type)
+    await server.connect_all()
+
+    yield server
+
+    await server.disconnect_all()
+
+
+@pytest.fixture
+async def services_manager(server_manager, tmp_path):
+    """
+    Create and initialize a services manager with temporary storage.
+
+    This fixture provides a fully initialized ServicesManager instance
+    with all services ready to use. It uses temporary directories for
+    storage to ensure test isolation.
+
+    Args:
+        server_manager: Connected server manager from server_manager fixture
+        tmp_path: Pytest's built-in temporary directory fixture
+
+    Yields:
+        ServicesManager: Initialized services manager instance
+    """
+    from source.constructor import ServerManagerType
+    from source.services.constructor import construct_services_manager
+
+    # Create temporary storage paths
+    storage_path = str(tmp_path / "data")
+    recording_storage_path = str(tmp_path / "data" / "recordings")
+
+    # Determine server type from server_manager
+    # This is a bit of a hack, but it works for both dev and prod
+    server_type = (
+        ServerManagerType.DEVELOPMENT
+        if hasattr(server_manager, "mysql_server")
+        else ServerManagerType.PRODUCTION
+    )
+
+    services = construct_services_manager(
+        service_type=server_type,
+        server=server_manager,
+        storage_path=storage_path,
+        recording_storage_path=recording_storage_path,
+    )
+
+    await services.initialize_all()
+
+    yield services
+
+    # Cleanup is handled by the services manager itself
+    # No explicit teardown needed

@@ -64,7 +64,7 @@ class Voice(commands.Cog):
         # Join the user VC
         voice_client = await self.get_bot_voice_client(interaction)
         if not voice_client:
-            voice_client = await self.connect_to_vc(interaction, voice_channel)
+            voice_client = await self.connect_to_vc(voice_channel)
             await interaction.edit_original_response(
                 content=f"Joined voice channel: {voice_channel.name}"
             )
