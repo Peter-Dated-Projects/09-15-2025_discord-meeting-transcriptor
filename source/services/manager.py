@@ -275,3 +275,30 @@ class BaseTranscriptionFileServiceManager(Manager):
 
     def __init__(self, server):
         super().__init__(server)
+
+
+class BaseDiscordRecorderServiceManager(Manager):
+    """Specialized manager for Discord recorder services."""
+
+    def __init__(self, server):
+        super().__init__(server)
+
+    @abstractmethod
+    async def start_session(self, session_id: str) -> None:
+        """Start a new recording session."""
+        pass
+
+    @abstractmethod
+    async def stop_session(self, session_id: str) -> None:
+        """Stop a recording session."""
+        pass
+
+    @abstractmethod
+    async def pause_session(self, session_id: str) -> None:
+        """Pause a recording session."""
+        pass
+
+    @abstractmethod
+    async def resume_session(self, session_id: str) -> None:
+        """Resume a paused recording session."""
+        pass
