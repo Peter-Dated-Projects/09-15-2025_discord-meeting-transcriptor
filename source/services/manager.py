@@ -123,6 +123,11 @@ class BaseFileServiceManager(Manager):
         """Check if a file exists."""
         pass
 
+    @abstractmethod
+    async def create_file(self, filename: str) -> None:
+        """Create an empty file."""
+        pass
+
 
 class BaseRecordingFileServiceManager(Manager):
     """Specialized manager for recording file services."""

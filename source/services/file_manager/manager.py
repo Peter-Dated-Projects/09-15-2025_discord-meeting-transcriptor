@@ -133,3 +133,13 @@ class FileManagerService(BaseFileServiceManager):
     async def file_exists(self, filename: str) -> bool:
         """Check if a file exists in the storage path."""
         return os.path.exists(os.path.join(self.storage_path, filename))
+
+    async def create_file(self, filename: str) -> None:
+        """Create an empty file in the storage path."""
+        async with (
+            self._acquire_file_lock(filename),
+            aiofiles.open(os.path.join(self.storage_path, filename), "wb") as f,
+        ):
+            await f.write(b"")
+
+        await self.services.logging_service.info(f"Created empty file: {filename}")

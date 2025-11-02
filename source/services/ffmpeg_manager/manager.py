@@ -270,6 +270,9 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
             )
             return False
 
+        # Create output file using file manager for output path
+        self.services.file_service_manager.create_file(output_path)
+
         # Add event to queue
         # Abuse current thread to run all jobs if not already processing
         await self._jobs.put((input_path, output_path, options))

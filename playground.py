@@ -1,8 +1,55 @@
-from pywhispercpp.model import Model
+import asyncio
+import os
 
-m = Model("assets/models/ggml-large-v2.bin", gpu=True)
+import dotenv
 
-target_file = r"C:\Users\peter\Videos\audio-recording-1.m4a"
-transcription = m.transcribe(target_file)
+from source.constructor import ServerManagerType
+from source.server.constructor import construct_server_manager
+from source.services.constructor import construct_services_manager
 
-print(transcription.text)
+dotenv.load_dotenv(dotenv_path=".env.local")
+
+
+async def main():
+    """Main function to setup services and run transcription."""
+    # -------------------------------------------------------------- #
+    # Startup services
+    # -------------------------------------------------------------- #
+
+    print("=" * 60)
+    print("Setting up server and services...")
+    print("=" * 60)
+
+    # Initialize server manager
+    servers_manager = construct_server_manager(ServerManagerType.DEVELOPMENT)
+    await servers_manager.connect_all()
+    print("✓ Connected all servers")
+
+    # Initialize services manager
+    storage_path = os.path.join("assets", "data")
+    recording_storage_path = os.path.join(storage_path, "recordings")
+
+    services_manager = construct_services_manager(
+        ServerManagerType.DEVELOPMENT,
+        server=servers_manager,
+        storage_path=storage_path,
+        recording_storage_path=recording_storage_path,
+    )
+    await services_manager.initialize_all()
+    print("✓ Initialized all services")
+
+    # -------------------------------------------------------------- #
+    # Cleanup
+    # -------------------------------------------------------------- #
+
+    print("\n" + "=" * 60)
+    print("Cleaning up...")
+    print("=" * 60)
+
+    await servers_manager.disconnect_all()
+    print("✓ Disconnected all servers")
+    print("✓ Done")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
