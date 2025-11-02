@@ -37,13 +37,13 @@ def construct_services_manager(
         from source.services.recording_file_manager.manager import (
             RecordingFileManagerService,
         )
-        from source.services.ffmpeg_manager.manager import FFmpegService
+        from source.services.ffmpeg_manager.manager import FFmpegManagerService
 
         file_service_manager = FileManagerService(server=server, storage_path=storage_path)
         recording_file_service_manager = RecordingFileManagerService(
             server=server, recording_storage_path=recording_storage_path
         )
-        ffmpeg_service_manager = FFmpegService(
+        ffmpeg_service_manager = FFmpegManagerService(
             server=server, ffmpeg_path="assets/binaries/ffmpeg.exe"
         )
 

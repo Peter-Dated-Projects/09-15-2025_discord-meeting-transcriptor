@@ -130,7 +130,7 @@ class FFmpegConversionStream:
         """
 
         # Use File Manager to lock output file
-        self.ffmpeg_handler.ffmpeg_service_manager.services.file_service_manager._acquire_file_lock(
+        self.ffmpeg_handler.ffmpeg_service_manager.services.file_service_manager._acquire_file_lock_oneshot(
             self.output_file
         )
 
@@ -181,7 +181,7 @@ class FFmpegConversionStream:
                 self.subprocess = None
 
                 # Release file lock
-                self.ffmpeg_handler.ffmpeg_service_manager.services.file_service_manager._release_file_lock(
+                self.ffmpeg_handler.ffmpeg_service_manager.services.file_service_manager._release_file_lock_oneshot(
                     self.output_file
                 )
 

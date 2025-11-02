@@ -135,12 +135,12 @@ class BaseFileServiceManager(Manager):
         pass
 
     @abstractmethod
-    async def _acquire_file_lock(self, filename: str):
+    async def _acquire_file_lock_oneshot(self, filename: str):
         """Asynchronous context manager to acquire a file lock for atomic operations."""
         pass
 
     @abstractmethod
-    async def _release_file_lock(self, filename: str):
+    async def _release_file_lock_oneshot(self, filename: str):
         """Asynchronous context manager to release a file lock."""
         pass
 
