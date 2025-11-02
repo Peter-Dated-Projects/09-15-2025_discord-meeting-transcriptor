@@ -1,4 +1,5 @@
 import asyncio
+import os
 import subprocess
 from dataclasses import dataclass
 
@@ -232,7 +233,7 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
         super().__init__(server)
 
         self.ffmpeg_path = ffmpeg_path
-        self.handler = FFmpegHandler(ffmpeg_path)
+        self.handler = FFmpegHandler(self, ffmpeg_path)
 
         self._jobs: asyncio.Queue[FFJob] | None = None
         self._worker_task: asyncio.Task | None = None
@@ -283,7 +284,7 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
             try:
                 job = await self._jobs.get()
                 await self.services.logging_service.info(
-                    f"Processing FFmpeg conversion: {job.input_path} → {job.output_path}"
+                    f"Processing FFmpeg conversion: {job.input_path} -> {job.output_path}"
                 )
                 try:
                     # Run the synchronous conversion in a thread pool to avoid blocking
@@ -298,7 +299,7 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
                     job.fut.set_result(bool(ok))
                     if ok:
                         await self.services.logging_service.info(
-                            f"FFmpeg conversion completed: {job.input_path} → {job.output_path}"
+                            f"FFmpeg conversion completed: {job.input_path} -> {job.output_path}"
                         )
                     else:
                         await self.services.logging_service.error(
@@ -343,12 +344,26 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
         Returns:
             True if conversion was successful, False otherwise
         """
+        await self.services.logging_service.info(
+            f"Starting queue_mp3_to_whisper_format_job: {input_path} -> {output_path}"
+        )
+
+        if self._jobs is None:
+            self._jobs = asyncio.Queue(maxsize=10)
+            await self.services.logging_service.info("Initialized FFmpeg job queue")
+
+        # Start the worker task if not already running
+        if not self._worker_task or self._worker_task.done():
+            self._worker_task = asyncio.create_task(self._worker())
+            await self.services.logging_service.info("Started FFmpeg worker task")
+
         if self._jobs.full():
             await self.services.logging_service.warning("FFmpeg job queue full")
             return False
 
         # Ensure parent directory exists; let ffmpeg create/overwrite output file itself
         self.services.file_service_manager.ensure_parent_dir(output_path)
+        await self.services.logging_service.debug(f"Ensured parent directory for {output_path}")
 
         # Create a Future for this specific job
         options = {
@@ -363,20 +378,27 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
         # Enqueue the job
         await self._jobs.put(job)
         await self.services.logging_service.info(
-            f"Queued FFmpeg job: {input_path} → {output_path} (queue size: {self._jobs.qsize()})"
+            f"Queued FFmpeg job: {input_path} -> {output_path} (queue size: {self._jobs.qsize()})"
         )
 
         # Wait only for THIS job to complete
         try:
+            await self.services.logging_service.info(
+                f"Waiting for FFmpeg job to complete: {input_path} -> {output_path}"
+            )
             # Optional: Add timeout (e.g., 10 minutes for large files)
-            return await asyncio.wait_for(fut, timeout=600)
+            result = await asyncio.wait_for(fut, timeout=600)
+            await self.services.logging_service.info(
+                f"FFmpeg job completed successfully: {input_path} -> {output_path}"
+            )
+            return result
         except asyncio.TimeoutError:
             await self.services.logging_service.error(
-                f"FFmpeg job timed out: {input_path} → {output_path}"
+                f"FFmpeg job timed out: {input_path} -> {output_path}"
             )
             return False
         except Exception as e:
             await self.services.logging_service.error(
-                f"FFmpeg job failed with exception: {input_path} → {output_path}: {str(e)}"
+                f"FFmpeg job failed with exception: {input_path} -> {output_path}: {str(e)}"
             )
             return False
