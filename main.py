@@ -83,10 +83,14 @@ async def main():
     await servers_manager.connect_all()
     print("[OK] Connected all servers.")
 
+    storage_path = os.path.join("assets", "data")
+    recording_storage_path = os.path.join(storage_path, "recordings")
+
     services_manager = construct_services_manager(
         ServerManagerType.DEVELOPMENT,
         server=servers_manager,
-        storage_path=os.path.join("assets", "data"),
+        storage_path=storage_path,
+        recording_storage_path=recording_storage_path,
     )
     await services_manager.initialize_all()
     print("[OK] Initialized all services.")

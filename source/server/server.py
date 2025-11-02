@@ -20,6 +20,22 @@ class BaseSQLServerHandler(ABC):
         self.name = name
         self._connected = False
 
+    # -------------------------------------------------------------- #
+    # Handler Methods
+    # -------------------------------------------------------------- #
+
+    async def on_startup(self) -> None:
+        """Actions to perform on server startup."""
+        pass
+
+    async def on_close(self) -> None:
+        """Actions to perform on server close."""
+        pass
+
+    # -------------------------------------------------------------- #
+    # Abstract Methods
+    # -------------------------------------------------------------- #
+
     @abstractmethod
     async def connect(self) -> None:
         """Establish connection to the server."""
@@ -40,8 +56,28 @@ class BaseSQLServerHandler(ABC):
         """Check if currently connected to the server."""
         return self._connected
 
-    async def on_startup(self) -> None:
-        """Actions to perform on server startup."""
+    # -------------------------------------------------------------- #
+    # CRUD Operations
+    # -------------------------------------------------------------- #
+
+    @abstractmethod
+    async def query(self, query: str) -> any:
+        """Execute a query against the server."""
+        pass
+
+    @abstractmethod
+    async def insert(self, table: str, data: dict) -> None:
+        """Insert data into a specified table."""
+        pass
+
+    @abstractmethod
+    async def update(self, table: str, data: dict, conditions: dict) -> None:
+        """Update data in a specified table based on conditions."""
+        pass
+
+    @abstractmethod
+    async def delete(self, table: str, conditions: dict) -> None:
+        """Delete data from a specified table based on conditions."""
         pass
 
 
