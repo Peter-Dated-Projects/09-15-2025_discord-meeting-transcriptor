@@ -129,6 +129,11 @@ class BaseFileServiceManager(Manager):
         """Create an empty file."""
         pass
 
+    @abstractmethod
+    def ensure_parent_dir(self, filepath: str) -> None:
+        """Ensure the parent directory of the given filepath exists."""
+        pass
+
 
 class BaseRecordingFileServiceManager(Manager):
     """Specialized manager for recording file services."""
@@ -238,8 +243,20 @@ class BaseFFmpegServiceManager(Manager):
         pass
 
     @abstractmethod
-    async def queue_mp3_to_whisper_format_job(self, input_path: str, output_path: str) -> None:
-        """Convert an MP3 file to Whisper-compatible format."""
+    async def queue_mp3_to_whisper_format_job(
+        self, input_path: str, output_path: str, options: dict
+    ) -> bool:
+        """
+        Convert an MP3 file to Whisper-compatible format.
+
+        Args:
+            input_path: Path to the input MP3 file
+            output_path: Path to the output file
+            options: Dictionary of FFmpeg options
+
+        Returns:
+            True if conversion was successful, False otherwise
+        """
         pass
 
 

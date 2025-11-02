@@ -39,6 +39,21 @@ async def main():
     print("✓ Initialized all services")
 
     # -------------------------------------------------------------- #
+    # Playground for testing services
+    # -------------------------------------------------------------- #
+
+    # test the ffmpeg service
+    success = await services_manager.ffmpeg_service_manager.queue_mp3_to_whisper_format_job(
+        input_path="assets/data/test_input.mp3",
+        output_path="assets/data/test_output.wav",
+        options={"-f": "s16le", "-ar": "48000", "-y": None},
+    )
+    if success:
+        print("✓ FFmpeg conversion completed successfully")
+    else:
+        print("✗ FFmpeg conversion failed")
+
+    # -------------------------------------------------------------- #
     # Cleanup
     # -------------------------------------------------------------- #
 

@@ -143,3 +143,15 @@ class FileManagerService(BaseFileServiceManager):
             await f.write(b"")
 
         await self.services.logging_service.info(f"Created empty file: {filename}")
+
+    def ensure_parent_dir(self, filepath: str) -> None:
+        """
+        Ensure the parent directory of the given filepath exists.
+        Creates nested directories if needed.
+
+        Args:
+            filepath: Full path to a file (not just filename)
+        """
+        parent_dir = os.path.dirname(filepath)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
