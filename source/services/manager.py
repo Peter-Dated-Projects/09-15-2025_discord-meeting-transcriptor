@@ -221,6 +221,16 @@ class BaseFFmpegServiceManager(Manager):
     def __init__(self, server):
         super().__init__(server)
 
+    @abstractmethod
+    def get_ffmpeg_path(self) -> str:
+        """Get the FFmpeg executable path."""
+        pass
+
+    @abstractmethod
+    async def convert_media(self, input_path: str, output_path: str, options: dict) -> bool:
+        """Convert media using FFmpeg."""
+        pass
+
 
 class BaseTranscriptionFileServiceManager(Manager):
     """Specialized manager for transcription file services."""
