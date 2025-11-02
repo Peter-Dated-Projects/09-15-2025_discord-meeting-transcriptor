@@ -102,7 +102,7 @@ class RecordingModel(Base):
     duration_in_ms = Column(Integer, nullable=False)
     meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
     sha256 = Column(String(64), nullable=False, unique=True)
-    recording_filename = Column(String, nullable=False)
+    filename = Column(String, nullable=False)
 
 
 class JobsStatusModel(Base):
@@ -177,3 +177,19 @@ class JobsStatusErrorLogModel(Base):
     id = Column(String(16), primary_key=True, index=True)
     created_at = Column(DateTime, nullable=False)
     log_file = Column(String, nullable=False)
+
+
+class TempRecordingModel(Base):
+    """
+    ID = Temporary Recording ID
+    Created At = Timestamp when temporary recording was created
+    Meeting ID = Foreign Key to associated Meeting ID
+    Filename = Filename of the temporary recording file
+    """
+
+    __tablename__ = "temp_recordings"
+
+    id = Column(String(16), primary_key=True, index=True)
+    created_at = Column(DateTime, nullable=False)
+    meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
+    filename = Column(String, nullable=False)
