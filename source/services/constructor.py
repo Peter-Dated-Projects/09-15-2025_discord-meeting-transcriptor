@@ -3,6 +3,14 @@ from source.server.server import ServerManager
 from source.services.logger import AsyncLoggingService
 from source.services.manager import ServicesManager
 
+import os
+import platform
+
+from dotenv import load_dotenv
+
+# prefer a project-local .env.local file, then fallback to any .env
+load_dotenv(dotenv_path=".env.local")
+
 # -------------------------------------------------------------- #
 # Constructor for Dynamic Creation of Services Manager
 # -------------------------------------------------------------- #
@@ -43,9 +51,17 @@ def construct_services_manager(
         recording_file_service_manager = RecordingFileManagerService(
             server=server, recording_storage_path=recording_storage_path
         )
-        ffmpeg_service_manager = FFmpegManagerService(
-            server=server, ffmpeg_path="assets/binaries/ffmpeg.exe"
-        )
+        # Decide ffmpeg binary path based on environment and platform
+        if platform.system().lower().startswith("win") or os.name == "nt":
+            ffmpeg_env = os.getenv("WINDOWS_FFMPEG_PATH")
+            default_ffmpeg = "assets/binaries/ffmpeg.exe"
+        else:
+            ffmpeg_env = os.getenv("MAC_FFMPEG_PATH")
+            default_ffmpeg = "assets/binaries/ffmpeg"
+
+        ffmpeg_path = ffmpeg_env if ffmpeg_env else default_ffmpeg
+
+        ffmpeg_service_manager = FFmpegManagerService(server=server, ffmpeg_path=ffmpeg_path)
 
     # TODO: https://www.notion.so/DISC-19-create-ffmpeg-service-29c5eca3b9df805a949fdcd5850eaf5a?source=copy_link
     # # create ffmpeg service manager
