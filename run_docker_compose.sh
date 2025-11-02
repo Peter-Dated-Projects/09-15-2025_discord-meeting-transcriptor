@@ -33,7 +33,7 @@ log_error() {
 
 usage() {
     echo "Usage: ./run_docker_compose.sh [--down [service]] [--restart <service|all>] [--list]"
-    echo "  --down [service]      Stop and remove all containers, or only the specified service."
+    echo "  --down [service]      Stop containers (do NOT remove), or only the specified service."
     echo "  --restart <service>   Restart the specified service/container from this compose file."
     echo "  --restart all         Restart all services/containers from this compose file."
     echo "  --list                Show containers/services and their current status (with IP + ports if available)."
@@ -97,32 +97,23 @@ if [ "$#" -gt 0 ]; then
         --down)
             SERVICE="$2"
             if [ -n "$SERVICE" ]; then
-                # Stop specific service
+                # Stop specific service (do NOT remove container)
                 log_info "Stopping service '$SERVICE'..."
                 if $docker_compose_cmd -f "$COMPOSE_FILE" stop "$SERVICE"; then
                     log_success "Service '$SERVICE' stopped successfully."
+                    exit 0
                 else
                     log_error "Failed to stop service '$SERVICE'."
                     exit 1
                 fi
-
-                # Remove specific service
-                log_info "Removing service '$SERVICE'..."
-                if $docker_compose_cmd -f "$COMPOSE_FILE" rm -f "$SERVICE"; then
-                    log_success "Service '$SERVICE' removed successfully."
-                    exit 0
-                else
-                    log_error "Failed to remove service '$SERVICE'."
-                    exit 1
-                fi
             else
-                # Stop everything
-                log_info "Stopping and removing all containers from $COMPOSE_FILE..."
-                if $docker_compose_cmd -f "$COMPOSE_FILE" down; then
-                    log_success "All containers stopped and removed."
+                # Stop all services/containers but do not remove them
+                log_info "Stopping all services/containers from $COMPOSE_FILE (containers will not be removed)..."
+                if $docker_compose_cmd -f "$COMPOSE_FILE" stop; then
+                    log_success "All containers stopped. Containers were not removed."
                     exit 0
                 else
-                    log_error "Failed to stop and remove containers."
+                    log_error "Failed to stop containers."
                     exit 1
                 fi
             fi

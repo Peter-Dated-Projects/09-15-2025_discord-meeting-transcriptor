@@ -1,12 +1,12 @@
-from source.constructor import ServerManagerType
-from source.server.server import ServerManager
-from source.services.logger import AsyncLoggingService
-from source.services.manager import ServicesManager
-
 import os
 import platform
 
 from dotenv import load_dotenv
+
+from source.constructor import ServerManagerType
+from source.server.server import ServerManager
+from source.services.logger import AsyncLoggingService
+from source.services.manager import ServicesManager
 
 # prefer a project-local .env.local file, then fallback to any .env
 load_dotenv(dotenv_path=".env.local")
@@ -41,11 +41,11 @@ def construct_services_manager(
         service_type == ServerManagerType.DEVELOPMENT
         or service_type == ServerManagerType.PRODUCTION
     ):
+        from source.services.ffmpeg_manager.manager import FFmpegManagerService
         from source.services.file_manager.manager import FileManagerService
         from source.services.recording_file_manager.manager import (
             RecordingFileManagerService,
         )
-        from source.services.ffmpeg_manager.manager import FFmpegManagerService
 
         file_service_manager = FileManagerService(server=server, storage_path=storage_path)
         recording_file_service_manager = RecordingFileManagerService(

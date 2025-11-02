@@ -11,7 +11,6 @@ import pytest
 
 from source.services.ffmpeg_manager.manager import FFmpegHandler
 
-
 # ============================================================================
 # FFmpeg Handler Unit Tests (Real FFmpeg)
 # ============================================================================
@@ -25,7 +24,7 @@ class TestFFmpegHandlerValidation:
     def ffmpeg_handler_from_services(self, tmp_path):
         """Provide FFmpeg handler constructed through services manager."""
         import asyncio
-        import platform
+
         from source.constructor import ServerManagerType
         from source.server.constructor import construct_server_manager
         from source.services.constructor import construct_services_manager
@@ -100,6 +99,7 @@ class TestFFmpegHandlerConversion:
     def ffmpeg_handler_and_services(self, tmp_path):
         """Provide FFmpeg handler and services manager via constructors."""
         import asyncio
+
         from source.constructor import ServerManagerType
         from source.server.constructor import construct_server_manager
         from source.services.constructor import construct_services_manager
