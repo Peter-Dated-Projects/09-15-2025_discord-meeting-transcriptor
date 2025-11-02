@@ -32,6 +32,13 @@ class JobsStatus(enum.Enum):
     SKIPPED = "skipped"
 
 
+class TranscodeStatus(enum.Enum):
+    QUEUED = "queued"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+    FAILED = "failed"
+
+
 # -------------------------------------------------------------- #
 # Models
 # -------------------------------------------------------------- #
@@ -169,15 +176,35 @@ class JobsStatusErrorLogModel(Base):
 
 class TempRecordingModel(Base):
     """
-    ID = Temporary Recording ID
-    Created At = Timestamp when temporary recording was created
+    ID = Temporary Recording ID (UUID)
     Meeting ID = Foreign Key to associated Meeting ID
-    Filename = Filename of the temporary recording file
+    User ID = Discord User ID of the participant
+    Guild ID = Discord Guild (Server) ID
+    Created At = Timestamp when temporary recording chunk was created
+    Completed At = Timestamp when transcoding completed (None if still processing)
+    PCM Path = Path to the PCM file (relative or absolute)
+    MP3 Path = Path to the MP3 file (relative or absolute)
+    Transcode Status = Current transcoding status (QUEUED, IN_PROGRESS, DONE, FAILED)
+    SHA256 = SHA256 hash of the MP3 file (populated after transcode)
+    Duration MS = Estimated duration in milliseconds (populated after transcode)
+    Cleaned = Whether the PCM file has been deleted (cleanup flag)
     """
 
     __tablename__ = "temp_recordings"
 
     id = Column(String(16), primary_key=True, index=True)
-    created_at = Column(DateTime, nullable=False)
     meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
-    filename = Column(String(512), nullable=False)
+    user_id = Column(String(20), nullable=False, index=True)
+    guild_id = Column(String(20), nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    pcm_path = Column(String(512), nullable=False)
+    mp3_path = Column(String(512), nullable=True)
+    transcode_status = Column(
+        Enum(TranscodeStatus, name="transcode_status_enum"),
+        nullable=False,
+        default=TranscodeStatus.QUEUED.value,
+    )
+    sha256 = Column(String(64), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    cleaned = Column(Integer, nullable=False, default=0)  # Using Integer for boolean (0/1)
