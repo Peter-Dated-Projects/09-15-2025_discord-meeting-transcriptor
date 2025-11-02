@@ -21,7 +21,8 @@ class FFJob:
 
 
 class FFmpegHandler:
-    def __init__(self, ffmpeg_path: str):
+    def __init__(self, ffmpeg_service_manager: BaseFFmpegServiceManager, ffmpeg_path: str):
+        self.ffmpeg_service_manager = ffmpeg_service_manager
         self.ffmpeg_path = ffmpeg_path
 
     # -------------------------------------------------------------- #
@@ -91,14 +92,22 @@ class FFmpegHandler:
     def create_ffmpeg_stream_process(self) -> "FFmpegConversionStream":
         return FFmpegConversionStream(self)
 
-    def create_pcm_to_mp3_stream_process(self) -> "FFmpegConversionStream":
+    def create_pcm_to_mp3_stream_process(self, output_file: str) -> "FFmpegConversionStream":
         """Create a new FFmpeg conversion stream for PCM to MP3 conversion."""
-        return FFmpegConversionStream(self)
+        return FFmpegConversionStream(self, self.ffmpeg_service_manager, output_file=output_file)
 
 
 class FFmpegConversionStream:
-    def __init__(self, ffmpeg_handler: FFmpegHandler):
+    def __init__(
+        self,
+        ffmpeg_handler: FFmpegHandler,
+        ffmpeg_service_manager: BaseFFmpegServiceManager,
+        output_file: str,
+    ):
         self.ffmpeg_handler = ffmpeg_handler
+        self.ffmpeg_service_manager = ffmpeg_service_manager
+        self.output_file = output_file
+
         self.subprocess = None
         self._is_running = False
         self._bytes_processed = 0
@@ -107,7 +116,7 @@ class FFmpegConversionStream:
     # Streaming Methods
     # -------------------------------------------------------------- #
 
-    def start_stream(self, input_path: str, output_path: str, options: dict) -> bool:
+    def start_stream(self, options: dict) -> bool:
         """
         Start a streaming FFmpeg process.
 
@@ -119,9 +128,15 @@ class FFmpegConversionStream:
         Returns:
             True if stream started successfully, False otherwise
         """
+
+        # Use File Manager to lock output file
+        self.ffmpeg_handler.ffmpeg_service_manager.services.file_service_manager._acquire_file_lock(
+            self.output_file
+        )
+
         try:
-            # Build FFmpeg command for streaming
-            cmd = [self.ffmpeg_handler.ffmpeg_path, "-i", input_path]
+            # Build FFmpeg command for streaming from STDIN
+            cmd = [self.ffmpeg_handler.ffmpeg_path, "-i", "-"]
 
             # Add options from the dictionary
             for key, value in options.items():
@@ -130,7 +145,7 @@ class FFmpegConversionStream:
                     cmd.append(str(value))
 
             # Add output path
-            cmd.append(output_path)
+            cmd.append(self.output_file)
 
             # Start the subprocess with pipes for stdin/stdout/stderr
             self.subprocess = subprocess.Popen(
@@ -164,6 +179,11 @@ class FFmpegConversionStream:
             finally:
                 self._is_running = False
                 self.subprocess = None
+
+                # Release file lock
+                self.ffmpeg_handler.ffmpeg_service_manager.services.file_service_manager._release_file_lock(
+                    self.output_file
+                )
 
     def get_stream_status(self) -> dict:
         """
@@ -311,9 +331,7 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
     async def create_pcm_to_mp3_stream_handler(self):
         return self.handler.create_pcm_to_mp3_stream_process()
 
-    async def queue_mp3_to_whisper_format_job(
-        self, input_path: str, output_path: str, options: dict
-    ) -> bool:
+    async def queue_mp3_to_whisper_format_job(self, input_path: str, output_path: str) -> bool:
         """
         Queue an MP3 to Whisper format conversion job and wait for its completion.
 
@@ -333,6 +351,12 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
         self.services.file_service_manager.ensure_parent_dir(output_path)
 
         # Create a Future for this specific job
+        options = {
+            "ar": "16000",
+            "ac": "1",
+            "-acodec": "pcm_s16le",
+            "-y": None,
+        }
         fut = asyncio.get_running_loop().create_future()
         job = FFJob(input_path, output_path, options, fut)
 

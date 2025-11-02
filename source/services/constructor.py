@@ -37,10 +37,14 @@ def construct_services_manager(
         from source.services.recording_file_manager.manager import (
             RecordingFileManagerService,
         )
+        from source.services.ffmpeg_manager.manager import FFmpegService
 
         file_service_manager = FileManagerService(server=server, storage_path=storage_path)
         recording_file_service_manager = RecordingFileManagerService(
             server=server, recording_storage_path=recording_storage_path
+        )
+        ffmpeg_service_manager = FFmpegService(
+            server=server, ffmpeg_path="assets/binaries/ffmpeg.exe"
         )
 
     # TODO: https://www.notion.so/DISC-19-create-ffmpeg-service-29c5eca3b9df805a949fdcd5850eaf5a?source=copy_link

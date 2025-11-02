@@ -44,7 +44,7 @@ async def main():
 
     # test the ffmpeg service
     success = await services_manager.ffmpeg_service_manager.queue_mp3_to_whisper_format_job(
-        input_path="assets/data/test_input.mp3",
+        input_path=r"C:\Users\peter\Videos\audio-recording-1.m4a",
         output_path="assets/data/test_output.wav",
         options={"-f": "s16le", "-ar": "48000", "-y": None},
     )

@@ -134,6 +134,16 @@ class BaseFileServiceManager(Manager):
         """Ensure the parent directory of the given filepath exists."""
         pass
 
+    @abstractmethod
+    async def _acquire_file_lock(self, filename: str):
+        """Asynchronous context manager to acquire a file lock for atomic operations."""
+        pass
+
+    @abstractmethod
+    async def _release_file_lock(self, filename: str):
+        """Asynchronous context manager to release a file lock."""
+        pass
+
 
 class BaseRecordingFileServiceManager(Manager):
     """Specialized manager for recording file services."""
