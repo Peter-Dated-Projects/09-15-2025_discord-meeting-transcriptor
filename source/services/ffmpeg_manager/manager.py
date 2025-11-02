@@ -42,7 +42,7 @@ class FFmpegHandler:
         Args:
             input_path: Path to the input file
             output_path: Path to the output file
-            options: Dictionary of FFmpeg options (e.g., {'-f': 's16le', '-ar': '48000'})
+            options: Dictionary of FFmpeg options (e.g., {'-f': 's16le', '-ar': '48000', 'y': None})
 
         Returns:
             True if conversion was successful, False otherwise
