@@ -85,15 +85,11 @@ class TestFFmpegManagerService:
         )
 
     @pytest.mark.slow
-    async def test_large_file_conversion(self, services_manager: ServicesManager, tmp_path):
+    async def test_large_file_conversion(self):
         """
         Test converting a larger audio file (stress test).
 
         This test is marked as 'slow' to exclude it from quick test runs.
-
-        Args:
-            services_manager: Fixture providing initialized services
-            tmp_path: Pytest fixture providing temporary directory
         """
         # This test would use a larger test file if available
         # For now, we'll skip if the large test file doesn't exist
