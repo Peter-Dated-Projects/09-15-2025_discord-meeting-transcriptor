@@ -30,7 +30,7 @@ class FFmpegHandler:
             )
             is_valid = result.returncode == 0
             if is_valid:
-                version_info = result.stdout.split('\n')[0] if result.stdout else "Unknown version"
+                version_info = result.stdout.split("\n")[0] if result.stdout else "Unknown version"
             return is_valid
         except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
             return False
@@ -213,12 +213,16 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
     async def on_start(self, services):
         await super().on_start(services)
         await self.services.logging_service.info("FFmpegManagerService initialized")
-        
+
         # Validate FFmpeg installation
         if self.handler.validate_ffmpeg():
-            await self.services.logging_service.info(f"FFmpeg validated at path: {self.ffmpeg_path}")
+            await self.services.logging_service.info(
+                f"FFmpeg validated at path: {self.ffmpeg_path}"
+            )
         else:
-            await self.services.logging_service.warning(f"FFmpeg validation failed at path: {self.ffmpeg_path}")
+            await self.services.logging_service.warning(
+                f"FFmpeg validation failed at path: {self.ffmpeg_path}"
+            )
         return True
 
     async def on_close(self):
@@ -266,6 +270,8 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
             )
             return False
 
+        # Add event to queue
+        # Abuse current thread to run all jobs if not already processing
         await self._jobs.put((input_path, output_path, options))
         await self.services.logging_service.info(
             f"Queued FFmpeg job: {input_path} → {output_path} (queue size: {self._jobs.qsize()})"
