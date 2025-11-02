@@ -445,7 +445,7 @@ def cleanup_after_test() -> Generator[None, None, None]:
 def _test_environment(test_environment: str) -> str:
     """
     Internal fixture to pass test_environment to other fixtures.
-    
+
     This is a workaround for fixtures that need test_environment but
     are used in integration tests. The underscore prefix indicates
     it's an internal fixture.
@@ -457,32 +457,32 @@ def _test_environment(test_environment: str) -> str:
 async def server_manager(_test_environment: str):
     """
     Create and connect a server manager for the current test environment.
-    
+
     This fixture provides a fully connected ServerManager instance
     that can be used across integration tests. It automatically handles
     cleanup on teardown.
-    
+
     Args:
         _test_environment: The test environment (local or prod)
-    
+
     Yields:
         ServerManager: Connected server manager instance
     """
     from source.constructor import ServerManagerType
     from source.server.constructor import construct_server_manager
-    
+
     # Map test environment to ServerManagerType
     server_type = (
-        ServerManagerType.DEVELOPMENT 
-        if _test_environment == "local" 
+        ServerManagerType.DEVELOPMENT
+        if _test_environment == "local"
         else ServerManagerType.PRODUCTION
     )
-    
+
     server = construct_server_manager(server_type)
     await server.connect_all()
-    
+
     yield server
-    
+
     await server.disconnect_all()
 
 
@@ -490,43 +490,43 @@ async def server_manager(_test_environment: str):
 async def services_manager(server_manager, tmp_path):
     """
     Create and initialize a services manager with temporary storage.
-    
+
     This fixture provides a fully initialized ServicesManager instance
     with all services ready to use. It uses temporary directories for
     storage to ensure test isolation.
-    
+
     Args:
         server_manager: Connected server manager from server_manager fixture
         tmp_path: Pytest's built-in temporary directory fixture
-    
+
     Yields:
         ServicesManager: Initialized services manager instance
     """
     from source.constructor import ServerManagerType
     from source.services.constructor import construct_services_manager
-    
+
     # Create temporary storage paths
     storage_path = str(tmp_path / "data")
     recording_storage_path = str(tmp_path / "data" / "recordings")
-    
+
     # Determine server type from server_manager
     # This is a bit of a hack, but it works for both dev and prod
     server_type = (
-        ServerManagerType.DEVELOPMENT 
-        if hasattr(server_manager, 'mysql_server')
+        ServerManagerType.DEVELOPMENT
+        if hasattr(server_manager, "mysql_server")
         else ServerManagerType.PRODUCTION
     )
-    
+
     services = construct_services_manager(
         service_type=server_type,
         server=server_manager,
         storage_path=storage_path,
         recording_storage_path=recording_storage_path,
     )
-    
+
     await services.initialize_all()
-    
+
     yield services
-    
+
     # Cleanup is handled by the services manager itself
     # No explicit teardown needed

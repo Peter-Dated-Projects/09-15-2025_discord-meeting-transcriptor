@@ -42,7 +42,7 @@ class TestFFmpegManagerService:
         test_audio_file = os.path.join(
             os.path.dirname(__file__), "..", "..", "..", "assets", "audio-recording-1.m4a"
         )
-        
+
         # Verify test audio file exists
         if not os.path.exists(test_audio_file):
             pytest.skip(
@@ -86,9 +86,7 @@ class TestFFmpegManagerService:
         )
 
     @pytest.mark.slow
-    async def test_large_file_conversion(
-        self, services_manager: ServicesManager, tmp_path
-    ):
+    async def test_large_file_conversion(self, services_manager: ServicesManager, tmp_path):
         """
         Test converting a larger audio file (stress test).
 
@@ -114,9 +112,7 @@ class TestFFmpegManagerService:
 class TestFFmpegErrorHandling:
     """Test FFmpeg error handling and edge cases."""
 
-    async def test_nonexistent_input_file(
-        self, services_manager: ServicesManager, tmp_path
-    ):
+    async def test_nonexistent_input_file(self, services_manager: ServicesManager, tmp_path):
         """
         Test that conversion fails gracefully with a nonexistent input file.
 
@@ -138,13 +134,9 @@ class TestFFmpegErrorHandling:
         assert not success, "Conversion should fail for nonexistent input file"
 
         # Assert: Output file should not be created
-        assert not os.path.exists(
-            output_path
-        ), "Output file should not exist when conversion fails"
+        assert not os.path.exists(output_path), "Output file should not exist when conversion fails"
 
-    async def test_invalid_output_path(
-        self, services_manager: ServicesManager, tmp_path
-    ):
+    async def test_invalid_output_path(self, services_manager: ServicesManager, tmp_path):
         """
         Test that conversion fails gracefully with an invalid output path.
 
