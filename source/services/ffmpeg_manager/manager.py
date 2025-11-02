@@ -48,7 +48,9 @@ class FFmpegHandler:
     # Media Conversion Methods
     # -------------------------------------------------------------- #
 
-    def convert_file(self, input_path: str, output_path: str, options: dict) -> bool:
+    def convert_file(
+        self, input_path: str, output_path: str, options: dict
+    ) -> tuple[bool, str, str]:
         """
         Convert a media file using FFmpeg with the provided options.
 
@@ -58,7 +60,7 @@ class FFmpegHandler:
             options: Dictionary of FFmpeg options (e.g., {'-f': 's16le', '-ar': '48000', 'y': None})
 
         Returns:
-            True if conversion was successful, False otherwise
+            Tuple of (success: bool, stdout: str, stderr: str)
         """
         try:
             # Build FFmpeg command
@@ -82,13 +84,11 @@ class FFmpegHandler:
             )
 
             success = result.returncode == 0
-            if success:
-                pass  # Logging will be done by FFmpegManagerService
-            return success
+            return success, result.stdout, result.stderr
         except subprocess.TimeoutExpired:
-            return False
-        except Exception:
-            return False
+            return False, "", "FFmpeg process timed out"
+        except Exception as e:
+            return False, "", str(e)
 
     def create_ffmpeg_stream_process(self) -> "FFmpegConversionStream":
         return FFmpegConversionStream(self)
@@ -162,7 +162,7 @@ class FFmpegConversionStream:
             self._is_running = False
             return False
 
-    def close_stream(self) -> None:
+    async def close_stream(self) -> None:
         """Close the streaming FFmpeg process gracefully."""
         if self.subprocess and self._is_running:
             try:
@@ -171,11 +171,34 @@ class FFmpegConversionStream:
                     self.subprocess.stdin.write(b"q")
                     self.subprocess.stdin.flush()
                 # Wait for process to terminate (with timeout)
-                self.subprocess.wait(timeout=5)
+                stdout_data, stderr_data = self.subprocess.communicate(timeout=5)
+
+                # Log captured stdout and stderr when process exits
+                if stdout_data:
+                    await self.ffmpeg_handler.ffmpeg_service_manager.services.logging_service.info(
+                        f"FFmpeg STDOUT:\n{stdout_data.decode('utf-8', errors='replace')}"
+                    )
+                if stderr_data:
+                    await self.ffmpeg_handler.ffmpeg_service_manager.services.logging_service.info(
+                        f"FFmpeg STDERR:\n{stderr_data.decode('utf-8', errors='replace')}"
+                    )
+
             except (BrokenPipeError, subprocess.TimeoutExpired):
                 # Force kill if graceful shutdown fails
                 if self.subprocess.poll() is None:
                     self.subprocess.kill()
+                    stdout_data, stderr_data = self.subprocess.communicate()
+
+                    # Log captured stdout and stderr from killed process
+                    if stdout_data:
+                        await self.ffmpeg_handler.ffmpeg_service_manager.services.logging_service.info(
+                            f"FFmpeg STDOUT (killed):\n{stdout_data.decode('utf-8', errors='replace')}"
+                        )
+                    if stderr_data:
+                        await self.ffmpeg_handler.ffmpeg_service_manager.services.logging_service.error(
+                            f"FFmpeg STDERR (killed):\n{stderr_data.decode('utf-8', errors='replace')}"
+                        )
+                else:
                     self.subprocess.wait()
             finally:
                 self._is_running = False
@@ -289,7 +312,7 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
                 try:
                     # Run the synchronous conversion in a thread pool to avoid blocking
                     loop = asyncio.get_running_loop()
-                    ok = await loop.run_in_executor(
+                    ok, stdout, stderr = await loop.run_in_executor(
                         None,
                         self.handler.convert_file,
                         job.input_path,
@@ -297,6 +320,13 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
                         job.options,
                     )
                     job.fut.set_result(bool(ok))
+
+                    # Log FFmpeg output
+                    if stdout:
+                        await self.services.logging_service.info(f"FFmpeg STDOUT:\n{stdout}")
+                    if stderr:
+                        await self.services.logging_service.info(f"FFmpeg STDERR:\n{stderr}")
+
                     if ok:
                         await self.services.logging_service.info(
                             f"FFmpeg conversion completed: {job.input_path} -> {job.output_path}"
@@ -367,8 +397,8 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
 
         # Create a Future for this specific job
         options = {
-            "ar": "16000",
-            "ac": "1",
+            "-ar": "16000",
+            "-ac": "1",
             "-acodec": "pcm_s16le",
             "-y": None,
         }
