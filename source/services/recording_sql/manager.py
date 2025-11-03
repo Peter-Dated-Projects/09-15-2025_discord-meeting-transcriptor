@@ -210,6 +210,49 @@ class SQLRecordingManagerService(Manager):
 
         return entry_id
 
+    async def delete_persistent_recording(self, recording_entry_id: str) -> None:
+        """
+        Delete a persistent recording entry by its ID.
+
+        Args:
+            recording_entry_id: The ID of the persistent recording to delete
+        """
+
+        # Validate input
+        if len(recording_entry_id) != 16:
+            raise ValueError("recording_entry_id must be 16 characters long")
+
+        # Build delete query
+        query = delete(RecordingModel).where(RecordingModel.id == recording_entry_id)
+
+        # Execute delete
+        await self.server.sql_client.execute(query)
+        await self.services.logging_service.info(
+            f"Deleted persistent recording: {recording_entry_id}"
+        )
+
+    async def delete_persistent_recordings(self, recording_entry_ids: list[str]) -> None:
+        """
+        Delete multiple persistent recording entries by their IDs.
+
+        Args:
+            recording_entry_ids: List of persistent recording IDs to delete
+        """
+
+        # Validate input
+        for entry_id in recording_entry_ids:
+            if len(entry_id) != 16:
+                raise ValueError("All recording_entry_ids must be 16 characters long")
+
+        # Build delete query
+        query = delete(RecordingModel).where(RecordingModel.id.in_(recording_entry_ids))
+
+        # Execute delete
+        await self.server.sql_client.execute(query)
+        await self.services.logging_service.info(
+            f"Deleted {len(recording_entry_ids)} persistent recordings"
+        )
+
     # -------------------------------------------------------------- #
     # Meeting Methods
     # -------------------------------------------------------------- #

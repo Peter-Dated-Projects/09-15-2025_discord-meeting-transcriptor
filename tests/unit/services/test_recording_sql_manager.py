@@ -53,9 +53,10 @@ class TestSQLRecordingManagerService:
         test_channel_id = "9876543210"
         test_meeting_id = generate_16_char_uuid()
 
-        # Create a dummy test audio file
+        # Create a dummy test audio file with unique content based on meeting_id
+        # This ensures each test has a unique SHA256
         test_audio_file = tmp_path / "test_audio.mp3"
-        test_audio_file.write_bytes(b"dummy audio data")
+        test_audio_file.write_bytes(f"dummy audio data {test_meeting_id}".encode())
 
         return {
             "user_id": test_user_id,
@@ -93,11 +94,24 @@ class TestSQLRecordingManagerService:
 
         yield services_manager, servers_manager, test_data
 
-        # Cleanup meeting
+        # Cleanup - delete temp_recordings first due to foreign key constraint
         from sqlalchemy import delete
 
-        from source.server.sql_models import MeetingModel
+        from source.server.sql_models import MeetingModel, TempRecordingModel, RecordingModel
 
+        # Delete temp recordings first
+        delete_temp_recordings_stmt = delete(TempRecordingModel).where(
+            TempRecordingModel.meeting_id == test_data["meeting_id"]
+        )
+        await db_service.execute(delete_temp_recordings_stmt)
+
+        # Delete persistent recordings
+        delete_recordings_stmt = delete(RecordingModel).where(
+            RecordingModel.meeting_id == test_data["meeting_id"]
+        )
+        await db_service.execute(delete_recordings_stmt)
+
+        # Finally delete meeting
         delete_meeting_stmt = delete(MeetingModel).where(MeetingModel.id == test_data["meeting_id"])
         await db_service.execute(delete_meeting_stmt)
 
@@ -283,7 +297,7 @@ class TestSQLRecordingManagerService:
         )
 
         # Delete the persistent recording
-        await recording_sql_service.delete_temp_recording(persistent_recording_id)
+        await recording_sql_service.delete_persistent_recording(persistent_recording_id)
 
         # Verify deletion
         verify_persistent = await recording_sql_service.get_persistent_recordings_for_meeting(
