@@ -38,7 +38,7 @@ def generate_16_char_uuid() -> str:
 # -------------------------------------------------------------- #
 
 
-def get_current_timestamp_est() -> datetime.datetime:
+def get_current_timestamp_est() -> datetime:
     """Get the current EST timestamp."""
     return datetime.now(ZoneInfo("EST"))
 
