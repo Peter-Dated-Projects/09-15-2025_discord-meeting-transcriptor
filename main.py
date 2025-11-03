@@ -95,6 +95,9 @@ async def main():
     await services_manager.initialize_all()
     print("[OK] Initialized all services.")
 
+    # Store services_manager on bot for access in cogs
+    bot.services_manager = services_manager
+
     # -------------------------------------------------------------- #
     # Start Discord Bot
     # -------------------------------------------------------------- #
