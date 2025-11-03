@@ -1,5 +1,4 @@
 import discord
-from discord import app_commands
 from discord.ext import commands
 
 
@@ -13,8 +12,8 @@ class General(commands.Cog):
     # Slash Commands
     # -------------------------------------------------------------- #
 
-    @app_commands.command(name="whoami", description="Display information about the bot")
-    async def whoami(self, interaction: discord.Interaction):
+    @discord.slash_command(name="whoami", description="Display information about the bot")
+    async def whoami(self, ctx: discord.ApplicationContext):
         """Display bot information with an embed."""
 
         # Create embed with bot information
@@ -42,17 +41,13 @@ class General(commands.Cog):
 
         # Set footer
         embed.set_footer(
-            text=f"Requested by {interaction.user.name}",
-            icon_url=interaction.user.avatar.url if interaction.user.avatar else None,
+            text=f"Requested by {ctx.author.name}",
+            icon_url=ctx.author.avatar.url if ctx.author.avatar else None,
         )
 
         # Send the embed as a response
-        await interaction.response.send_message(embed=embed)
+        await ctx.respond(embed=embed)
 
 
 async def setup(bot: commands.Bot):
-    cog = General(bot)
-    await bot.add_cog(cog)
-    # Add cog's commands to the command tree for all guilds
-    for guild in bot.guilds:
-        bot.tree.copy_global_to(guild=guild)
+    bot.add_cog(General(bot))

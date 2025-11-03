@@ -16,7 +16,7 @@ A Discord bot that records voice channel meetings and provides:
 
 ### What We Test
 
-We focus on testing **business logic and core services**, not Discord.py framework code:
+We focus on testing **business logic and core services**, not Py-Cord framework code:
 
 #### ✅ **Unit Tests** (tests/unit/)
 - **RAG Service** (`test_rag.py`)
@@ -57,14 +57,14 @@ We focus on testing **business logic and core services**, not Discord.py framewo
 
 ### What We DON'T Test
 
-❌ **Discord.py Framework Code**
+❌ **Py-Cord Framework Code**
 - Bot commands and event handlers
 - Discord API interactions
 - Voice channel connections
 - User interactions and responses
 - Cog loading/setup
 
-**Reasoning:** Discord.py is a well-tested framework. Testing it would be:
+**Reasoning:** Py-Cord is a well-tested framework. Testing it would be:
 - Redundant (framework already tested)
 - Brittle (requires extensive mocking)
 - Low value (not our business logic)
@@ -81,7 +81,7 @@ Instead, we keep Discord integration thin and test the services it calls.
 **Purpose:** Only dependencies needed to run the bot in production
 
 ```txt
-discord.py>=2.6.4          # Discord bot framework
+py-cord[voice]>=2.6.1      # Discord bot framework with voice support
 python-dotenv>=1.1.1       # Environment variable management
 asyncpg>=0.29.0            # PostgreSQL async driver
 audioop-lts>=0.2.2         # Audio operations

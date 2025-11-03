@@ -244,18 +244,22 @@ def mock_discord_bot() -> MagicMock:
 
 
 @pytest.fixture
-def mock_discord_interaction() -> MagicMock:
-    """Create a mock Discord interaction."""
-    interaction = MagicMock()
-    interaction.user = MagicMock()
-    interaction.user.name = "TestUser"
-    interaction.user.id = 987654321
-    interaction.user.voice = None
-    interaction.guild = MagicMock()
-    interaction.guild.id = 111222333
-    interaction.guild.name = "Test Guild"
-    interaction.response = AsyncMock()
-    return interaction
+def mock_discord_context() -> MagicMock:
+    """Create a mock Discord application context (py-cord)."""
+    ctx = MagicMock()
+    ctx.author = MagicMock()
+    ctx.author.name = "TestUser"
+    ctx.author.id = 987654321
+    ctx.author.voice = None
+    ctx.guild = MagicMock()
+    ctx.guild.id = 111222333
+    ctx.guild.name = "Test Guild"
+    ctx.defer = AsyncMock()
+    ctx.respond = AsyncMock()
+    ctx.edit = AsyncMock()
+    ctx.followup = MagicMock()
+    ctx.followup.send = AsyncMock()
+    return ctx
 
 
 @pytest.fixture
@@ -271,13 +275,13 @@ def mock_voice_channel() -> MagicMock:
 
 @pytest.fixture
 def mock_discord_user_in_voice(
-    mock_discord_interaction: MagicMock,
+    mock_discord_context: MagicMock,
     mock_voice_channel: MagicMock,
 ) -> MagicMock:
     """Create a mock Discord user in a voice channel."""
-    mock_discord_interaction.user.voice = MagicMock()
-    mock_discord_interaction.user.voice.channel = mock_voice_channel
-    return mock_discord_interaction
+    mock_discord_context.author.voice = MagicMock()
+    mock_discord_context.author.voice.channel = mock_voice_channel
+    return mock_discord_context
 
 
 # ============================================================================
