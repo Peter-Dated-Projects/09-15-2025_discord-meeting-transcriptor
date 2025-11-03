@@ -1,7 +1,7 @@
 import uuid
 from zoneinfo import ZoneInfo
 import discord
-import datetime
+from datetime import datetime
 import hashlib
 
 # -------------------------------------------------------------- #
