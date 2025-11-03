@@ -125,7 +125,7 @@ class PostgreSQLServer(SQLDatabase):
             return False
 
     async def create_tables(self) -> None:
-        """Create all database tables from the defined models."""
+        """Create all database tables from the defined models and update existing tables."""
         try:
 
             # Create engine for SQLAlchemy table creation
@@ -134,18 +134,123 @@ class PostgreSQLServer(SQLDatabase):
 
             # Create all tables from the models
             # Note: This uses synchronous engine, but it's only during initialization
-            logger.info(f"[{self.name}] Creating database tables...")
+            logger.info(f"[{self.name}] Creating/updating database tables...")
 
             for model in SQL_DATABASE_MODELS:
-                model.metadata.create_all(engine, [model.__table__], checkfirst=True)
-                logger.info(f"[{self.name}] Created/verified table: {model.__tablename__}")
+                table_name = model.__tablename__
+                
+                # Check if table exists
+                async with self._get_connection() as connection:
+                    result = await connection.fetchval(
+                        "SELECT COUNT(*) FROM information_schema.tables "
+                        "WHERE table_schema = 'public' AND table_name = $1",
+                        table_name
+                    )
+                    table_exists = result > 0
 
-            logger.info(f"[{self.name}] All tables created/verified successfully")
+                if not table_exists:
+                    # Create new table
+                    model.metadata.create_all(engine, [model.__table__], checkfirst=True)
+                    logger.info(f"[{self.name}] Created table: {table_name}")
+                else:
+                    # Update existing table
+                    await self._update_table_schema(model, table_name)
+                    logger.info(f"[{self.name}] Updated/verified table: {table_name}")
+
+            logger.info(f"[{self.name}] All tables created/updated successfully")
             engine.dispose()
         except Exception as e:
-            logger.error(f"[{self.name}] Error creating tables: {e}")
+            logger.error(f"[{self.name}] Error creating/updating tables: {e}")
             # Don't raise - continue with connection even if table creation fails
             # in case tables already exist
+
+    async def _update_table_schema(self, model, table_name: str) -> None:
+        """
+        Update an existing table schema to match the model definition.
+        
+        Args:
+            model: SQLAlchemy model class
+            table_name: Name of the table to update
+        """
+        try:
+            # Get current columns from database
+            async with self._get_connection() as connection:
+                db_columns_rows = await connection.fetch(
+                    "SELECT column_name, data_type, is_nullable, udt_name "
+                    "FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = $1",
+                    table_name
+                )
+                db_columns = {row['column_name']: row for row in db_columns_rows}
+                
+                # Get model columns
+                model_columns = {col.name: col for col in model.__table__.columns}
+                
+                # Find columns to add
+                columns_to_add = set(model_columns.keys()) - set(db_columns.keys())
+                # Find columns to remove
+                columns_to_remove = set(db_columns.keys()) - set(model_columns.keys())
+                
+                # Add missing columns
+                for col_name in columns_to_add:
+                    col = model_columns[col_name]
+                    col_type = self._get_postgresql_column_type(col)
+                    nullable = "" if col.nullable else "NOT NULL"
+                    default = ""
+                    if col.default is not None:
+                        if hasattr(col.default, 'arg'):
+                            default_val = col.default.arg
+                            if isinstance(default_val, str):
+                                default = f"DEFAULT '{default_val}'"
+                            else:
+                                default = f"DEFAULT {default_val}"
+                    
+                    alter_query = f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {col_type} {nullable} {default}'
+                    await connection.execute(alter_query)
+                    logger.info(f"[{self.name}] Added column `{col_name}` to table `{table_name}`")
+                
+                # Remove extra columns
+                for col_name in columns_to_remove:
+                    alter_query = f'ALTER TABLE "{table_name}" DROP COLUMN "{col_name}"'
+                    await connection.execute(alter_query)
+                    logger.info(f"[{self.name}] Removed column `{col_name}` from table `{table_name}`")
+                    
+        except Exception as e:
+            logger.error(f"[{self.name}] Error updating table schema for {table_name}: {e}")
+            raise
+
+    def _get_postgresql_column_type(self, column) -> str:
+        """
+        Convert SQLAlchemy column type to PostgreSQL column type string.
+        
+        Args:
+            column: SQLAlchemy Column object
+            
+        Returns:
+            PostgreSQL column type string
+        """
+        col_type = column.type
+        type_name = col_type.__class__.__name__
+        
+        if type_name == "String":
+            length = col_type.length if hasattr(col_type, 'length') and col_type.length else 255
+            return f"VARCHAR({length})"
+        elif type_name == "Integer":
+            return "INTEGER"
+        elif type_name == "DateTime":
+            return "TIMESTAMP"
+        elif type_name == "JSON":
+            return "JSONB"
+        elif type_name == "Enum":
+            # For PostgreSQL, we need to use the enum type name
+            # This assumes the enum type already exists or will be created
+            if hasattr(col_type, 'name'):
+                return col_type.name
+            else:
+                # Fallback to VARCHAR if enum name not available
+                return "VARCHAR(255)"
+        else:
+            return str(col_type)
 
     @asynccontextmanager
     async def _get_connection(self):

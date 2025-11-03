@@ -19,33 +19,39 @@ class ServicesManager:
     def __init__(
         self,
         server: ServerManager,
+        logging_service: BaseAsyncLoggingService,
         file_service_manager: BaseFileServiceManager,
         recording_file_service_manager: BaseRecordingFileServiceManager,
         transcription_file_service_manager: BaseTranscriptionFileServiceManager,
         ffmpeg_service_manager: BaseFFmpegServiceManager,
-        logging_service: BaseAsyncLoggingService,
-        sql_recording_service: Optional[BaseSQLRecordingServiceManager] = None,
+        sql_recording_service_manager: BaseSQLRecordingServiceManager,
     ):
         self.server = server
+
+        self.logging_service = logging_service
 
         # add service managers as attributes
         self.file_service_manager = file_service_manager
         self.recording_file_service_manager = recording_file_service_manager
         self.transcription_file_service_manager = transcription_file_service_manager
         self.ffmpeg_service_manager = ffmpeg_service_manager
-        self.logging_service = logging_service
-        self.sql_recording_service = sql_recording_service
+
+        # DB interfaces
+        self.sql_recording_service_manager = sql_recording_service_manager
 
     async def initialize_all(self) -> None:
         """Initialize all service managers."""
+
+        # Logging
         await self.logging_service.on_start(self)
+
+        # Services managers
         await self.file_service_manager.on_start(self)
         await self.recording_file_service_manager.on_start(self)
         await self.ffmpeg_service_manager.on_start(self)
 
-        # Initialize SQL recording service if available
-        if self.sql_recording_service:
-            await self.sql_recording_service.on_start(self)
+        # DB interfaces
+        await self.sql_recording_service_manager.on_start(self)
 
         # TODO - need to create
         # await self.transcription_file_service_manager.on_start(self)

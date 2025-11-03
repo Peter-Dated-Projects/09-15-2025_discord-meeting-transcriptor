@@ -40,7 +40,7 @@ def generate_16_char_uuid() -> str:
 
 def get_current_timestamp_est() -> datetime:
     """Get the current EST timestamp."""
-    return datetime.now(ZoneInfo("EST"))
+    return datetime.now(ZoneInfo("America/New_York"))
 
 
 def calculate_file_sha256(file_path: str) -> str:
