@@ -143,7 +143,7 @@ class MySQLServer(SQLDatabase):
 
             for model in SQL_DATABASE_MODELS:
                 table_name = model.__tablename__
-                
+
                 # Check if table exists
                 async with (
                     self._get_connection() as connection,
@@ -152,10 +152,10 @@ class MySQLServer(SQLDatabase):
                     await cursor.execute(
                         "SELECT COUNT(*) as count FROM information_schema.tables "
                         "WHERE table_schema = %s AND table_name = %s",
-                        (self.database, table_name)
+                        (self.database, table_name),
                     )
                     result = await cursor.fetchone()
-                    table_exists = result['count'] > 0
+                    table_exists = result["count"] > 0
 
                 if not table_exists:
                     # Create new table
@@ -176,7 +176,7 @@ class MySQLServer(SQLDatabase):
     async def _update_table_schema(self, model, table_name: str) -> None:
         """
         Update an existing table schema to match the model definition.
-        
+
         Args:
             model: SQLAlchemy model class
             table_name: Name of the table to update
@@ -191,18 +191,18 @@ class MySQLServer(SQLDatabase):
                     "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_TYPE "
                     "FROM information_schema.columns "
                     "WHERE table_schema = %s AND table_name = %s",
-                    (self.database, table_name)
+                    (self.database, table_name),
                 )
-                db_columns = {row['COLUMN_NAME']: row for row in await cursor.fetchall()}
-                
+                db_columns = {row["COLUMN_NAME"]: row for row in await cursor.fetchall()}
+
                 # Get model columns
                 model_columns = {col.name: col for col in model.__table__.columns}
-                
+
                 # Find columns to add
                 columns_to_add = set(model_columns.keys()) - set(db_columns.keys())
                 # Find columns to remove
                 columns_to_remove = set(db_columns.keys()) - set(model_columns.keys())
-                
+
                 # Add missing columns
                 for col_name in columns_to_add:
                     col = model_columns[col_name]
@@ -210,25 +210,27 @@ class MySQLServer(SQLDatabase):
                     nullable = "NULL" if col.nullable else "NOT NULL"
                     default = ""
                     if col.default is not None:
-                        if hasattr(col.default, 'arg'):
+                        if hasattr(col.default, "arg"):
                             default_val = col.default.arg
                             if isinstance(default_val, str):
                                 default = f"DEFAULT '{default_val}'"
                             else:
                                 default = f"DEFAULT {default_val}"
-                    
+
                     alter_query = f"ALTER TABLE `{table_name}` ADD COLUMN `{col_name}` {col_type} {nullable} {default}"
                     await cursor.execute(alter_query)
                     await connection.commit()
                     logger.info(f"[{self.name}] Added column `{col_name}` to table `{table_name}`")
-                
+
                 # Remove extra columns
                 for col_name in columns_to_remove:
                     alter_query = f"ALTER TABLE `{table_name}` DROP COLUMN `{col_name}`"
                     await cursor.execute(alter_query)
                     await connection.commit()
-                    logger.info(f"[{self.name}] Removed column `{col_name}` from table `{table_name}`")
-                    
+                    logger.info(
+                        f"[{self.name}] Removed column `{col_name}` from table `{table_name}`"
+                    )
+
             except Exception as e:
                 logger.error(f"[{self.name}] Error updating table schema for {table_name}: {e}")
                 raise
@@ -236,18 +238,18 @@ class MySQLServer(SQLDatabase):
     def _get_mysql_column_type(self, column) -> str:
         """
         Convert SQLAlchemy column type to MySQL column type string.
-        
+
         Args:
             column: SQLAlchemy Column object
-            
+
         Returns:
             MySQL column type string
         """
         col_type = column.type
         type_name = col_type.__class__.__name__
-        
+
         if type_name == "String":
-            length = col_type.length if hasattr(col_type, 'length') and col_type.length else 255
+            length = col_type.length if hasattr(col_type, "length") and col_type.length else 255
             return f"VARCHAR({length})"
         elif type_name == "Integer":
             return "INTEGER"
