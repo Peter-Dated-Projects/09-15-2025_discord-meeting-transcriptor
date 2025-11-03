@@ -181,26 +181,29 @@ class MySQLServer(SQLDatabase):
         query_str = str(compiled)
         return query_str
 
-    async def execute(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    async def execute(self, stmt) -> list[dict[str, Any]]:
         """
-        Execute a SQL query and return results.
+        Execute a SQLAlchemy statement and return results.
 
         Args:
-            query: SQL query string with %(key)s for named parameters
-            params: Optional parameters dictionary
+            stmt: SQLAlchemy statement object (select, insert, update, delete)
 
         Returns:
-            List of result rows as dictionaries
+            List of result rows as dictionaries (empty list for non-SELECT queries)
         """
         try:
+            # Compile the statement to SQL string
+            compiled = stmt.compile(dialect=mysql.dialect(), compile_kwargs={"literal_binds": True})
+            query = str(compiled)
+
             async with (
                 self._get_connection() as connection,
                 connection.cursor(aiomysql.DictCursor) as cursor,
             ):
-                await cursor.execute(query, params)
-                
+                await cursor.execute(query)
+
                 # Check if this is a SELECT query (returns results)
-                if query.strip().upper().startswith('SELECT'):
+                if query.strip().upper().startswith("SELECT"):
                     rows = await cursor.fetchall()
                     return rows if rows else []
                 else:

@@ -37,15 +37,14 @@ class SQLDatabase(BaseSQLServerHandler):
         pass
 
     @abstractmethod
-    async def execute(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    async def execute(self, stmt) -> list[dict[str, Any]]:
         """
-        Execute a SQL query and return results.
+        Execute a SQLAlchemy statement and return results.
 
         Args:
-            query: SQL query string
-            params: Optional parameters for the query
+            stmt: SQLAlchemy statement object (select, insert, update, delete)
 
         Returns:
-            List of result rows as dictionaries
+            List of result rows as dictionaries (empty list for non-SELECT queries)
         """
         pass

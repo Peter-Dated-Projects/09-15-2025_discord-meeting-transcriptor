@@ -176,28 +176,31 @@ class PostgreSQLServer(SQLDatabase):
         compiled = stmt.compile(dialect=postgresql.dialect())
         return str(compiled)
 
-    async def execute(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    async def execute(self, stmt) -> list[dict[str, Any]]:
         """
-        Execute a SQL query and return results.
+        Execute a SQLAlchemy statement and return results.
 
         Args:
-            query: SQL query string with $1, $2, etc. for parameters
-            params: Optional parameters dictionary
+            stmt: SQLAlchemy statement object (select, insert, update, delete)
 
         Returns:
-            List of result rows as dictionaries
+            List of result rows as dictionaries (empty list for non-SELECT queries)
         """
         try:
+            # Compile the statement to SQL string with literal binds
+            compiled = stmt.compile(
+                dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+            )
+            query = str(compiled)
+
             async with self._get_connection() as connection:
-                param_values = list(params.values()) if params else []
-                
                 # Check if this is a SELECT query (returns results)
-                if query.strip().upper().startswith('SELECT'):
-                    rows = await connection.fetch(query, *param_values)
+                if query.strip().upper().startswith("SELECT"):
+                    rows = await connection.fetch(query)
                     return [dict(row) for row in rows]
                 else:
                     # For INSERT, UPDATE, DELETE - execute and return empty list
-                    await connection.execute(query, *param_values)
+                    await connection.execute(query)
                     return []
         except Exception as e:
             logger.error(f"[{self.name}] Execute error: {e}")

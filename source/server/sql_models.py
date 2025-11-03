@@ -193,3 +193,4 @@ class TempRecordingModel(Base):
     user_id = Column(String(20), nullable=False)
     meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
     filename = Column(String(512), nullable=False)
+    timestamp_ms = Column(Integer, nullable=False)
