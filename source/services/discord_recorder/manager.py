@@ -1,14 +1,13 @@
 import asyncio
 import os
 from collections import Counter
+from contextlib import suppress
 from datetime import datetime, timedelta
-from typing import Optional
 
-from source.utils import generate_16_char_uuid
 from source.server.server import ServerManager
 from source.server.sql_models import TranscodeStatus
 from source.services.manager import BaseDiscordRecorderServiceManager, ServicesManager
-
+from source.utils import generate_16_char_uuid
 
 # -------------------------------------------------------------- #
 # Configuration Constants
@@ -23,6 +22,16 @@ class DiscordRecorderConstants:
 
     # FFmpeg encoding
     MP3_BITRATE = "128k"  # 128 kbps
+
+    # Transcode timeout
+    TRANSCODE_TIMEOUT_SECONDS = 300  # 5 minutes
+
+    # Cleanup configuration
+    CLEANUP_INTERVAL_SECONDS = 3600  # 1 hour
+    TEMP_RECORDING_TTL_HOURS = 24  # 24 hours
+
+    # Batch deletion
+    MAX_DELETE_BATCH_SIZE = 100
 
 
 # -------------------------------------------------------------- #
@@ -80,10 +89,8 @@ class DiscordSessionHandler:
         # Cancel flush task
         if self._flush_task:
             self._flush_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._flush_task
-            except asyncio.CancelledError:
-                pass
 
         # Final flush of any remaining data
         if len(self._audio_buffer) > 0:
@@ -137,7 +144,7 @@ class DiscordSessionHandler:
     # -------------------------------------------------------------- #
 
     async def _queue_pcm_to_mp3_transcode(
-        self, pcm_path: str, mp3_path: str, temp_recording_id: Optional[str]
+        self, pcm_path: str, mp3_path: str, temp_recording_id: str | None
     ) -> None:
         """
         Queue a PCM → MP3 transcode job with temp recording tracking.
@@ -216,7 +223,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         super().__init__(server)
 
         self.sessions: dict[int, DiscordSessionHandler] = {}
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_task: asyncio.Task | None = None
 
     # -------------------------------------------------------------- #
     # Discord Recorder Manager Methods
@@ -240,10 +247,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         # Cancel cleanup task
         if self._cleanup_task:
             self._cleanup_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
 
         await self.services.logging_service.info("Discord Recorder Service Manager stopped")
         return True
@@ -255,9 +260,9 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
     async def start_session(
         self,
         channel_id: int,
-        meeting_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        guild_id: Optional[str] = None,
+        meeting_id: str | None = None,
+        user_id: str | None = None,
+        guild_id: str | None = None,
     ) -> bool:
         """
         Start recording audio from a Discord channel.
@@ -349,7 +354,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
             completed = await self._wait_for_pending_transcodes(
                 meeting_id=meeting_id,
-                max_wait_seconds=RecordingConfig.TRANSCODE_TIMEOUT_SECONDS,
+                max_wait_seconds=DiscordRecorderConstants.TRANSCODE_TIMEOUT_SECONDS,
             )
 
             if not completed:
@@ -405,10 +410,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         session.is_recording = False
         if session._flush_task:
             session._flush_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await session._flush_task
-            except asyncio.CancelledError:
-                pass
 
         await self.services.logging_service.info(
             f"Paused recording session for channel {channel_id}"
@@ -449,7 +452,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
     async def _wait_for_pending_transcodes(
         self,
         meeting_id: str,
-        max_wait_seconds: int = RecordingConfig.TRANSCODE_TIMEOUT_SECONDS,
+        max_wait_seconds: int = DiscordRecorderConstants.TRANSCODE_TIMEOUT_SECONDS,
     ) -> bool:
         """
         Wait for all temp recordings to reach DONE or FAILED status.
@@ -514,8 +517,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
         This runs periodically to delete temp recordings older than a TTL.
         """
-        cleanup_interval = RecordingConfig.CLEANUP_INTERVAL_SECONDS
-        ttl_hours = RecordingConfig.TEMP_RECORDING_TTL_HOURS
+        cleanup_interval = DiscordRecorderConstants.CLEANUP_INTERVAL_SECONDS
+        ttl_hours = DiscordRecorderConstants.TEMP_RECORDING_TTL_HOURS
 
         await self.services.logging_service.info(
             f"Started temp recording cleanup task (TTL: {ttl_hours}h, interval: {cleanup_interval}s)"
@@ -545,7 +548,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         cutoff_time = datetime.utcnow() - timedelta(hours=ttl_hours)
 
         # Query old temp recordings using enum values
-        query = f"""
+        query = """
             SELECT id, mp3_path, pcm_path
             FROM temp_recordings
             WHERE created_at < :cutoff
@@ -610,7 +613,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         Args:
             temp_ids: List of temp recording IDs to delete
         """
-        batch_size = RecordingConfig.MAX_DELETE_BATCH_SIZE
+        batch_size = DiscordRecorderConstants.MAX_DELETE_BATCH_SIZE
 
         for i in range(0, len(temp_ids), batch_size):
             batch = temp_ids[i : i + batch_size]
@@ -625,7 +628,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
     # Session Information Methods
     # -------------------------------------------------------------- #
 
-    async def get_session_status(self, channel_id: int) -> Optional[dict]:
+    async def get_session_status(self, channel_id: int) -> dict | None:
         """
         Get status for a specific session.
 

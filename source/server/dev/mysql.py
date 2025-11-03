@@ -14,8 +14,6 @@ from typing import Any
 import aiomysql
 from aiomysql import Pool
 from sqlalchemy import (
-    MetaData,
-    Table,
     create_engine,
 )
 from sqlalchemy.dialects import mysql
@@ -212,13 +210,12 @@ class MySQLServer(SQLDatabase):
                     col_type = self._get_mysql_column_type(col)
                     nullable = "NULL" if col.nullable else "NOT NULL"
                     default = ""
-                    if col.default is not None:
-                        if hasattr(col.default, "arg"):
-                            default_val = col.default.arg
-                            if isinstance(default_val, str):
-                                default = f"DEFAULT '{default_val}'"
-                            else:
-                                default = f"DEFAULT {default_val}"
+                    if col.default is not None and hasattr(col.default, "arg"):
+                        default_val = col.default.arg
+                        if isinstance(default_val, str):
+                            default = f"DEFAULT '{default_val}'"
+                        else:
+                            default = f"DEFAULT {default_val}"
 
                     alter_query = f"ALTER TABLE `{table_name}` ADD COLUMN `{col_name}` {col_type} {nullable} {default}"
                     await cursor.execute(alter_query)
@@ -238,13 +235,12 @@ class MySQLServer(SQLDatabase):
                     if model_col_type.upper() != db_col_type:
                         nullable = "NULL" if col.nullable else "NOT NULL"
                         default = ""
-                        if col.default is not None:
-                            if hasattr(col.default, "arg"):
-                                default_val = col.default.arg
-                                if isinstance(default_val, str):
-                                    default = f"DEFAULT '{default_val}'"
-                                else:
-                                    default = f"DEFAULT {default_val}"
+                        if col.default is not None and hasattr(col.default, "arg"):
+                            default_val = col.default.arg
+                            if isinstance(default_val, str):
+                                default = f"DEFAULT '{default_val}'"
+                            else:
+                                default = f"DEFAULT {default_val}"
 
                         alter_query = f"ALTER TABLE `{table_name}` MODIFY COLUMN `{col_name}` {model_col_type} {nullable} {default}"
                         await cursor.execute(alter_query)

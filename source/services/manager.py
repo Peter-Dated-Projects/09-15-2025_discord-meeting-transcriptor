@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from typing import Optional
+    pass
 
 from source.server.server import ServerManager
 
@@ -352,9 +352,9 @@ class BaseDiscordRecorderServiceManager(Manager):
     async def start_session(
         self,
         channel_id: int,
-        meeting_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        guild_id: Optional[str] = None,
+        meeting_id: str | None = None,
+        user_id: str | None = None,
+        guild_id: str | None = None,
     ) -> bool:
         """Start a new recording session."""
         pass
