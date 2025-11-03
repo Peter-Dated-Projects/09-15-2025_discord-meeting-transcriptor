@@ -30,25 +30,32 @@ class FFmpegHandler:
     # FFmpeg Management Methods
     # -------------------------------------------------------------- #
 
-    def validate_ffmpeg(self) -> bool:
+    async def validate_ffmpeg(self) -> bool:
         """Validate that FFmpeg is installed and accessible."""
         try:
-            result = subprocess.run(
-                [self.ffmpeg_path, "-version"],
-                capture_output=True,
-                timeout=5,
-                text=True,
+            loop = asyncio.get_event_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: subprocess.run(
+                        [self.ffmpeg_path, "-version"],
+                        capture_output=True,
+                        timeout=5,
+                        text=True,
+                    ),
+                ),
+                timeout=6.0,  # Slightly longer than subprocess timeout
             )
             is_valid = result.returncode == 0
             return is_valid
-        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        except (FileNotFoundError, subprocess.TimeoutExpired, asyncio.TimeoutError, Exception):
             return False
 
     # -------------------------------------------------------------- #
     # Media Conversion Methods
     # -------------------------------------------------------------- #
 
-    def convert_file(
+    async def convert_file(
         self, input_path: str, output_path: str, options: dict
     ) -> tuple[bool, str, str]:
         """
@@ -75,17 +82,24 @@ class FFmpegHandler:
             # Add output path
             cmd.append(output_path)
 
-            # Run FFmpeg process
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                timeout=300,  # 5 minute timeout
-                text=True,
+            # Run FFmpeg process in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        timeout=300,  # 5 minute timeout
+                        text=True,
+                    ),
+                ),
+                timeout=310.0,  # Slightly longer than subprocess timeout
             )
 
             success = result.returncode == 0
             return success, result.stdout, result.stderr
-        except subprocess.TimeoutExpired:
+        except (subprocess.TimeoutExpired, asyncio.TimeoutError):
             return False, "", "FFmpeg process timed out"
         except Exception as e:
             return False, "", str(e)
@@ -170,36 +184,48 @@ class FFmpegConversionStream:
                 if self.subprocess.stdin:
                     self.subprocess.stdin.write(b"q")
                     self.subprocess.stdin.flush()
-                # Wait for process to terminate (with timeout)
-                stdout_data, stderr_data = self.subprocess.communicate(timeout=5)
 
-                # Log captured stdout and stderr when process exits
-                if stdout_data:
-                    await self.ffmpeg_handler.ffmpeg_service_manager.services.logging_service.info(
-                        f"FFmpeg STDOUT:\n{stdout_data.decode('utf-8', errors='replace')}"
-                    )
-                if stderr_data:
-                    await self.ffmpeg_handler.ffmpeg_service_manager.services.logging_service.info(
-                        f"FFmpeg STDERR:\n{stderr_data.decode('utf-8', errors='replace')}"
+                # Wait for process to terminate (with timeout) - NON-BLOCKING
+                try:
+                    loop = asyncio.get_event_loop()
+                    stdout_data, stderr_data = await asyncio.wait_for(
+                        loop.run_in_executor(None, self.subprocess.communicate), timeout=5.0
                     )
 
-            except (BrokenPipeError, subprocess.TimeoutExpired):
-                # Force kill if graceful shutdown fails
-                if self.subprocess.poll() is None:
-                    self.subprocess.kill()
-                    stdout_data, stderr_data = self.subprocess.communicate()
-
-                    # Log captured stdout and stderr from killed process
+                    # Log captured stdout and stderr when process exits
                     if stdout_data:
                         await self.ffmpeg_handler.ffmpeg_service_manager.services.logging_service.info(
-                            f"FFmpeg STDOUT (killed):\n{stdout_data.decode('utf-8', errors='replace')}"
+                            f"FFmpeg STDOUT:\n{stdout_data.decode('utf-8', errors='replace')}"
                         )
                     if stderr_data:
-                        await self.ffmpeg_handler.ffmpeg_service_manager.services.logging_service.error(
-                            f"FFmpeg STDERR (killed):\n{stderr_data.decode('utf-8', errors='replace')}"
+                        await self.ffmpeg_handler.ffmpeg_service_manager.services.logging_service.info(
+                            f"FFmpeg STDERR:\n{stderr_data.decode('utf-8', errors='replace')}"
                         )
-                else:
-                    self.subprocess.wait()
+                except asyncio.TimeoutError:
+                    # Force kill if timeout expires
+                    if self.subprocess.poll() is None:
+                        self.subprocess.kill()
+                        loop = asyncio.get_event_loop()
+                        stdout_data, stderr_data = await loop.run_in_executor(
+                            None, self.subprocess.communicate
+                        )
+
+                        # Log captured stdout and stderr from killed process
+                        if stdout_data:
+                            await self.ffmpeg_handler.ffmpeg_service_manager.services.logging_service.info(
+                                f"FFmpeg STDOUT (killed):\n{stdout_data.decode('utf-8', errors='replace')}"
+                            )
+                        if stderr_data:
+                            await self.ffmpeg_handler.ffmpeg_service_manager.services.logging_service.error(
+                                f"FFmpeg STDERR (killed):\n{stderr_data.decode('utf-8', errors='replace')}"
+                            )
+
+            except BrokenPipeError:
+                # Force kill if pipe breaks
+                if self.subprocess.poll() is None:
+                    self.subprocess.kill()
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, self.subprocess.wait)
             finally:
                 self._is_running = False
                 self.subprocess = None
@@ -274,7 +300,7 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
             self._jobs = asyncio.Queue(maxsize=10)
 
         # Validate FFmpeg installation
-        if self.handler.validate_ffmpeg():
+        if await self.handler.validate_ffmpeg():
             await self.services.logging_service.info(
                 f"FFmpeg validated at path: {self.ffmpeg_path}"
             )
@@ -390,7 +416,7 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
             return False
 
         # Ensure parent directory exists; let ffmpeg create/overwrite output file itself
-        self.services.file_service_manager.ensure_parent_dir(output_path)
+        await self.services.file_service_manager.ensure_parent_dir(output_path)
         await self.services.logging_service.debug(f"Ensured parent directory for {output_path}")
 
         # Create a Future for this specific job

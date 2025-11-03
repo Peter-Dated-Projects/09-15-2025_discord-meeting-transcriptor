@@ -3,8 +3,12 @@ import os
 from collections import Counter
 from contextlib import suppress
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 import discord
+
+if TYPE_CHECKING:
+    from discord import sinks
 
 from source.server.server import ServerManager
 from source.server.sql_models import TranscodeStatus
@@ -89,7 +93,7 @@ class DiscordSessionHandler:
         self._user_bytes_read: dict[int, int] = {}
 
         # Pycord recording sink
-        self._sink: discord.sinks.WaveSink | None = None
+        self._sink: "discord.sinks.WaveSink | None" = None
 
         # Shutdown flag
         self._is_shutting_down = False
@@ -126,8 +130,9 @@ class DiscordSessionHandler:
         self._sink = discord.sinks.WaveSink()
 
         # Start recording (callback will be triggered on stop)
+        # Use sync_start=False to avoid blocking the event loop
         self.discord_voice_client.start_recording(
-            self._sink, self._recording_finished_callback, sync_start=True
+            self._sink, self._recording_finished_callback, sync_start=False
         )
 
         # Start periodic flush task for ALL users
@@ -165,7 +170,7 @@ class DiscordSessionHandler:
     # Audio Buffering Methods
     # -------------------------------------------------------------- #
 
-    async def _recording_finished_callback(self, _sink: discord.sinks.WaveSink, *_args) -> None:
+    async def _recording_finished_callback(self, _sink: "discord.sinks.WaveSink", *_args) -> None:
         """
         Callback triggered when Pycord stops recording.
 
@@ -350,7 +355,7 @@ class DiscordSessionHandler:
             raise RuntimeError("Recording file manager service not available")
 
         # Write to temp storage
-        file_path = await self.services.recording_file_manager_service.write_temp_recording(
+        file_path = await self.services.recording_file_manager_service.save_to_temp_file(
             filename=filename, data=data
         )
 
@@ -387,10 +392,11 @@ class DiscordSessionHandler:
                 temp_recording_id=temp_recording_id, status=new_status
             )
 
-            # Delete PCM file after successful transcode
+            # Delete PCM file after successful transcode (non-blocking)
             if success and os.path.exists(pcm_path):
                 try:
-                    os.remove(pcm_path)
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, os.remove, pcm_path)
                 except (OSError, PermissionError) as e:
                     await self.services.logging_service.warning(
                         f"Failed to delete PCM file {pcm_path}: {e}"
@@ -514,7 +520,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         await self.services.logging_service.info("Discord Recorder Service Manager started")
 
         # Start background cleanup task for old temp recordings
-        if self.services.sql_recording_service:
+        if self.services.sql_recording_service_manager:
             self._cleanup_task = asyncio.create_task(self._cleanup_old_temp_recordings())
 
     async def on_close(self) -> bool:
@@ -728,6 +734,99 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         return True
 
     # -------------------------------------------------------------- #
+    # Global Cache Query Methods
+    # -------------------------------------------------------------- #
+
+    def get_active_session(self, channel_id: int) -> DiscordSessionHandler | None:
+        """
+        Get an active recording session by channel ID.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            DiscordSessionHandler if session exists, None otherwise
+        """
+        return self.sessions.get(channel_id)
+
+    def get_all_active_sessions(self) -> dict[int, DiscordSessionHandler]:
+        """
+        Get all active recording sessions.
+
+        Returns:
+            Dictionary mapping channel_id to DiscordSessionHandler
+        """
+        return self.sessions.copy()
+
+    def is_recording_in_channel(self, channel_id: int) -> bool:
+        """
+        Check if there's an active recording session in a channel.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            True if recording, False otherwise
+        """
+        session = self.sessions.get(channel_id)
+        return session is not None and session.is_recording
+
+    def get_session_by_guild(self, guild_id: str) -> list[DiscordSessionHandler]:
+        """
+        Get all active recording sessions in a specific guild.
+
+        Args:
+            guild_id: Discord guild ID (as string)
+
+        Returns:
+            List of DiscordSessionHandler objects
+        """
+        return [session for session in self.sessions.values() if session.guild_id == guild_id]
+
+    def get_session_by_meeting_id(self, meeting_id: str) -> DiscordSessionHandler | None:
+        """
+        Get a recording session by meeting ID.
+
+        Args:
+            meeting_id: Meeting ID
+
+        Returns:
+            DiscordSessionHandler if found, None otherwise
+        """
+        for session in self.sessions.values():
+            if session.meeting_id == meeting_id:
+                return session
+        return None
+
+    async def get_session_stats(self, channel_id: int) -> dict | None:
+        """
+        Get statistics for a recording session.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            Dictionary with session stats, or None if session not found
+        """
+        session = self.sessions.get(channel_id)
+        if not session:
+            return None
+
+        return await session.get_stats()
+
+    async def get_all_sessions_stats(self) -> dict[int, dict]:
+        """
+        Get statistics for all active recording sessions.
+
+        Returns:
+            Dictionary mapping channel_id to session stats
+        """
+        stats = {}
+        for channel_id, session in self.sessions.items():
+            stats[channel_id] = await session.get_stats()
+        return stats
+
+    # -------------------------------------------------------------- #
     # Promotion Helper Methods
     # -------------------------------------------------------------- #
 
@@ -860,13 +959,15 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             pcm_path = record.get("pcm_path")
 
             try:
-                # Delete MP3 file if exists
-                if mp3_path and os.path.exists(mp3_path):
-                    os.remove(mp3_path)
+                loop = asyncio.get_event_loop()
 
-                # Delete PCM file if exists (should already be deleted, but check)
+                # Delete MP3 file if exists (non-blocking)
+                if mp3_path and os.path.exists(mp3_path):
+                    await loop.run_in_executor(None, os.remove, mp3_path)
+
+                # Delete PCM file if exists (non-blocking)
                 if pcm_path and os.path.exists(pcm_path):
-                    os.remove(pcm_path)
+                    await loop.run_in_executor(None, os.remove, pcm_path)
 
                 deleted_count += 1
 

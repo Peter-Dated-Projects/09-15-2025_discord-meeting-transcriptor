@@ -153,7 +153,7 @@ class BaseFileServiceManager(Manager):
         pass
 
     @abstractmethod
-    def ensure_parent_dir(self, filepath: str) -> None:
+    async def ensure_parent_dir(self, filepath: str) -> None:
         """Ensure the parent directory of the given filepath exists."""
         pass
 

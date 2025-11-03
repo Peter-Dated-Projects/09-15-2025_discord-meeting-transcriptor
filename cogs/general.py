@@ -51,4 +51,8 @@ class General(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(General(bot))
+    cog = General(bot)
+    await bot.add_cog(cog)
+    # Add cog's commands to the command tree for all guilds
+    for guild in bot.guilds:
+        bot.tree.copy_global_to(guild=guild)

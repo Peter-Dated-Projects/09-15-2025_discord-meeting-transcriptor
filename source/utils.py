@@ -50,14 +50,20 @@ def get_current_timestamp_est() -> datetime:
     return datetime.now(ZoneInfo("America/New_York"))
 
 
-def calculate_file_sha256(file_path: str) -> str:
+async def calculate_file_sha256(file_path: str) -> str:
     """Calculate the SHA256 hash of a file."""
-    sha256_hash = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        # Read and update hash string value in blocks of 4K
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    return sha256_hash.hexdigest()
+    import asyncio
+
+    def _hash_file():
+        sha256_hash = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            # Read and update hash string value in blocks of 4K
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _hash_file)
 
 
 def calculate_audio_file_duration_ms(file_path: str) -> int:

@@ -177,7 +177,7 @@ class SQLRecordingManagerService(Manager):
         # entry data
         entry_id = generate_16_char_uuid()
         timestamp = get_current_timestamp_est()
-        sha256 = calculate_file_sha256(filename)
+        sha256 = await calculate_file_sha256(filename)
         file_duration_ms = calculate_audio_file_duration_ms(filename)
 
         recording = RecordingModel(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 
 from source.server.server import ServerManager
@@ -26,13 +27,17 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
 
     async def on_start(self, services):
         await super().on_start(services)
+
+        # Run blocking filesystem operations in executor
+        loop = asyncio.get_event_loop()
+
         # check if folder exists
-        if not os.path.exists(self.recording_storage_path):
-            os.makedirs(self.recording_storage_path)
-        if not os.path.exists(self.temp_path):
-            os.makedirs(self.temp_path)
-        if not os.path.exists(self.storage_path):
-            os.makedirs(self.storage_path)
+        if not await loop.run_in_executor(None, os.path.exists, self.recording_storage_path):
+            await loop.run_in_executor(None, os.makedirs, self.recording_storage_path)
+        if not await loop.run_in_executor(None, os.path.exists, self.temp_path):
+            await loop.run_in_executor(None, os.makedirs, self.temp_path)
+        if not await loop.run_in_executor(None, os.path.exists, self.storage_path):
+            await loop.run_in_executor(None, os.makedirs, self.storage_path)
 
         await self.services.logging_service.info(
             f"RecordingFileManagerService initialized with storage path: {self.recording_storage_path}"
@@ -40,14 +45,22 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
         return True
 
     async def on_close(self):
-        # delete all items in temp folder
-        for filename in os.listdir(self.temp_path):
+        # delete all items in temp folder (non-blocking)
+        loop = asyncio.get_event_loop()
+        filenames = await loop.run_in_executor(None, os.listdir, self.temp_path)
+
+        for filename in filenames:
             file_path = os.path.join(self.temp_path, filename)
             try:
-                if os.path.isfile(file_path) or os.path.islink(file_path):
-                    os.unlink(file_path)
-                elif os.path.isdir(file_path):
-                    os.rmdir(file_path)
+                # Check file type in executor
+                is_file = await loop.run_in_executor(None, os.path.isfile, file_path)
+                is_link = await loop.run_in_executor(None, os.path.islink, file_path)
+                is_dir = await loop.run_in_executor(None, os.path.isdir, file_path)
+
+                if is_file or is_link:
+                    await loop.run_in_executor(None, os.unlink, file_path)
+                elif is_dir:
+                    await loop.run_in_executor(None, os.rmdir, file_path)
             except Exception as e:
                 self.logger.error(f"Failed to delete {file_path}. Reason: {e}")
         return True
@@ -86,7 +99,10 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
         temp_file_path = os.path.join(self.temp_path, filename)
         persistent_file_path = os.path.join(self.storage_path, filename)
 
-        os.rename(temp_file_path, persistent_file_path)
+        # Use executor for blocking os.rename
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, os.rename, temp_file_path, persistent_file_path)
+
         await self.services.logging_service.info(
             f"Moved recording file to persistent storage: {filename}"
         )
