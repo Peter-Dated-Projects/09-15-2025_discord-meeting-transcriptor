@@ -1,6 +1,6 @@
 import asyncio
-import os
 import subprocess
+from contextlib import suppress
 from dataclasses import dataclass
 
 from source.server.server import ServerManager
@@ -294,10 +294,8 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
         # Cancel the worker task if it's running
         if self._worker_task and not self._worker_task.done():
             self._worker_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._worker_task
-            except asyncio.CancelledError:
-                pass
             await self.services.logging_service.info("FFmpeg worker task stopped")
         return True
 

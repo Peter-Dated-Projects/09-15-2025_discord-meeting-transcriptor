@@ -25,6 +25,7 @@ dependencies = [
     "ruff>=0.14.3",
     "setuptools>=80.9.0",
     "sqlalchemy[asyncio]>=2.0.44",
+    "tzdata>=2025.2",
     "wheel>=0.45.1",
 ]
 

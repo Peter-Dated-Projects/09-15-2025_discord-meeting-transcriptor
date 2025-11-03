@@ -26,7 +26,7 @@ class BaseSQLServerHandler(ABC):
 
     async def on_startup(self) -> None:
         """Actions to perform on server startup."""
-        pass
+        await self.create_tables()
 
     async def on_close(self) -> None:
         """Actions to perform on server close."""
@@ -51,33 +51,44 @@ class BaseSQLServerHandler(ABC):
         """Check if the server is healthy and responding."""
         pass
 
+    @abstractmethod
+    async def create_tables(self) -> None:
+        """Create database tables from models."""
+        pass
+
     @property
     def is_connected(self) -> bool:
         """Check if currently connected to the server."""
         return self._connected
 
     # -------------------------------------------------------------- #
-    # CRUD Operations
+    # Utility Methods
     # -------------------------------------------------------------- #
 
     @abstractmethod
-    async def query(self, query: str) -> any:
-        """Execute a query against the server."""
+    def compile_query_object(self, stmt) -> str:
+        """
+        Compile a SQLAlchemy statement object into a SQL query string.
+
+        Args:
+            stmt: SQLAlchemy statement object
+
+        Returns:
+            Compiled SQL query string
+        """
         pass
 
     @abstractmethod
-    async def insert(self, table: str, data: dict) -> None:
-        """Insert data into a specified table."""
-        pass
+    async def execute(self, stmt) -> list[dict]:
+        """
+        Execute a SQLAlchemy statement and return results.
 
-    @abstractmethod
-    async def update(self, table: str, data: dict, conditions: dict) -> None:
-        """Update data in a specified table based on conditions."""
-        pass
+        Args:
+            stmt: SQLAlchemy statement object (select, insert, update, delete)
 
-    @abstractmethod
-    async def delete(self, table: str, conditions: dict) -> None:
-        """Delete data from a specified table based on conditions."""
+        Returns:
+            List of result rows as dictionaries (empty list for non-SELECT queries)
+        """
         pass
 
 
@@ -104,6 +115,7 @@ class ServerManager:
         for name, server in self._servers.items():
             try:
                 await server.connect()
+                await server.on_startup()
                 print(f"[ServerManager] Connected {name}")
             except Exception as e:
                 print(f"[ServerManager] Failed to connect {name}: {e}")
@@ -115,6 +127,7 @@ class ServerManager:
         print(f"[ServerManager] Disconnecting {len(self._servers)} server(s)...")
         for name, server in self._servers.items():
             try:
+                await server.on_close()
                 await server.disconnect()
                 print(f"[ServerManager] Disconnected {name}")
             except Exception as e:
