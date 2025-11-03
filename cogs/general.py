@@ -5,14 +5,14 @@ from discord.ext import commands
 class General(commands.Cog):
     """General purpose commands."""
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: discord.Bot):
         self.bot = bot
 
     # -------------------------------------------------------------- #
     # Slash Commands
     # -------------------------------------------------------------- #
 
-    @discord.slash_command(name="whoami", description="Display information about the bot")
+    @commands.slash_command(name="whoami", description="Display information about the bot")
     async def whoami(self, ctx: discord.ApplicationContext):
         """Display bot information with an embed."""
 
@@ -49,5 +49,5 @@ class General(commands.Cog):
         await ctx.respond(embed=embed)
 
 
-async def setup(bot: commands.Bot):
+def setup(bot: discord.Bot):
     bot.add_cog(General(bot))

@@ -7,7 +7,7 @@ from discord.ext import commands
 class Voice(commands.Cog):
     """Voice based commands."""
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: discord.Bot):
         self.bot = bot
 
     # -------------------------------------------------------------- #
@@ -49,7 +49,7 @@ class Voice(commands.Cog):
     # Slash Commands
     # -------------------------------------------------------------- #
 
-    @discord.slash_command(name="transcribe", description="Transcribe the current voice channel")
+    @commands.slash_command(name="transcribe", description="Transcribe the current voice channel")
     async def transcribe(self, ctx: discord.ApplicationContext) -> None:
         voice_channel = self.find_user_vc(ctx)
         await ctx.defer(ephemeral=True)
@@ -77,5 +77,5 @@ class Voice(commands.Cog):
         return None
 
 
-async def setup(bot: commands.Bot):
+def setup(bot: discord.Bot):
     bot.add_cog(Voice(bot))

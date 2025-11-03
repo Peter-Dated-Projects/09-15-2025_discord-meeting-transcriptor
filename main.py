@@ -19,21 +19,28 @@ logging.basicConfig(level=logging.INFO)
 # Discord Bot Setup
 # -------------------------------------------------------------- #
 
+# Add your Discord server ID(s) here for instant command registration during development
+# You can find your server ID by right-clicking your server icon with Developer Mode enabled
+DEBUG_GUILD_IDS = [1233459903696208014]  # Example: [123456789012345678]
+# Leave empty [] for global commands (takes up to 1 hour to register)
+# Or add your guild IDs for instant registration during development
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
 intents.members = True
 intents.voice_states = True
 
-bot = commands.Bot(command_prefix="/", intents=intents)
+# If DEBUG_GUILD_IDS is not empty, commands will register instantly in those guilds
+bot = discord.Bot(intents=intents, debug_guilds=DEBUG_GUILD_IDS if DEBUG_GUILD_IDS else None)
 
 
-async def load_cogs():
+def load_cogs():
     """Load all cog extensions."""
-    await bot.load_extension("cogs.general")
+    bot.load_extension("cogs.general")
     print("✓ Loaded cogs.general")
 
-    await bot.load_extension("cogs.voice")
+    bot.load_extension("cogs.voice")
     print("✓ Loaded cogs.voice")
 
 
@@ -48,20 +55,44 @@ async def on_ready():
     print(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
     print("------")
 
-    # Sync slash commands with Discord
-    try:
-        # -------------------------------------------------------------- #
-        # Sync Slash Commands
-        # -------------------------------------------------------------- #
+    # In py-cord, slash commands are automatically synced
+    # No manual syncing needed like discord.py's tree.sync()
+    print("Bot is ready! Slash commands are automatically available.")
+    print(f"Connected to {len(bot.guilds)} guild(s):")
+    for guild in bot.guilds:
+        print(f"  ✓ {guild.name} (ID: {guild.id})")
 
-        # Sync in call guilds for instant access
-        print("Syncing to individual guilds for instant access...")
-        for guild in bot.guilds:
-            synced = await bot.tree.sync(guild=guild)
-            print(f"  ✓ Synced {len(synced)} command(s) to: {guild.name} (ID: {guild.id})")
+    # Display all registered slash commands
+    print("\nRegistered slash commands:")
+    slash_commands = [
+        cmd for cmd in bot.pending_application_commands if isinstance(cmd, discord.SlashCommand)
+    ]
+    if slash_commands:
+        for cmd in slash_commands:
+            print(f"  ✓ /{cmd.name} - {cmd.description}")
+    else:
+        print("  (No slash commands registered)")
 
-    except Exception as e:
-        print(f"Failed to sync commands: {e}")
+    # Important information about command visibility
+    if DEBUG_GUILD_IDS:
+        print(f"\n⚠️  Commands registered for guilds: {DEBUG_GUILD_IDS}")
+        print("   Commands should appear INSTANTLY in these servers.")
+    else:
+        print("\n⚠️  Commands registered GLOBALLY")
+        print("   ⏱️  This can take up to 1 HOUR to appear in Discord!")
+        print("   💡 TIP: Set DEBUG_GUILD_IDS for instant registration during development")
+
+
+@bot.event
+async def on_application_command_error(
+    ctx: discord.ApplicationContext, error: discord.DiscordException
+):
+    """Handle errors in application commands."""
+    if isinstance(error, discord.CheckFailure):
+        await ctx.respond("❌ You don't have permission to use this command.", ephemeral=True)
+    else:
+        print(f"Command error in {ctx.command.name}: {error}")
+        await ctx.respond(f"❌ An error occurred: {str(error)}", ephemeral=True)
 
 
 # -------------------------------------------------------------- #
@@ -103,7 +134,7 @@ async def main():
     # -------------------------------------------------------------- #
 
     async with bot:
-        await load_cogs()
+        load_cogs()
         token = os.getenv("DISCORD_API_TOKEN")
         if not token:
             print("Error: DISCORD_API_TOKEN not found in environment variables")
