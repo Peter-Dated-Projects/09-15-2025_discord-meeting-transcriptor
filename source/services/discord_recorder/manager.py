@@ -15,30 +15,14 @@ from source.services.manager import BaseDiscordRecorderServiceManager, ServicesM
 # -------------------------------------------------------------- #
 
 
-class RecordingConfig:
+class DiscordRecorderConstants:
     """Configuration constants for Discord recording."""
 
     # Flush cycle
     FLUSH_INTERVAL_SECONDS = 10  # Configurable: flush buffer every N seconds
 
-    # Audio format (Discord voice default)
-    SAMPLE_RATE_HZ = 48000  # 48kHz
-    CHANNELS = 2  # Stereo
-    SAMPLE_WIDTH_BYTES = 2  # 16-bit = 2 bytes
-
     # FFmpeg encoding
     MP3_BITRATE = "128k"  # 128 kbps
-
-    # Session management
-    TRANSCODE_TIMEOUT_SECONDS = 300  # 5 minutes
-    EMPTY_CHANNEL_GRACE_SECONDS = 30  # Auto-stop grace window
-
-    # Cleanup
-    CLEANUP_INTERVAL_SECONDS = 3600  # 1 hour
-    TEMP_RECORDING_TTL_HOURS = 24  # 24 hours
-
-    # Performance
-    MAX_DELETE_BATCH_SIZE = 1000  # Max records to delete at once
 
 
 # -------------------------------------------------------------- #
@@ -57,44 +41,8 @@ class DiscordSessionHandler:
     - Session lifecycle management
     """
 
-    def __init__(
-        self,
-        channel_id: int,
-        meeting_id: str,
-        user_id: str,
-        guild_id: str,
-        services: ServicesManager,
-    ):
-        """
-        Initialize a recording session with SQL tracking.
-
-        Args:
-            channel_id: Discord channel ID
-            meeting_id: Meeting ID (16 chars) from meetings table
-            user_id: Discord user ID
-            guild_id: Discord guild/server ID
-            services: Services manager for accessing SQL and FFmpeg services
-        """
-        self.channel_id = channel_id
-        self.meeting_id = meeting_id
-        self.user_id = user_id
-        self.guild_id = guild_id
-        self.services = services
-
-        # Recording state
-        self.is_recording = False
-        self._is_shutting_down = False  # Prevent race conditions during shutdown
-        self._audio_buffer = bytearray()
-        self._chunk_counter = 0
-        self._flush_task: Optional[asyncio.Task] = None
-
-        # Track temp recording IDs for this session
-        self._temp_recording_ids: list[str] = []
-
-        # Audio format settings (Discord voice default)
-        self._sample_rate = RecordingConfig.SAMPLE_RATE_HZ
-        self._channels = RecordingConfig.CHANNELS
-        self._sample_width = RecordingConfig.SAMPLE_WIDTH_BYTES
+    def __init__(self):
+        pass
 
     # -------------------------------------------------------------- #
     # Session Lifecycle Methods
@@ -167,100 +115,6 @@ class DiscordSessionHandler:
     # Flush Cycle (Core Integration Point)
     # -------------------------------------------------------------- #
 
-    async def _flush_loop(self) -> None:
-        """Periodically flush buffered audio data."""
-        try:
-            while self.is_recording:
-                await asyncio.sleep(RecordingConfig.FLUSH_INTERVAL_SECONDS)
-                await self._flush_once()
-        except asyncio.CancelledError:
-            await self.services.logging_service.debug("Flush loop cancelled")
-        except Exception as e:
-            await self.services.logging_service.error(f"Error in flush loop: {e}")
-
-    async def _flush_once(self) -> None:
-        """
-        Flush buffered audio to disk and insert temp recording.
-
-        Steps:
-        1. Write PCM data to temp file
-        2. INSERT temp_recording with QUEUED status
-        3. Queue FFmpeg transcode job with temp_recording_id
-        4. Clear buffer
-        """
-        if len(self._audio_buffer) == 0:
-            return
-
-        pcm_path = None
-        try:
-            # Generate chunk filename
-            self._chunk_counter += 1
-            pcm_filename = f"{self.meeting_id}_{self.user_id}_chunk_{self._chunk_counter:04d}.pcm"
-
-            # Write PCM data to temp storage
-            pcm_path = await self._write_pcm_to_temp(pcm_filename, bytes(self._audio_buffer))
-            await self.services.logging_service.debug(
-                f"Flushed chunk {self._chunk_counter}: {pcm_path}"
-            )
-
-            # Check if SQL recording service is available
-            if not self.services.sql_recording_service:
-                await self.services.logging_service.warning(
-                    "SQL recording service not available - skipping temp recording insert"
-                )
-                # Still queue FFmpeg job even without SQL tracking
-                mp3_filename = pcm_filename.replace(".pcm", ".mp3")
-                mp3_path = await self._get_mp3_temp_path(mp3_filename)
-                await self._queue_pcm_to_mp3_transcode(pcm_path, mp3_path, None)
-                self._audio_buffer.clear()
-                return
-
-            # INSERT temp recording into SQL
-            temp_recording_id = await self.services.sql_recording_service.insert_temp_recording(
-                meeting_id=self.meeting_id,
-                user_id=self.user_id,
-                guild_id=self.guild_id,
-                pcm_path=pcm_path,
-                created_at=datetime.utcnow(),
-            )
-
-            self._temp_recording_ids.append(temp_recording_id)
-
-            await self.services.logging_service.info(
-                f"Created temp recording {temp_recording_id} for chunk {self._chunk_counter}"
-            )
-
-            # Queue FFmpeg transcode job
-            mp3_filename = pcm_filename.replace(".pcm", ".mp3")
-            mp3_path = await self._get_mp3_temp_path(mp3_filename)
-
-            await self._queue_pcm_to_mp3_transcode(
-                pcm_path=pcm_path,
-                mp3_path=mp3_path,
-                temp_recording_id=temp_recording_id,
-            )
-
-            # Clear buffer on success
-            self._audio_buffer.clear()
-
-        except (OSError, ValueError, RuntimeError) as e:
-            await self.services.logging_service.error(f"Error during flush: {e}")
-            # Cleanup orphaned PCM file if it was created
-            if pcm_path and os.path.exists(pcm_path):
-                try:
-                    os.remove(pcm_path)
-                    await self.services.logging_service.debug(
-                        f"Cleaned up orphaned PCM: {pcm_path}"
-                    )
-                except Exception as cleanup_error:
-                    await self.services.logging_service.warning(
-                        f"Failed to cleanup orphaned PCM: {cleanup_error}"
-                    )
-            # Don't clear buffer - will retry on next flush
-        except Exception as e:
-            await self.services.logging_service.critical(f"Unexpected error during flush: {e}")
-            raise  # Re-raise unexpected errors
-
     # -------------------------------------------------------------- #
     # File Operations
     # -------------------------------------------------------------- #
@@ -276,29 +130,7 @@ class DiscordSessionHandler:
         Returns:
             Absolute path to the written PCM file
         """
-        # Use recording file service to write to temp storage
-        await self.services.recording_file_service_manager.save_to_temp_file(filename, data)
-
-        # Get absolute path (cross-platform)
-        temp_storage_path = (
-            self.services.recording_file_service_manager.get_temporary_storage_path()
-        )
-        return os.path.join(temp_storage_path, filename)
-
-    async def _get_mp3_temp_path(self, filename: str) -> str:
-        """
-        Get the absolute path for an MP3 file in temp storage.
-
-        Args:
-            filename: MP3 filename
-
-        Returns:
-            Absolute path for the MP3 file
-        """
-        temp_storage_path = (
-            self.services.recording_file_service_manager.get_temporary_storage_path()
-        )
-        return os.path.join(temp_storage_path, filename)
+        pass
 
     # -------------------------------------------------------------- #
     # FFmpeg Integration
@@ -315,46 +147,7 @@ class DiscordSessionHandler:
             mp3_path: Path to output MP3 file
             temp_recording_id: Optional temp recording ID for SQL tracking
         """
-        # FFmpeg options for PCM → MP3 conversion
-        # Discord voice: 48kHz, 16-bit, stereo PCM
-        options = {
-            "-f": "s16le",  # Input format: signed 16-bit little-endian
-            "-ar": str(self._sample_rate),  # Sample rate
-            "-ac": str(self._channels),  # Audio channels
-            "-codec:a": "libmp3lame",  # MP3 encoder
-            "-b:a": RecordingConfig.MP3_BITRATE,  # Bitrate
-            "-y": None,  # Overwrite output file
-        }
-
-        # Queue job with FFmpeg manager
-        # Note: This assumes FFmpegManager has been enhanced to accept temp_recording_id
-        # If not yet implemented, you'll need to update the FFmpeg manager
-        try:
-            success = await self.services.ffmpeg_service_manager.queue_mp3_to_whisper_format_job(
-                input_path=pcm_path,
-                output_path=mp3_path,
-                options=options,
-            )
-
-            if success:
-                await self.services.logging_service.info(
-                    f"Queued transcode job for temp recording {temp_recording_id or 'N/A'}"
-                )
-            else:
-                await self.services.logging_service.error(
-                    f"Failed to queue transcode job for {temp_recording_id or 'N/A'}"
-                )
-                # Mark as failed immediately if SQL service available
-                if temp_recording_id and self.services.sql_recording_service:
-                    await self.services.sql_recording_service.update_temp_recording_transcode_failed(
-                        temp_recording_id
-                    )
-        except Exception as e:
-            await self.services.logging_service.error(f"Error queuing transcode job: {e}")
-            if temp_recording_id and self.services.sql_recording_service:
-                await self.services.sql_recording_service.update_temp_recording_transcode_failed(
-                    temp_recording_id
-                )
+        pass
 
     # -------------------------------------------------------------- #
     # Session Information Methods
