@@ -4,10 +4,12 @@ from collections import Counter
 from contextlib import suppress
 from datetime import datetime, timedelta
 
+import discord
+
 from source.server.server import ServerManager
 from source.server.sql_models import TranscodeStatus
 from source.services.manager import BaseDiscordRecorderServiceManager, ServicesManager
-from source.utils import generate_16_char_uuid
+from source.utils import generate_16_char_uuid, get_current_timestamp_est
 
 # -------------------------------------------------------------- #
 # Configuration Constants
@@ -44,21 +46,59 @@ class DiscordSessionHandler:
     Handler for managing individual Discord recording sessions.
 
     This class handles:
-    - Audio buffering and periodic flushing
+    - Multi-user audio recording via Pycord's recording API
+    - Per-user audio buffering and periodic flushing
     - Temp recording creation in SQL
     - FFmpeg job queuing
     - Session lifecycle management
+
+    Recording Architecture:
+    - Uses discord.sinks.WaveSink to capture per-user audio streams
+    - Periodically flushes audio for ALL users in the call
+    - Each user's audio is stored as separate temp recordings
     """
 
-    def __init__(self):
-        pass
+    def __init__(
+        self,
+        discord_voice_client: discord.VoiceClient,
+        channel_id: int,
+        meeting_id: str,
+        user_id: str,
+        guild_id: str,
+        services: "ServicesManager",
+    ):
+        self.discord_voice_client = discord_voice_client
+        self.channel_id = channel_id
+        self.meeting_id = meeting_id
+        self.user_id = user_id  # Bot user ID (for SQL tracking)
+        self.guild_id = guild_id
+        self.services = services
+        self.start_time = get_current_timestamp_est()
+        self.is_recording = False
+
+        # Per-user audio buffers: {user_id: bytearray}
+        self._user_audio_buffers: dict[int, bytearray] = {}
+
+        # Track chunk counters per user: {user_id: int}
+        self._user_chunk_counters: dict[int, int] = {}
+
+        # Track temp recording IDs per user: {user_id: list[str]}
+        self._user_temp_recording_ids: dict[int, list[str]] = {}
+
+        # Pycord recording sink
+        self._sink: discord.sinks.WaveSink | None = None
+
+        # Shutdown flag
+        self._is_shutting_down = False
+
+        self._flush_task: asyncio.Task | None = None
 
     # -------------------------------------------------------------- #
     # Session Lifecycle Methods
     # -------------------------------------------------------------- #
 
     async def start_recording(self) -> None:
-        """Start the recording session and flush cycle."""
+        """Start the recording session using Pycord's recording API."""
         if self.is_recording:
             await self.services.logging_service.warning(
                 f"Session {self.channel_id} already recording"
@@ -66,19 +106,31 @@ class DiscordSessionHandler:
             return
 
         self.is_recording = True
-        self._chunk_counter = 0
-        self._temp_recording_ids = []
+        self._is_shutting_down = False
+
+        # Initialize per-user tracking
+        self._user_audio_buffers = {}
+        self._user_chunk_counters = {}
+        self._user_temp_recording_ids = {}
 
         await self.services.logging_service.info(
             f"Started recording session for meeting {self.meeting_id}, "
             f"user {self.user_id}, channel {self.channel_id}"
         )
 
-        # Start periodic flush task (every 10 seconds)
+        # Start Pycord recording with WaveSink
+        self._sink = discord.sinks.WaveSink()
+
+        # Start recording (callback will be triggered on stop)
+        self.discord_voice_client.start_recording(
+            self._sink, self._recording_finished_callback, sync_start=True
+        )
+
+        # Start periodic flush task for ALL users
         self._flush_task = asyncio.create_task(self._flush_loop())
 
     async def stop_recording(self) -> None:
-        """Stop the recording session and flush any remaining data."""
+        """Stop the recording session and flush any remaining data for all users."""
         if not self.is_recording:
             return
 
@@ -92,35 +144,161 @@ class DiscordSessionHandler:
             with suppress(asyncio.CancelledError):
                 await self._flush_task
 
-        # Final flush of any remaining data
-        if len(self._audio_buffer) > 0:
-            await self._flush_once()
+        # Stop Pycord recording
+        if self.discord_voice_client.recording:
+            self.discord_voice_client.stop_recording()
 
+        # Final flush of any remaining data for ALL users
+        await self._flush_all_users()
+
+        total_chunks = sum(len(ids) for ids in self._user_temp_recording_ids.values())
         await self.services.logging_service.info(
             f"Stopped recording session for meeting {self.meeting_id}. "
-            f"Created {len(self._temp_recording_ids)} temp recording chunks."
+            f"Created {total_chunks} temp recording chunks across {len(self._user_audio_buffers)} users."
         )
 
     # -------------------------------------------------------------- #
     # Audio Buffering Methods
     # -------------------------------------------------------------- #
 
-    async def push_audio_data(self, pcm_data: bytes) -> None:
+    async def _recording_finished_callback(self, _sink: discord.sinks.WaveSink, *_args) -> None:
         """
-        Push PCM audio data to the buffer.
+        Callback triggered when Pycord stops recording.
+
+        This is primarily for final cleanup - the periodic flush task handles
+        most of the audio processing during active recording.
 
         Args:
-            pcm_data: Raw PCM audio bytes (s16le format)
+            _sink: The WaveSink containing per-user audio data (unused - periodic flush handles this)
+            _args: Additional callback arguments (unused)
         """
-        # Prevent race conditions during shutdown
-        if not self.is_recording or self._is_shutting_down:
+        await self.services.logging_service.info(
+            f"Recording finished callback for meeting {self.meeting_id}"
+        )
+
+    async def _extract_user_audio_from_sink(self) -> None:
+        """
+        Extract audio data from the Pycord sink for all users.
+
+        This reads from sink.audio_data and appends PCM data to per-user buffers.
+        The sink accumulates audio continuously, so we track what we've already
+        processed to avoid duplicates.
+        """
+        if not self._sink or not self._sink.audio_data:
             return
 
-        self._audio_buffer.extend(pcm_data)
+        # Iterate through all users in the sink
+        for user_id, audio_data in self._sink.audio_data.items():
+            # Initialize buffer for new users
+            if user_id not in self._user_audio_buffers:
+                self._user_audio_buffers[user_id] = bytearray()
+                self._user_chunk_counters[user_id] = 0
+                self._user_temp_recording_ids[user_id] = []
+
+                await self.services.logging_service.info(
+                    f"Started recording for user {user_id} in meeting {self.meeting_id}"
+                )
+
+            # Extract PCM data from BytesIO
+            # Note: audio_data.file is a BytesIO containing WAV format
+            # We need to extract the raw PCM data (skip WAV header if needed)
+            bytes_io = audio_data.file
+            bytes_io.seek(0)
+            wav_data = bytes_io.read()
+
+            # For now, append the entire WAV data
+            # TODO: Strip WAV header and extract only PCM if needed
+            self._user_audio_buffers[user_id].extend(wav_data)
 
     # -------------------------------------------------------------- #
     # Flush Cycle (Core Integration Point)
     # -------------------------------------------------------------- #
+
+    async def _flush_loop(self) -> None:
+        """
+        Periodic flush loop that processes audio for ALL users.
+
+        Runs every FLUSH_INTERVAL_SECONDS and:
+        1. Extracts audio from Pycord sink
+        2. Flushes audio for each user with buffered data
+        """
+        try:
+            while self.is_recording and not self._is_shutting_down:
+                await asyncio.sleep(DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS)
+
+                # Extract latest audio from sink
+                await self._extract_user_audio_from_sink()
+
+                # Flush all users
+                await self._flush_all_users()
+
+        except asyncio.CancelledError:
+            await self.services.logging_service.debug("Flush loop cancelled")
+            raise
+
+    async def _flush_all_users(self) -> None:
+        """
+        Flush audio data for all users who have buffered audio.
+
+        For each user:
+        1. Write PCM to temp storage
+        2. Create temp recording in SQL
+        3. Queue FFmpeg transcode job
+        4. Clear buffer
+        """
+        if self._is_shutting_down:
+            return
+
+        for user_id, buffer in list(self._user_audio_buffers.items()):
+            if len(buffer) == 0:
+                continue
+
+            await self._flush_user(user_id, buffer)
+
+    async def _flush_user(self, user_id: int, buffer: bytearray) -> None:
+        """
+        Flush audio buffer for a single user.
+
+        Args:
+            user_id: Discord user ID
+            buffer: Audio buffer to flush
+        """
+        # Generate unique chunk filename
+        chunk_num = self._user_chunk_counters[user_id]
+        pcm_filename = f"{self.meeting_id}_user{user_id}_chunk{chunk_num:04d}.pcm"
+
+        # Write PCM to temp storage
+        pcm_path = await self._write_pcm_to_temp(pcm_filename, bytes(buffer))
+
+        # Generate MP3 path
+        mp3_path = pcm_path.replace(".pcm", ".mp3")
+
+        # Create temp recording in SQL
+        temp_recording_id = None
+        if self.services.sql_recording_service:
+            temp_recording_id = await self.services.sql_recording_service.create_temp_recording(
+                meeting_id=self.meeting_id,
+                user_id=str(user_id),  # Discord user ID, not bot user
+                guild_id=self.guild_id,
+                chunk_number=chunk_num,
+                pcm_path=pcm_path,
+                mp3_path=mp3_path,
+                transcode_status=TranscodeStatus.QUEUED,
+            )
+
+            if temp_recording_id:
+                self._user_temp_recording_ids[user_id].append(temp_recording_id)
+
+        # Queue FFmpeg transcode job
+        await self._queue_pcm_to_mp3_transcode(pcm_path, mp3_path, temp_recording_id)
+
+        # Clear buffer and increment counter
+        buffer.clear()
+        self._user_chunk_counters[user_id] += 1
+
+        await self.services.logging_service.debug(
+            f"Flushed chunk {chunk_num} for user {user_id} in meeting {self.meeting_id}"
+        )
 
     # -------------------------------------------------------------- #
     # File Operations
@@ -137,7 +315,15 @@ class DiscordSessionHandler:
         Returns:
             Absolute path to the written PCM file
         """
-        pass
+        if not self.services.recording_file_manager_service:
+            raise RuntimeError("Recording file manager service not available")
+
+        # Write to temp storage
+        file_path = await self.services.recording_file_manager_service.write_temp_recording(
+            filename=filename, data=data
+        )
+
+        return file_path
 
     # -------------------------------------------------------------- #
     # FFmpeg Integration
@@ -154,18 +340,56 @@ class DiscordSessionHandler:
             mp3_path: Path to output MP3 file
             temp_recording_id: Optional temp recording ID for SQL tracking
         """
-        pass
+        if not self.services.ffmpeg_manager_service:
+            await self.services.logging_service.warning(
+                "FFmpeg manager service not available, skipping transcode"
+            )
+            return
+
+        # Define callback to update SQL status
+        async def on_transcode_complete(success: bool) -> None:
+            if not self.services.sql_recording_service or not temp_recording_id:
+                return
+
+            new_status = TranscodeStatus.DONE if success else TranscodeStatus.FAILED
+            await self.services.sql_recording_service.update_temp_recording_status(
+                temp_recording_id=temp_recording_id, status=new_status
+            )
+
+            # Delete PCM file after successful transcode
+            if success and os.path.exists(pcm_path):
+                try:
+                    os.remove(pcm_path)
+                except (OSError, PermissionError) as e:
+                    await self.services.logging_service.warning(
+                        f"Failed to delete PCM file {pcm_path}: {e}"
+                    )
+
+        # Queue FFmpeg job
+        await self.services.ffmpeg_manager_service.queue_pcm_to_mp3(
+            input_path=pcm_path,
+            output_path=mp3_path,
+            bitrate=DiscordRecorderConstants.MP3_BITRATE,
+            callback=on_transcode_complete,
+        )
 
     # -------------------------------------------------------------- #
     # Session Information Methods
     # -------------------------------------------------------------- #
 
     def get_temp_recording_ids(self) -> list[str]:
-        """Get all temp recording IDs created during this session."""
-        return self._temp_recording_ids.copy()
+        """Get all temp recording IDs created during this session (across all users)."""
+        all_ids = []
+        for user_ids in self._user_temp_recording_ids.values():
+            all_ids.extend(user_ids)
+        return all_ids
+
+    def get_recorded_user_ids(self) -> list[int]:
+        """Get list of Discord user IDs that have been recorded in this session."""
+        return list(self._user_audio_buffers.keys())
 
     async def get_session_status(self) -> dict:
-        """Get current session status including SQL tracking info."""
+        """Get current session status including per-user SQL tracking info."""
         # Check if SQL recording service is available
         if not self.services.sql_recording_service:
             return {
@@ -174,8 +398,15 @@ class DiscordSessionHandler:
                 "user_id": self.user_id,
                 "guild_id": self.guild_id,
                 "channel_id": self.channel_id,
-                "total_chunks": len(self._temp_recording_ids),
-                "buffer_size_bytes": len(self._audio_buffer),
+                "total_users": len(self._user_audio_buffers),
+                "total_chunks": sum(len(ids) for ids in self._user_temp_recording_ids.values()),
+                "per_user_stats": {
+                    str(uid): {
+                        "chunks": len(self._user_temp_recording_ids.get(uid, [])),
+                        "buffer_size_bytes": len(self._user_audio_buffers.get(uid, bytearray())),
+                    }
+                    for uid in self._user_audio_buffers
+                },
                 "chunk_statuses": {"note": "SQL service not available"},
             }
 
@@ -184,11 +415,8 @@ class DiscordSessionHandler:
             self.meeting_id
         )
 
-        # Filter to this session's chunks
-        session_chunks = [c for c in chunks if c["id"] in self._temp_recording_ids]
-
         # Count by status (optimized with Counter)
-        status_counter = Counter(c["transcode_status"] for c in session_chunks)
+        status_counter = Counter(c["transcode_status"] for c in chunks)
         status_counts = {
             "queued": status_counter.get(TranscodeStatus.QUEUED.value, 0),
             "in_progress": status_counter.get(TranscodeStatus.IN_PROGRESS.value, 0),
@@ -196,14 +424,34 @@ class DiscordSessionHandler:
             "failed": status_counter.get(TranscodeStatus.FAILED.value, 0),
         }
 
+        # Per-user statistics
+        per_user_stats = {}
+        for user_id in self._user_audio_buffers:
+            user_chunks = [
+                c for c in chunks if c["id"] in self._user_temp_recording_ids.get(user_id, [])
+            ]
+            user_status_counter = Counter(c["transcode_status"] for c in user_chunks)
+
+            per_user_stats[str(user_id)] = {
+                "chunks": len(self._user_temp_recording_ids.get(user_id, [])),
+                "buffer_size_bytes": len(self._user_audio_buffers.get(user_id, bytearray())),
+                "transcode_status": {
+                    "queued": user_status_counter.get(TranscodeStatus.QUEUED.value, 0),
+                    "in_progress": user_status_counter.get(TranscodeStatus.IN_PROGRESS.value, 0),
+                    "done": user_status_counter.get(TranscodeStatus.DONE.value, 0),
+                    "failed": user_status_counter.get(TranscodeStatus.FAILED.value, 0),
+                },
+            }
+
         return {
             "is_recording": self.is_recording,
             "meeting_id": self.meeting_id,
             "user_id": self.user_id,
             "guild_id": self.guild_id,
             "channel_id": self.channel_id,
-            "total_chunks": len(self._temp_recording_ids),
-            "buffer_size_bytes": len(self._audio_buffer),
+            "total_users": len(self._user_audio_buffers),
+            "total_chunks": sum(len(ids) for ids in self._user_temp_recording_ids.values()),
+            "per_user_stats": per_user_stats,
             "chunk_statuses": status_counts,
         }
 
@@ -259,6 +507,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
     async def start_session(
         self,
+        discord_voice_client: discord.VoiceClient,
         channel_id: int,
         meeting_id: str | None = None,
         user_id: str | None = None,
@@ -268,6 +517,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         Start recording audio from a Discord channel.
 
         Args:
+            discord_voice_client: Active VoiceClient connected to the channel
             channel_id: Discord channel ID
             meeting_id: Optional meeting ID (generated if not provided)
             user_id: Optional Discord user ID (required for SQL tracking)
@@ -295,6 +545,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
         # Create session handler
         session = DiscordSessionHandler(
+            discord_voice_client=discord_voice_client,
             channel_id=channel_id,
             meeting_id=meeting_id,
             user_id=user_id,

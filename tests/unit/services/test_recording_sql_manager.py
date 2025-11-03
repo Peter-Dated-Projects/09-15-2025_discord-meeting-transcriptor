@@ -97,7 +97,7 @@ class TestSQLRecordingManagerService:
         # Cleanup - delete temp_recordings first due to foreign key constraint
         from sqlalchemy import delete
 
-        from source.server.sql_models import MeetingModel, TempRecordingModel, RecordingModel
+        from source.server.sql_models import MeetingModel, RecordingModel, TempRecordingModel
 
         # Delete temp recordings first
         delete_temp_recordings_stmt = delete(TempRecordingModel).where(
