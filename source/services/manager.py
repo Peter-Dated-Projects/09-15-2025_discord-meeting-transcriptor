@@ -25,6 +25,7 @@ class ServicesManager:
         transcription_file_service_manager: BaseTranscriptionFileServiceManager,
         ffmpeg_service_manager: BaseFFmpegServiceManager,
         sql_recording_service_manager: BaseSQLRecordingServiceManager,
+        discord_recorder_service_manager: BaseDiscordRecorderServiceManager | None = None,
     ):
         self.server = server
 
@@ -39,6 +40,9 @@ class ServicesManager:
         # DB interfaces
         self.sql_recording_service_manager = sql_recording_service_manager
 
+        # Discord recorder
+        self.discord_recorder_service_manager = discord_recorder_service_manager
+
     async def initialize_all(self) -> None:
         """Initialize all service managers."""
 
@@ -52,6 +56,10 @@ class ServicesManager:
 
         # DB interfaces
         await self.sql_recording_service_manager.on_start(self)
+
+        # Discord recorder
+        if self.discord_recorder_service_manager:
+            await self.discord_recorder_service_manager.on_start(self)
 
         # TODO - need to create
         # await self.transcription_file_service_manager.on_start(self)
@@ -351,6 +359,7 @@ class BaseDiscordRecorderServiceManager(Manager):
     @abstractmethod
     async def start_session(
         self,
+        discord_voice_client: Any,  # discord.VoiceClient
         channel_id: int,
         meeting_id: str | None = None,
         user_id: str | None = None,

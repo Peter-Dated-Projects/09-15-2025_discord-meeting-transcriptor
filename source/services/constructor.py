@@ -31,6 +31,7 @@ def construct_services_manager(
     transcription_file_service_manager = None
     ffmpeg_service_manager = None
     sql_recording_service_manager = None
+    discord_recorder_service_manager = None
 
     # create logger
     logging_service = AsyncLoggingService(
@@ -76,6 +77,14 @@ def construct_services_manager(
 
         sql_recording_service_manager = SQLRecordingManagerService(server=server)
 
+        # -------------------------------------------------------------- #
+        # Discord Recorder Setup
+        # -------------------------------------------------------------- #
+
+        from source.services.discord_recorder.manager import DiscordRecorderManagerService
+
+        discord_recorder_service_manager = DiscordRecorderManagerService(server=server)
+
     # TODO: https://www.notion.so/DISC-19-create-ffmpeg-service-29c5eca3b9df805a949fdcd5850eaf5a?source=copy_link
     # # create ffmpeg service manager
     # if service_type == ServerManagerType.DEVELOPMENT:
@@ -95,4 +104,5 @@ def construct_services_manager(
         ffmpeg_service_manager=ffmpeg_service_manager,
         logging_service=logging_service,
         sql_recording_service_manager=sql_recording_service_manager,
+        discord_recorder_service_manager=discord_recorder_service_manager,
     )

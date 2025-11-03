@@ -85,6 +85,9 @@ class DiscordSessionHandler:
         # Track temp recording IDs per user: {user_id: list[str]}
         self._user_temp_recording_ids: dict[int, list[str]] = {}
 
+        # Track how many bytes we've read from each user's sink: {user_id: int}
+        self._user_bytes_read: dict[int, int] = {}
+
         # Pycord recording sink
         self._sink: discord.sinks.WaveSink | None = None
 
@@ -112,6 +115,7 @@ class DiscordSessionHandler:
         self._user_audio_buffers = {}
         self._user_chunk_counters = {}
         self._user_temp_recording_ids = {}
+        self._user_bytes_read = {}
 
         await self.services.logging_service.info(
             f"Started recording session for meeting {self.meeting_id}, "
@@ -180,12 +184,18 @@ class DiscordSessionHandler:
         """
         Extract audio data from the Pycord sink for all users.
 
-        This reads from sink.audio_data and appends PCM data to per-user buffers.
+        This reads from sink.audio_data and appends new PCM data to per-user buffers.
         The sink accumulates audio continuously, so we track what we've already
-        processed to avoid duplicates.
+        processed (via _user_bytes_read) to avoid duplicates.
+
+        Note: WaveSink stores data as WAV format (44-byte header + PCM data).
+        We skip the header on first read and only extract raw PCM thereafter.
         """
         if not self._sink or not self._sink.audio_data:
             return
+
+        # WAV header size (standard RIFF WAV format)
+        WAV_HEADER_SIZE = 44
 
         # Iterate through all users in the sink
         for user_id, audio_data in self._sink.audio_data.items():
@@ -194,21 +204,42 @@ class DiscordSessionHandler:
                 self._user_audio_buffers[user_id] = bytearray()
                 self._user_chunk_counters[user_id] = 0
                 self._user_temp_recording_ids[user_id] = []
+                self._user_bytes_read[user_id] = 0
 
                 await self.services.logging_service.info(
                     f"Started recording for user {user_id} in meeting {self.meeting_id}"
                 )
 
-            # Extract PCM data from BytesIO
-            # Note: audio_data.file is a BytesIO containing WAV format
-            # We need to extract the raw PCM data (skip WAV header if needed)
+            # Get current position in the BytesIO
             bytes_io = audio_data.file
-            bytes_io.seek(0)
-            wav_data = bytes_io.read()
+            bytes_io.seek(0, 2)  # Seek to end to get total size
+            total_bytes = bytes_io.tell()
 
-            # For now, append the entire WAV data
-            # TODO: Strip WAV header and extract only PCM if needed
-            self._user_audio_buffers[user_id].extend(wav_data)
+            # Calculate how many new bytes are available
+            bytes_already_read = self._user_bytes_read[user_id]
+            new_bytes_available = total_bytes - bytes_already_read
+
+            if new_bytes_available <= 0:
+                continue  # No new data for this user
+
+            # Seek to where we left off
+            bytes_io.seek(bytes_already_read)
+
+            # If this is the first read, skip WAV header
+            if bytes_already_read == 0:
+                # Skip WAV header (44 bytes)
+                bytes_io.seek(WAV_HEADER_SIZE)
+                bytes_already_read = WAV_HEADER_SIZE
+                new_bytes_available = total_bytes - WAV_HEADER_SIZE
+
+            # Read only the new PCM data
+            new_pcm_data = bytes_io.read(new_bytes_available)
+
+            # Append to user's buffer
+            self._user_audio_buffers[user_id].extend(new_pcm_data)
+
+            # Update bytes read tracker
+            self._user_bytes_read[user_id] = total_bytes
 
     # -------------------------------------------------------------- #
     # Flush Cycle (Core Integration Point)
