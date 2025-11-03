@@ -85,6 +85,7 @@ class RecordingModel(Base):
     ID = Recording ID
     Created At = Timestamp when recording was created
     Duration in ms = Duration of the recording in milliseconds
+    User ID = Discord User ID of the participant
     Meeting ID = Foreign Key to associated Meeting ID
     SHA256 = SHA256 hash of the recording file
     Recording Filename = Filename of the recording file
@@ -95,6 +96,7 @@ class RecordingModel(Base):
     id = Column(String(16), primary_key=True, index=True)
     created_at = Column(DateTime, nullable=False)
     duration_in_ms = Column(Integer, nullable=False)
+    user_id = Column(String(20), nullable=False)
     meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
     sha256 = Column(String(64), nullable=False, unique=True)
     filename = Column(String(512), nullable=False)
@@ -178,13 +180,16 @@ class TempRecordingModel(Base):
     """
     ID = Recording ID
     Created At = Timestamp when recording was created
+    User ID = Discord User ID of the participant
     Meeting ID = Foreign Key to associated Meeting ID
     Filename = Filename of the recording file
+        - assets/recordings/yyyy-mm-dd_recording_{user_id}_{timestamp in ms}.???
     """
 
     __tablename__ = "temp_recordings"
 
     id = Column(String(16), primary_key=True, index=True)
     created_at = Column(DateTime, nullable=False)
+    user_id = Column(String(20), nullable=False)
     meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
     filename = Column(String(512), nullable=False)

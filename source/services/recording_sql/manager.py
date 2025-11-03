@@ -8,7 +8,12 @@ from source.server.sql_models import (
     TranscodeStatus,
 )
 from source.services.manager import Manager
-from source.utils import generate_16_char_uuid
+from source.utils import (
+    DISCORD_GUILD_ID_MIN_LENGTH,
+    DISCORD_USER_ID_MIN_LENGTH,
+    generate_16_char_uuid,
+    get_current_timestamp_est,
+)
 
 # -------------------------------------------------------------- #
 # SQL Recording Manager Service
@@ -39,70 +44,60 @@ class SQLRecordingManagerService(Manager):
     # -------------------------------------------------------------- #
 
     async def insert_temp_recording(
-        self,
-        meeting_id: str,
-        user_id: str,
-        guild_id: str,
-        pcm_path: str,
-        created_at: Optional[datetime] = None,
+        self, user_id: str, meeting_id: str, start_timestamp_ms: int
     ) -> str:
         """
         Insert a new temp recording chunk when PCM file is flushed.
 
         Args:
+            user_id: Discord User ID of the participant
             meeting_id: Meeting ID (16 chars)
-            user_id: Discord User ID
-            guild_id: Discord Guild ID
-            pcm_path: Path to the PCM file
-            created_at: Optional timestamp (defaults to now)
 
         Returns:
             temp_recording_id: The generated ID for the temp recording
         """
-        temp_id = generate_16_char_uuid()
-        timestamp = created_at or datetime.utcnow()
 
         # Validate inputs
-        if len(meeting_id) != 16:
-            raise ValueError("meeting_id must be 16 characters long")
+        if len(user_id) < DISCORD_USER_ID_MIN_LENGTH:
+            raise ValueError(
+                f"user_id must be at least {DISCORD_USER_ID_MIN_LENGTH} characters long"
+            )
+        if len(meeting_id) < DISCORD_GUILD_ID_MIN_LENGTH:
+            raise ValueError(
+                f"meeting_id must be at least {DISCORD_GUILD_ID_MIN_LENGTH} characters long"
+            )
+
+        # entry data
+        entry_id = generate_16_char_uuid()
+        timestamp = get_current_timestamp_est()
+        filename = (
+            f"{timestamp.strftime('%Y-%m-%d')}_recording_{user_id}_{int(start_timestamp_ms)}.pcm"
+        )
 
         temp_recording = TempRecordingModel(
-            id=temp_id,
-            meeting_id=meeting_id,
+            id=entry_id,
             user_id=user_id,
-            guild_id=guild_id,
+            meeting_id=meeting_id,
             created_at=timestamp,
-            completed_at=None,
-            pcm_path=pcm_path,
-            mp3_path=None,
-            transcode_status=TranscodeStatus.QUEUED,
-            sha256=None,
-            duration_ms=None,
-            cleaned=0,
+            filename=filename,
         )
 
         # Convert to dict for insertion
         temp_data = {
             "id": temp_recording.id,
-            "meeting_id": temp_recording.meeting_id,
             "user_id": temp_recording.user_id,
-            "guild_id": temp_recording.guild_id,
+            "meeting_id": temp_recording.meeting_id,
             "created_at": temp_recording.created_at,
-            "completed_at": temp_recording.completed_at,
-            "pcm_path": temp_recording.pcm_path,
-            "mp3_path": temp_recording.mp3_path,
-            "transcode_status": temp_recording.transcode_status.value,
-            "sha256": temp_recording.sha256,
-            "duration_ms": temp_recording.duration_ms,
-            "cleaned": temp_recording.cleaned,
+            "filename": temp_recording.filename,
         }
 
+        # Insert data to sql table
         await self.server.sql_client.insert(TempRecordingModel.__tablename__, temp_data)
         await self.services.logging_service.info(
-            f"Inserted temp recording: {temp_id} for meeting {meeting_id}"
+            f"Inserted temp recording: {entry_id} for meeting {meeting_id}"
         )
 
-        return temp_id
+        return entry_id
 
     async def update_temp_recording_transcode_started(self, temp_recording_id: str) -> None:
         """

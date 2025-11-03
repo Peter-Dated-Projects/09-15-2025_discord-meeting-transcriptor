@@ -1,6 +1,7 @@
 import uuid
-
+from zoneinfo import ZoneInfo
 import discord
+import datetime
 
 # -------------------------------------------------------------- #
 # Constants
@@ -11,6 +12,8 @@ import discord
 BOT_UNIQUE_ROLE_NAME = "Echo"
 BOT_UNIQUE_ROLE_COLOR = discord.Color.purple()
 
+DISCORD_USER_ID_MIN_LENGTH = 16  # ranges from 16 -> 20 as time goes on
+DISCORD_GUILD_ID_MIN_LENGTH = 17  # ranges from 17 -> 20 as time goes on
 
 # -------------------------------------------------------------- #
 # Generators
@@ -27,3 +30,13 @@ def generate_variable_char_uuid(length: int) -> str:
 def generate_16_char_uuid() -> str:
     """Generate a unique 16-character identifier."""
     return generate_variable_char_uuid(16)
+
+
+# -------------------------------------------------------------- #
+# Util Functions
+# -------------------------------------------------------------- #
+
+
+def get_current_timestamp_est() -> datetime.datetime:
+    """Get the current EST timestamp."""
+    return datetime.now(ZoneInfo("EST"))
