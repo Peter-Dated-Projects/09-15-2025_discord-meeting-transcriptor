@@ -96,9 +96,6 @@ class MySQLServer(SQLDatabase):
             )
             self._connected = True
             logger.info(f"[{self.name}] Connected to MySQL")
-
-            # Create all tables from database models
-            await self._create_tables()
         except Exception as e:
             logger.error(f"[{self.name}] Failed to connect: {e}")
             self._connected = False
@@ -135,7 +132,7 @@ class MySQLServer(SQLDatabase):
             logger.error(f"[{self.name}] Health check error: {e}")
             return False
 
-    async def _create_tables(self) -> None:
+    async def create_tables(self) -> None:
         """Create all database tables from the defined models."""
         try:
 

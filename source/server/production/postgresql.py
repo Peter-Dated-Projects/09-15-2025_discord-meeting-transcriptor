@@ -15,11 +15,14 @@ from asyncpg import Pool
 from sqlalchemy import (
     MetaData,
     Table,
+    create_engine,
     delete,
     insert,
     update,
 )
 from sqlalchemy.dialects import postgresql
+
+from source.server.db_models import SQL_DATABASE_MODELS
 
 from ..services import SQLDatabase
 
@@ -123,6 +126,29 @@ class PostgreSQLServer(SQLDatabase):
         except Exception as e:
             logger.error(f"[{self.name}] Health check error: {e}")
             return False
+
+    async def create_tables(self) -> None:
+        """Create all database tables from the defined models."""
+        try:
+
+            # Create engine for SQLAlchemy table creation
+            connection_string = f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+            engine = create_engine(connection_string)
+
+            # Create all tables from the models
+            # Note: This uses synchronous engine, but it's only during initialization
+            logger.info(f"[{self.name}] Creating database tables...")
+
+            for model in SQL_DATABASE_MODELS:
+                model.metadata.create_all(engine, [model.__table__], checkfirst=True)
+                logger.info(f"[{self.name}] Created/verified table: {model.__tablename__}")
+
+            logger.info(f"[{self.name}] All tables created/verified successfully")
+            engine.dispose()
+        except Exception as e:
+            logger.error(f"[{self.name}] Error creating tables: {e}")
+            # Don't raise - continue with connection even if table creation fails
+            # in case tables already exist
 
     @asynccontextmanager
     async def _get_connection(self):

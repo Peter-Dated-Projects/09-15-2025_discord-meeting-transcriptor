@@ -26,7 +26,7 @@ class BaseSQLServerHandler(ABC):
 
     async def on_startup(self) -> None:
         """Actions to perform on server startup."""
-        pass
+        await self.create_tables()
 
     async def on_close(self) -> None:
         """Actions to perform on server close."""
@@ -49,6 +49,11 @@ class BaseSQLServerHandler(ABC):
     @abstractmethod
     async def health_check(self) -> bool:
         """Check if the server is healthy and responding."""
+        pass
+
+    @abstractmethod
+    async def create_tables(self) -> None:
+        """Create database tables from models."""
         pass
 
     @property
@@ -104,6 +109,7 @@ class ServerManager:
         for name, server in self._servers.items():
             try:
                 await server.connect()
+                await server.on_startup()
                 print(f"[ServerManager] Connected {name}")
             except Exception as e:
                 print(f"[ServerManager] Failed to connect {name}: {e}")
@@ -115,6 +121,7 @@ class ServerManager:
         print(f"[ServerManager] Disconnecting {len(self._servers)} server(s)...")
         for name, server in self._servers.items():
             try:
+                await server.on_close()
                 await server.disconnect()
                 print(f"[ServerManager] Disconnected {name}")
             except Exception as e:
