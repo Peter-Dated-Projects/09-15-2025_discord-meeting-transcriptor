@@ -306,3 +306,20 @@ class PostgreSQLServer(SQLDatabase):
         except Exception as e:
             logger.error(f"[{self.name}] Delete error: {e}")
             raise
+
+    # -------------------------------------------------------------- #
+    # Utils
+    # -------------------------------------------------------------- #
+
+    def compile_query_object(self, stmt) -> str:
+        """
+        Compile a SQLAlchemy statement object into a SQL query string.
+
+        Args:
+            stmt: SQLAlchemy statement object
+
+        Returns:
+            Compiled SQL query string
+        """
+        compiled = stmt.compile(dialect=postgresql.dialect())
+        return str(compiled)

@@ -323,3 +323,20 @@ class MySQLServer(SQLDatabase):
         except Exception as e:
             logger.error(f"[{self.name}] Delete error: {e}")
             raise
+
+    # -------------------------------------------------------------- #
+    # Utils
+    # -------------------------------------------------------------- #
+
+    def compile_query_object(self, stmt) -> str:
+        """
+        Compile a SQLAlchemy statement to a MySQL query string and parameters.
+
+        Args:
+            stmt: SQLAlchemy statement object
+        Returns:
+            Compiled query string
+        """
+        compiled = stmt.compile(dialect=mysql.dialect())
+        query_str = str(compiled)
+        return query_str

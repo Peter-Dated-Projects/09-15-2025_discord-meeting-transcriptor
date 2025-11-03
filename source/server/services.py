@@ -59,3 +59,20 @@ class SQLDatabase(BaseSQLServerHandler):
             conditions: Conditions for the update as a dictionary
         """
         pass
+
+    # ------------------------------------------------------ #
+    # Utils
+    # ------------------------------------------------------ #
+
+    @abstractmethod
+    def compile_query_object(self, stmt) -> str:
+        """
+        Compile a SQLAlchemy statement object into a SQL query string.
+
+        Args:
+            stmt: SQLAlchemy statement object
+
+        Returns:
+            Compiled SQL query string
+        """
+        pass
