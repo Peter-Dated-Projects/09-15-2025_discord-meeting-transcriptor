@@ -138,13 +138,13 @@ class PostgreSQLServer(SQLDatabase):
 
             for model in SQL_DATABASE_MODELS:
                 table_name = model.__tablename__
-                
+
                 # Check if table exists
                 async with self._get_connection() as connection:
                     result = await connection.fetchval(
                         "SELECT COUNT(*) FROM information_schema.tables "
                         "WHERE table_schema = 'public' AND table_name = $1",
-                        table_name
+                        table_name,
                     )
                     table_exists = result > 0
 
@@ -167,7 +167,7 @@ class PostgreSQLServer(SQLDatabase):
     async def _update_table_schema(self, model, table_name: str) -> None:
         """
         Update an existing table schema to match the model definition.
-        
+
         Args:
             model: SQLAlchemy model class
             table_name: Name of the table to update
@@ -179,18 +179,20 @@ class PostgreSQLServer(SQLDatabase):
                     "SELECT column_name, data_type, is_nullable, udt_name "
                     "FROM information_schema.columns "
                     "WHERE table_schema = 'public' AND table_name = $1",
-                    table_name
+                    table_name,
                 )
-                db_columns = {row['column_name']: row for row in db_columns_rows}
-                
+                db_columns = {row["column_name"]: row for row in db_columns_rows}
+
                 # Get model columns
                 model_columns = {col.name: col for col in model.__table__.columns}
-                
+
                 # Find columns to add
                 columns_to_add = set(model_columns.keys()) - set(db_columns.keys())
                 # Find columns to remove
                 columns_to_remove = set(db_columns.keys()) - set(model_columns.keys())
-                
+                # Find columns to potentially modify
+                columns_to_check = set(model_columns.keys()) & set(db_columns.keys())
+
                 # Add missing columns
                 for col_name in columns_to_add:
                     col = model_columns[col_name]
@@ -198,23 +200,52 @@ class PostgreSQLServer(SQLDatabase):
                     nullable = "" if col.nullable else "NOT NULL"
                     default = ""
                     if col.default is not None:
-                        if hasattr(col.default, 'arg'):
+                        if hasattr(col.default, "arg"):
                             default_val = col.default.arg
                             if isinstance(default_val, str):
                                 default = f"DEFAULT '{default_val}'"
                             else:
                                 default = f"DEFAULT {default_val}"
-                    
+
                     alter_query = f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {col_type} {nullable} {default}'
                     await connection.execute(alter_query)
                     logger.info(f"[{self.name}] Added column `{col_name}` to table `{table_name}`")
-                
+
+                # Modify existing columns if needed
+                for col_name in columns_to_check:
+                    col = model_columns[col_name]
+                    db_col = db_columns[col_name]
+
+                    # Check if column needs modification
+                    model_col_type = self._get_postgresql_column_type(col)
+                    db_col_type = db_col["data_type"].upper()
+
+                    # Compare types (normalize for comparison)
+                    if model_col_type.upper() != db_col_type:
+                        nullable = "" if col.nullable else "NOT NULL"
+                        default = ""
+                        if col.default is not None:
+                            if hasattr(col.default, "arg"):
+                                default_val = col.default.arg
+                                if isinstance(default_val, str):
+                                    default = f"DEFAULT '{default_val}'"
+                                else:
+                                    default = f"DEFAULT {default_val}"
+
+                        alter_query = f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" TYPE {model_col_type} {nullable} {default}'
+                        await connection.execute(alter_query)
+                        logger.info(
+                            f"[{self.name}] Modified column `{col_name}` in table `{table_name}` from {db_col_type} to {model_col_type}"
+                        )
+
                 # Remove extra columns
                 for col_name in columns_to_remove:
                     alter_query = f'ALTER TABLE "{table_name}" DROP COLUMN "{col_name}"'
                     await connection.execute(alter_query)
-                    logger.info(f"[{self.name}] Removed column `{col_name}` from table `{table_name}`")
-                    
+                    logger.info(
+                        f"[{self.name}] Removed column `{col_name}` from table `{table_name}`"
+                    )
+
         except Exception as e:
             logger.error(f"[{self.name}] Error updating table schema for {table_name}: {e}")
             raise
@@ -222,18 +253,18 @@ class PostgreSQLServer(SQLDatabase):
     def _get_postgresql_column_type(self, column) -> str:
         """
         Convert SQLAlchemy column type to PostgreSQL column type string.
-        
+
         Args:
             column: SQLAlchemy Column object
-            
+
         Returns:
             PostgreSQL column type string
         """
         col_type = column.type
         type_name = col_type.__class__.__name__
-        
+
         if type_name == "String":
-            length = col_type.length if hasattr(col_type, 'length') and col_type.length else 255
+            length = col_type.length if hasattr(col_type, "length") and col_type.length else 255
             return f"VARCHAR({length})"
         elif type_name == "Integer":
             return "INTEGER"
@@ -244,7 +275,7 @@ class PostgreSQLServer(SQLDatabase):
         elif type_name == "Enum":
             # For PostgreSQL, we need to use the enum type name
             # This assumes the enum type already exists or will be created
-            if hasattr(col_type, 'name'):
+            if hasattr(col_type, "name"):
                 return col_type.name
             else:
                 # Fallback to VARCHAR if enum name not available

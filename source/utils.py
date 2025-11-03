@@ -1,8 +1,12 @@
+import os
+
+import platform
 import uuid
 from zoneinfo import ZoneInfo
 import discord
 from datetime import datetime
 import hashlib
+import subprocess
 
 # -------------------------------------------------------------- #
 # Constants
@@ -15,6 +19,9 @@ BOT_UNIQUE_ROLE_COLOR = discord.Color.purple()
 
 DISCORD_USER_ID_MIN_LENGTH = 16  # ranges from 16 -> 20 as time goes on
 DISCORD_GUILD_ID_MIN_LENGTH = 17  # ranges from 17 -> 20 as time goes on
+
+MEETING_UUID_LENGTH = 16  # fixed length for meeting UUIDs
+
 
 # -------------------------------------------------------------- #
 # Generators
@@ -51,3 +58,34 @@ def calculate_file_sha256(file_path: str) -> str:
         for byte_block in iter(lambda: f.read(4096), b""):
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
+
+
+def calculate_audio_file_duration_ms(file_path: str) -> int:
+    """Calculate the duration of an audio file in milliseconds."""
+    ffprobe_executable = os.environ.get(
+        (
+            "WINDOWS_FFPROBE_PATH"
+            if platform.system().lower().startswith("win")
+            else "MAC_FFPROBE_PATH"
+        ),
+        "ffprobe",
+    )
+
+    command = [
+        ffprobe_executable,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        file_path,
+    ]
+
+    try:
+        output = subprocess.check_output(command, stderr=subprocess.STDOUT)
+        duration = float(output)
+        return int(duration * 1000)  # Convert to milliseconds
+    except subprocess.CalledProcessError as e:
+        print(f"Error occurred while calculating audio file duration: {e}")
+        return 0

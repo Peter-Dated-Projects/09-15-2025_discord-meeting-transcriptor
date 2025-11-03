@@ -61,12 +61,10 @@ def construct_services_manager(
         # Decide ffmpeg binary path based on environment and platform
         if platform.system().lower().startswith("win") or os.name == "nt":
             ffmpeg_env = os.getenv("WINDOWS_FFMPEG_PATH")
-            default_ffmpeg = "assets/binaries/ffmpeg.exe"
         else:
             ffmpeg_env = os.getenv("MAC_FFMPEG_PATH")
-            default_ffmpeg = "assets/binaries/ffmpeg"
 
-        ffmpeg_path = ffmpeg_env if ffmpeg_env else default_ffmpeg
+        ffmpeg_path = ffmpeg_env
 
         ffmpeg_service_manager = FFmpegManagerService(server=server, ffmpeg_path=ffmpeg_path)
 

@@ -3,6 +3,8 @@ import enum
 from sqlalchemy import JSON, Column, DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.orm import declarative_base
 
+from source.utils import MEETING_UUID_LENGTH
+
 # -------------------------------------------------------------- #
 # SQL Database Data Models
 # -------------------------------------------------------------- #
@@ -97,7 +99,9 @@ class RecordingModel(Base):
     created_at = Column(DateTime, nullable=False)
     duration_in_ms = Column(Integer, nullable=False)
     user_id = Column(String(20), nullable=False)
-    meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
+    meeting_id = Column(
+        String(MEETING_UUID_LENGTH), ForeignKey("meetings.id"), nullable=False, index=True
+    )
     sha256 = Column(String(64), nullable=False, unique=True)
     filename = Column(String(512), nullable=False)
 
@@ -118,7 +122,9 @@ class JobsStatusModel(Base):
 
     id = Column(String(16), primary_key=True, index=True)
     type = Column(Enum(JobsType, name="jobs_type_enum"), nullable=False)
-    meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
+    meeting_id = Column(
+        String(MEETING_UUID_LENGTH), ForeignKey("meetings.id"), nullable=False, index=True
+    )
     created_at = Column(DateTime, nullable=False)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
@@ -140,7 +146,9 @@ class TranscriptsModel(Base):
 
     id = Column(String(16), primary_key=True, index=True)
     created_at = Column(DateTime, nullable=False)
-    meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
+    meeting_id = Column(
+        String(MEETING_UUID_LENGTH), ForeignKey("meetings.id"), nullable=False, index=True
+    )
     user_id = Column(String(20), nullable=False)
     sha256 = Column(String(64), nullable=False, unique=True)
     transcript_filename = Column(String(512), nullable=False)
@@ -191,6 +199,8 @@ class TempRecordingModel(Base):
     id = Column(String(16), primary_key=True, index=True)
     created_at = Column(DateTime, nullable=False)
     user_id = Column(String(20), nullable=False)
-    meeting_id = Column(String(16), ForeignKey("meetings.id"), nullable=False, index=True)
+    meeting_id = Column(
+        String(MEETING_UUID_LENGTH), ForeignKey("meetings.id"), nullable=False, index=True
+    )
     filename = Column(String(512), nullable=False)
     timestamp_ms = Column(Integer, nullable=False)

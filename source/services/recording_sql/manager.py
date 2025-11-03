@@ -13,9 +13,11 @@ from source.services.manager import Manager
 from source.utils import (
     DISCORD_GUILD_ID_MIN_LENGTH,
     DISCORD_USER_ID_MIN_LENGTH,
+    MEETING_UUID_LENGTH,
     calculate_file_sha256,
     generate_16_char_uuid,
     get_current_timestamp_est,
+    calculate_audio_file_duration_ms,
 )
 
 # -------------------------------------------------------------- #
@@ -65,10 +67,8 @@ class SQLRecordingManagerService(Manager):
             raise ValueError(
                 f"user_id must be at least {DISCORD_USER_ID_MIN_LENGTH} characters long"
             )
-        if len(meeting_id) < DISCORD_GUILD_ID_MIN_LENGTH:
-            raise ValueError(
-                f"meeting_id must be at least {DISCORD_GUILD_ID_MIN_LENGTH} characters long"
-            )
+        if len(meeting_id) < MEETING_UUID_LENGTH:
+            raise ValueError(f"meeting_id must be at least {MEETING_UUID_LENGTH} characters long")
 
         # entry data
         entry_id = generate_16_char_uuid()
@@ -152,7 +152,10 @@ class SQLRecordingManagerService(Manager):
     # -------------------------------------------------------------- #
 
     async def insert_persistent_recording(
-        self, user_id: str, meeting_id: str, start_timestamp_ms: int, filename: str
+        self,
+        user_id: str,
+        meeting_id: str,
+        filename: str,
     ) -> str:
         """
         Insert a new persistent recording chunk when PCM file is flushed.
@@ -160,6 +163,9 @@ class SQLRecordingManagerService(Manager):
         Args:
             user_id: Discord User ID of the participant
             meeting_id: Meeting ID (16 chars)
+            start_timestamp_ms: Start timestamp in milliseconds
+            filename: Path to the recording file
+            duration_in_ms: Duration of the recording in milliseconds (default: 0)
 
         Returns:
             recording_id: The generated ID for the persistent recording
@@ -170,21 +176,21 @@ class SQLRecordingManagerService(Manager):
             raise ValueError(
                 f"user_id must be at least {DISCORD_USER_ID_MIN_LENGTH} characters long"
             )
-        if len(meeting_id) < DISCORD_GUILD_ID_MIN_LENGTH:
-            raise ValueError(
-                f"meeting_id must be at least {DISCORD_GUILD_ID_MIN_LENGTH} characters long"
-            )
+        if len(meeting_id) < MEETING_UUID_LENGTH:
+            raise ValueError(f"meeting_id must be at least {MEETING_UUID_LENGTH} characters long")
 
         # entry data
         entry_id = generate_16_char_uuid()
         timestamp = get_current_timestamp_est()
         sha256 = calculate_file_sha256(filename)
+        file_duration_ms = calculate_audio_file_duration_ms(filename)
 
         recording = RecordingModel(
             id=entry_id,
             user_id=user_id,
             meeting_id=meeting_id,
             created_at=timestamp,
+            duration_in_ms=file_duration_ms,
             filename=filename,
             sha256=sha256,
         )
@@ -195,6 +201,7 @@ class SQLRecordingManagerService(Manager):
             "user_id": recording.user_id,
             "meeting_id": recording.meeting_id,
             "created_at": recording.created_at,
+            "duration_in_ms": recording.duration_in_ms,
             "filename": recording.filename,
             "sha256": recording.sha256,
         }
@@ -324,8 +331,8 @@ class SQLRecordingManagerService(Manager):
             raise ValueError(
                 f"user_id must be at least {DISCORD_USER_ID_MIN_LENGTH} characters long"
             )
-        if len(meeting_id) != 16:
-            raise ValueError("meeting_id must be 16 characters long")
+        if len(meeting_id) != MEETING_UUID_LENGTH:
+            raise ValueError(f"meeting_id must be {MEETING_UUID_LENGTH} characters long")
 
         # Build and execute query
         query = select(TempRecordingModel).where(
@@ -353,8 +360,8 @@ class SQLRecordingManagerService(Manager):
             raise ValueError(
                 f"user_id must be at least {DISCORD_USER_ID_MIN_LENGTH} characters long"
             )
-        if len(meeting_id) != 16:
-            raise ValueError("meeting_id must be 16 characters long")
+        if len(meeting_id) != MEETING_UUID_LENGTH:
+            raise ValueError(f"meeting_id must be {MEETING_UUID_LENGTH} characters long")
 
         # Build and execute query
         query = select(RecordingModel).where(
