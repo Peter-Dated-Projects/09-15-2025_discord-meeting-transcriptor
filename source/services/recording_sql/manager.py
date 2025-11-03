@@ -361,7 +361,7 @@ class SQLRecordingManagerService(Manager):
 
         # Compute aggregated values
         total_duration_ms = sum(chunk.get("duration_ms", 0) for chunk in temp_chunks)
-        
+
         # For filename, you might want to construct it based on meeting/user
         # For now, using the first chunk's mp3_path as a reference
         first_chunk = temp_chunks[0]

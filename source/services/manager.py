@@ -42,7 +42,7 @@ class ServicesManager:
         await self.file_service_manager.on_start(self)
         await self.recording_file_service_manager.on_start(self)
         await self.ffmpeg_service_manager.on_start(self)
-        
+
         # Initialize SQL recording service if available
         if self.sql_recording_service:
             await self.sql_recording_service.on_start(self)
@@ -343,21 +343,27 @@ class BaseDiscordRecorderServiceManager(Manager):
         super().__init__(server)
 
     @abstractmethod
-    async def start_session(self, session_id: str) -> None:
+    async def start_session(
+        self,
+        channel_id: int,
+        meeting_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        guild_id: Optional[str] = None,
+    ) -> bool:
         """Start a new recording session."""
         pass
 
     @abstractmethod
-    async def stop_session(self, session_id: str) -> None:
+    async def stop_session(self, channel_id: int) -> bool:
         """Stop a recording session."""
         pass
 
     @abstractmethod
-    async def pause_session(self, session_id: str) -> None:
+    async def pause_session(self, channel_id: int) -> bool:
         """Pause a recording session."""
         pass
 
     @abstractmethod
-    async def resume_session(self, session_id: str) -> None:
+    async def resume_session(self, channel_id: int) -> bool:
         """Resume a paused recording session."""
         pass
