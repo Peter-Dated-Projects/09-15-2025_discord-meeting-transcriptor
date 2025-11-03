@@ -62,27 +62,34 @@ class BaseSQLServerHandler(ABC):
         return self._connected
 
     # -------------------------------------------------------------- #
-    # CRUD Operations
+    # Utility Methods
     # -------------------------------------------------------------- #
 
     @abstractmethod
-    async def query(self, query: str) -> any:
-        """Execute a query against the server."""
+    def compile_query_object(self, stmt) -> str:
+        """
+        Compile a SQLAlchemy statement object into a SQL query string.
+
+        Args:
+            stmt: SQLAlchemy statement object
+
+        Returns:
+            Compiled SQL query string
+        """
         pass
 
     @abstractmethod
-    async def insert(self, table: str, data: dict) -> None:
-        """Insert data into a specified table."""
-        pass
+    async def execute(self, query: str, params: dict | None = None) -> list[dict]:
+        """
+        Execute a SQL query and return results.
 
-    @abstractmethod
-    async def update(self, table: str, data: dict, conditions: dict) -> None:
-        """Update data in a specified table based on conditions."""
-        pass
+        Args:
+            query: SQL query string
+            params: Optional parameters for the query
 
-    @abstractmethod
-    async def delete(self, table: str, conditions: dict) -> None:
-        """Delete data from a specified table based on conditions."""
+        Returns:
+            List of result rows as dictionaries
+        """
         pass
 
 

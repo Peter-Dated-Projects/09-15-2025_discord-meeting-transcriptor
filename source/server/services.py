@@ -20,47 +20,6 @@ class SQLDatabase(BaseSQLServerHandler):
         self.connection = None
 
     # ------------------------------------------------------ #
-    # CRUD
-    # ------------------------------------------------------ #
-
-    @abstractmethod
-    async def query(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-        """
-        Execute a SQL query.
-
-        Args:
-            query: SQL query string
-            params: Optional parameters for the query
-
-        Returns:
-            List of result rows as dictionaries
-        """
-        pass
-
-    @abstractmethod
-    async def insert(self, table: str, data: dict[str, Any]) -> None:
-        """
-        Insert data into a table.
-
-        Args:
-            table: Table name
-            data: Data to insert as a dictionary
-        """
-        pass
-
-    @abstractmethod
-    async def update(self, table: str, data: dict[str, Any], conditions: dict[str, Any]) -> None:
-        """
-        Update data in a table.
-
-        Args:
-            table: Table name
-            data: Data to update as a dictionary
-            conditions: Conditions for the update as a dictionary
-        """
-        pass
-
-    # ------------------------------------------------------ #
     # Utils
     # ------------------------------------------------------ #
 
@@ -74,5 +33,19 @@ class SQLDatabase(BaseSQLServerHandler):
 
         Returns:
             Compiled SQL query string
+        """
+        pass
+
+    @abstractmethod
+    async def execute(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """
+        Execute a SQL query and return results.
+
+        Args:
+            query: SQL query string
+            params: Optional parameters for the query
+
+        Returns:
+            List of result rows as dictionaries
         """
         pass
