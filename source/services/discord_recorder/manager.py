@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 from source.server.sql_models import TempRecordingModel, TranscodeStatus
 from source.services.manager import BaseDiscordRecorderServiceManager, ServicesManager
-from source.utils import generate_16_char_uuid, get_current_timestamp_est
+from source.utils import BotUtils, generate_16_char_uuid, get_current_timestamp_est
 
 # -------------------------------------------------------------- #
 # Configuration Constants
@@ -1108,6 +1108,35 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
     # Promotion Helper Methods
     # -------------------------------------------------------------- #
 
+    async def _send_recording_notification(
+        self,
+        bot_instance: discord.Bot,
+        user_id: int | str,
+        meeting_id: str,
+        recording_id: str,
+        output_filename: str,
+    ) -> bool:
+        """
+        Send a recording completion notification to a Discord user.
+
+        Args:
+            bot_instance: Discord bot instance
+            user_id: Discord user ID (int or string)
+            meeting_id: Meeting ID
+            recording_id: Recording ID
+            output_filename: Name of the output file
+
+        Returns:
+            True if notification was sent successfully, False otherwise
+        """
+        message = (
+            f"✅ Your recording from meeting `{meeting_id}` has been processed and saved!\n"
+            f"Recording ID: `{recording_id}`\n"
+            f"File: `{output_filename}`"
+        )
+
+        return await BotUtils.send_dm(bot_instance, user_id, message)
+
     async def _process_recordings_post_stop(
         self,
         meeting_id: str,
@@ -1176,14 +1205,14 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                             # SQL stores PCM filename, convert to MP3 filename
                             mp3_filename = filename.replace(".pcm", ".mp3")
 
-                            # Construct full path
+                            # Use file service to check if file exists
                             temp_path = (
                                 self.services.recording_file_service_manager.get_temporary_storage_path()
                             )
                             full_path = os.path.join(temp_path, mp3_filename)
 
-                            # Check if file exists
-                            if os.path.exists(full_path):
+                            # Check if file exists using file service manager
+                            if await self.services.file_service_manager.file_exists(full_path):
                                 mp3_files.append(full_path)
                             else:
                                 await self.services.logging_service.debug(
@@ -1225,25 +1254,13 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
                     # Send DM notification to user if bot instance is provided
                     if bot_instance:
-                        try:
-                            user = await bot_instance.fetch_user(int(rec_user_id))
-                            if user:
-                                await user.send(
-                                    f"✅ Your recording from meeting `{meeting_id}` has been processed and saved!\n"
-                                    f"Recording ID: `{recording_id}`\n"
-                                    f"File: `{output_filename}`"
-                                )
-                                await self.services.logging_service.info(
-                                    f"Sent DM notification to user {rec_user_id}"
-                                )
-                        except discord.Forbidden:
-                            await self.services.logging_service.warning(
-                                f"Could not send DM to user {rec_user_id} - DMs disabled"
-                            )
-                        except Exception as e:
-                            await self.services.logging_service.error(
-                                f"Error sending DM to user {rec_user_id}: {e}"
-                            )
+                        await self._send_recording_notification(
+                            bot_instance=bot_instance,
+                            user_id=rec_user_id,
+                            meeting_id=meeting_id,
+                            recording_id=recording_id,
+                            output_filename=output_filename,
+                        )
 
                 except Exception as e:
                     await self.services.logging_service.error(
