@@ -192,6 +192,7 @@ class TempRecordingModel(Base):
     Meeting ID = Foreign Key to associated Meeting ID
     Filename = Filename of the recording file
         - assets/recordings/yyyy-mm-dd_recording_{user_id}_{timestamp in ms}.???
+    Transcode Status = Status of the FFmpeg transcode job (queued, in_progress, done, failed)
     """
 
     __tablename__ = "temp_recordings"
@@ -204,3 +205,8 @@ class TempRecordingModel(Base):
     )
     filename = Column(String(512), nullable=False)
     timestamp_ms = Column(Integer, nullable=False)
+    transcode_status = Column(
+        Enum(TranscodeStatus, name="transcode_status_enum"),
+        nullable=False,
+        default=TranscodeStatus.QUEUED.value,
+    )
