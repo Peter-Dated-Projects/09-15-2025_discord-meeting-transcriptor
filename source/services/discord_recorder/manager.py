@@ -143,8 +143,7 @@ class DiscordSessionHandler:
         if not self.is_recording:
             return
 
-        # Prevent race conditions - no new audio data during shutdown
-        self._is_shutting_down = True
+        # Stop recording flag first
         self.is_recording = False
 
         # Cancel flush task
@@ -157,8 +156,14 @@ class DiscordSessionHandler:
         if self.discord_voice_client.recording:
             self.discord_voice_client.stop_recording()
 
-        # Final flush of any remaining data for ALL users
-        await self._flush_all_users()
+        # Extract any final audio data from sink before flushing
+        await self._extract_user_audio_from_sink()
+
+        # Final flush of any remaining data for ALL users (regardless of buffer length)
+        await self._flush_all_users(force=True)
+
+        # Now set shutdown flag to prevent any new operations
+        self._is_shutting_down = True
 
         total_chunks = sum(len(ids) for ids in self._user_temp_recording_ids.values())
         await self.services.logging_service.info(
@@ -272,7 +277,7 @@ class DiscordSessionHandler:
             await self.services.logging_service.debug("Flush loop cancelled")
             raise
 
-    async def _flush_all_users(self) -> None:
+    async def _flush_all_users(self, force: bool = False) -> None:
         """
         Flush audio data for all users who have buffered audio.
 
@@ -281,8 +286,11 @@ class DiscordSessionHandler:
         2. Create temp recording in SQL
         3. Queue FFmpeg transcode job
         4. Clear buffer
+
+        Args:
+            force: If True, bypass shutdown check and flush all buffers regardless of length
         """
-        if self._is_shutting_down:
+        if self._is_shutting_down and not force:
             return
 
         for user_id, buffer in list(self._user_audio_buffers.items()):
@@ -595,6 +603,27 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                 "user_id and guild_id are required for SQL tracking"
             )
             return False
+
+        # Create meeting entry in SQL database (CRITICAL: must happen before session starts)
+        if self.services.sql_recording_service_manager:
+            try:
+                await self.services.sql_recording_service_manager.insert_meeting(
+                    meeting_id=meeting_id,
+                    guild_id=guild_id,
+                    channel_id=str(channel_id),
+                    requested_by=user_id,
+                )
+                await self.services.logging_service.info(
+                    f"Created meeting entry in database: {meeting_id}"
+                )
+            except Exception as e:
+                await self.services.logging_service.error(
+                    f"CRITICAL ERROR: Failed to create meeting entry in database - "
+                    f"Meeting: {meeting_id}, Guild: {guild_id}, Channel: {channel_id}, "
+                    f"Error Type: {type(e).__name__}, Details: {str(e)}. "
+                    f"Cannot start recording session without meeting entry (foreign key constraint)."
+                )
+                return False
 
         # Create session handler
         session = DiscordSessionHandler(
