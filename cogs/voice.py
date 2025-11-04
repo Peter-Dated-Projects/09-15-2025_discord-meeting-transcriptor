@@ -4,6 +4,9 @@ import logging
 import discord
 from discord.ext import commands
 
+from source.server.server import ServerManager
+from source.services.manager import ServicesManager
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,8 +19,10 @@ class VoiceConnectionError(Exception):
 class Voice(commands.Cog):
     """Voice based commands."""
 
-    def __init__(self, bot: discord.Bot):
+    def __init__(self, bot: discord.Bot, server: ServerManager, services: ServicesManager):
         self.bot = bot
+        self.server = server
+        self.services = services
 
     # -------------------------------------------------------------- #
     # Utils
@@ -156,5 +161,5 @@ class Voice(commands.Cog):
         return
 
 
-def setup(bot: discord.Bot):
-    bot.add_cog(Voice(bot))
+def setup(bot: discord.Bot, server: ServerManager, services: ServicesManager):
+    bot.add_cog(Voice(bot, server, services))

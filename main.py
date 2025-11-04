@@ -35,12 +35,20 @@ intents.voice_states = True
 bot = discord.Bot(intents=intents, debug_guilds=DEBUG_GUILD_IDS if DEBUG_GUILD_IDS else None)
 
 
-def load_cogs():
-    """Load all cog extensions."""
-    bot.load_extension("cogs.general")
+def load_cogs(servers_manager, services_manager):
+    """Load all cog extensions with server and services managers.
+
+    Args:
+        servers_manager: The server manager instance
+        services_manager: The services manager instance
+    """
+    from cogs.general import setup as setup_general
+    from cogs.voice import setup as setup_voice
+
+    setup_general(bot, servers_manager, services_manager)
     print("✓ Loaded cogs.general")
 
-    bot.load_extension("cogs.voice")
+    setup_voice(bot, servers_manager, services_manager)
     print("✓ Loaded cogs.voice")
 
 
@@ -134,7 +142,7 @@ async def main():
     # -------------------------------------------------------------- #
 
     async with bot:
-        load_cogs()
+        load_cogs(servers_manager, services_manager)
         token = os.getenv("DISCORD_API_TOKEN")
         if not token:
             print("Error: DISCORD_API_TOKEN not found in environment variables")
