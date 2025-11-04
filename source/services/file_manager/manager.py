@@ -88,6 +88,27 @@ class FileManagerService(BaseFileServiceManager):
                 self._locks.pop(key, None)
                 self._waiters.pop(key, None)
 
+    async def _acquire_file_lock_oneshot(self, filename: str):
+        """Acquire a file lock for atomic operations (non-context manager)."""
+        key = self._lock_key(filename)
+        lock = self._locks.setdefault(key, asyncio.Lock())
+        self._waiters[key] = self._waiters.get(key, 0) + 1
+        await lock.acquire()
+
+    async def _release_file_lock_oneshot(self, filename: str):
+        """Release a file lock (non-context manager)."""
+        key = self._lock_key(filename)
+        if key in self._locks:
+            self._locks[key].release()
+            self._waiters[key] -= 1
+            if self._waiters[key] == 0:
+                self._locks.pop(key, None)
+                self._waiters.pop(key, None)
+
+    # -------------------------------------------------------------- #
+    # Public File Operations
+    # -------------------------------------------------------------- #
+
     async def save_file(self, filename: str, data: bytes) -> None:
         """Save a file to the storage path atomically."""
         file_path = os.path.join(self.storage_path, filename)
@@ -204,20 +225,3 @@ class FileManagerService(BaseFileServiceManager):
             exists = await loop.run_in_executor(None, os.path.exists, parent_dir)
             if not exists:
                 await loop.run_in_executor(None, os.makedirs, parent_dir, True)
-
-    async def _acquire_file_lock_oneshot(self, filename: str):
-        """Acquire a file lock for atomic operations (non-context manager)."""
-        key = self._lock_key(filename)
-        lock = self._locks.setdefault(key, asyncio.Lock())
-        self._waiters[key] = self._waiters.get(key, 0) + 1
-        await lock.acquire()
-
-    async def _release_file_lock_oneshot(self, filename: str):
-        """Release a file lock (non-context manager)."""
-        key = self._lock_key(filename)
-        if key in self._locks:
-            self._locks[key].release()
-            self._waiters[key] -= 1
-            if self._waiters[key] == 0:
-                self._locks.pop(key, None)
-                self._waiters.pop(key, None)
