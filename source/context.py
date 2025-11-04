@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import discord
+
     from source.server.server import ServerManager
     from source.services.manager import ServicesManager
 
@@ -20,9 +21,9 @@ class Context:
     """
 
     def __init__(self):
-        self.server_manager: "ServerManager | None" = None
-        self.services_manager: "ServicesManager | None" = None
-        self.bot: "discord.Bot | None" = None
+        self.server_manager: ServerManager | None = None
+        self.services_manager: ServicesManager | None = None
+        self.bot: discord.Bot | None = None
 
     def set_server_manager(self, server_manager: "ServerManager") -> None:
         """Set the server manager instance."""
