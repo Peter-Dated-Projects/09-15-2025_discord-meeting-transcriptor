@@ -26,13 +26,10 @@ DEBUG_GUILD_IDS = [1233459903696208014]  # Example: [123456789012345678]
 # Or add your guild IDs for instant registration during development
 
 intents = discord.Intents.default()
-intents.message_content = True
-intents.guilds = True
-intents.members = True
 intents.voice_states = True
 
 # If DEBUG_GUILD_IDS is not empty, commands will register instantly in those guilds
-bot = discord.Bot(intents=intents, debug_guilds=DEBUG_GUILD_IDS if DEBUG_GUILD_IDS else None)
+bot = discord.Bot(intents=intents, debug_guilds=DEBUG_GUILD_IDS)
 
 
 def load_cogs(servers_manager, services_manager):
@@ -96,10 +93,11 @@ async def on_application_command_error(
     ctx: discord.ApplicationContext, error: discord.DiscordException
 ):
     """Handle errors in application commands."""
+    logging.error(f"Error in command {ctx.command.name}: {error}")
+
     if isinstance(error, discord.CheckFailure):
         await ctx.respond("❌ You don't have permission to use this command.", ephemeral=True)
     else:
-        print(f"Command error in {ctx.command.name}: {error}")
         await ctx.respond(f"❌ An error occurred: {str(error)}", ephemeral=True)
 
 
