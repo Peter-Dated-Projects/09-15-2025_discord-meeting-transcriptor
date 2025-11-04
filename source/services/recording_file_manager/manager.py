@@ -88,8 +88,23 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
     async def save_to_temp_file(self, filename: str, data: bytes) -> str:
         """Save data to a temporary file."""
         try:
-            await self.services.file_service_manager.save_file(filename, data)
             temp_path = os.path.join(self.temp_path, filename)
+
+            # Write file directly using aiofiles (bypass file_service_manager which has wrong base path)
+            loop = asyncio.get_event_loop()
+
+            # Ensure parent directory exists (shouldn't be needed but defensive)
+            parent_dir = os.path.dirname(temp_path)
+            if not await loop.run_in_executor(None, os.path.exists, parent_dir):
+                await loop.run_in_executor(None, os.makedirs, parent_dir)
+
+            # Write file atomically
+            def write_file():
+                with open(temp_path, "wb") as f:
+                    f.write(data)
+
+            await loop.run_in_executor(None, write_file)
+
             await self.services.logging_service.info(
                 f"Saved recording to temp file: {filename} ({len(data)} bytes)"
             )
