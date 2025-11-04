@@ -6,12 +6,13 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import discord
+from sqlalchemy import select
 
 if TYPE_CHECKING:
     pass
 
 from source.server.server import ServerManager
-from source.server.sql_models import TranscodeStatus
+from source.server.sql_models import TempRecordingModel, TranscodeStatus
 from source.services.manager import BaseDiscordRecorderServiceManager, ServicesManager
 from source.utils import generate_16_char_uuid, get_current_timestamp_est
 
@@ -1248,20 +1249,15 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         """
         cutoff_time = datetime.utcnow() - timedelta(hours=ttl_hours)
 
-        # Query old temp recordings using enum values
-        query = """
-            SELECT id, mp3_path, pcm_path
-            FROM temp_recordings
-            WHERE created_at < :cutoff
-            AND transcode_status IN (:status_done, :status_failed)
-        """
-        params = {
-            "cutoff": cutoff_time,
-            "status_done": TranscodeStatus.DONE.value,
-            "status_failed": TranscodeStatus.FAILED.value,
-        }
+        # Query old temp recordings using SQLAlchemy
+        query = select(TempRecordingModel).where(
+            TempRecordingModel.created_at < cutoff_time,
+            TempRecordingModel.transcode_status.in_(
+                [TranscodeStatus.DONE.value, TranscodeStatus.FAILED.value]
+            ),
+        )
 
-        old_recordings = await self.server.sql_client.query(query, params)
+        old_recordings = await self.server.sql_client.execute(query)
 
         if not old_recordings:
             await self.services.logging_service.debug("No old temp recordings to clean up")
@@ -1275,19 +1271,31 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         deleted_count = 0
         for record in old_recordings:
             temp_id = record["id"]
-            mp3_path = record.get("mp3_path")
-            pcm_path = record.get("pcm_path")
+            # Note: The TempRecordingModel only stores filename, not full paths
+            # We need to construct the paths from the filename
+            filename = record.get("filename")
 
             try:
-                loop = asyncio.get_event_loop()
+                if filename:
+                    temp_path = (
+                        self.services.recording_file_service_manager.get_temporary_storage_path()
+                    )
 
-                # Delete MP3 file if exists (non-blocking)
-                if mp3_path and os.path.exists(mp3_path):
-                    await loop.run_in_executor(None, os.remove, mp3_path)
+                    # Construct PCM and MP3 paths
+                    pcm_filename = filename
+                    mp3_filename = filename.replace(".pcm", ".mp3")
+                    pcm_path = os.path.join(temp_path, pcm_filename)
+                    mp3_path = os.path.join(temp_path, mp3_filename)
 
-                # Delete PCM file if exists (non-blocking)
-                if pcm_path and os.path.exists(pcm_path):
-                    await loop.run_in_executor(None, os.remove, pcm_path)
+                    loop = asyncio.get_event_loop()
+
+                    # Delete MP3 file if exists (non-blocking)
+                    if os.path.exists(mp3_path):
+                        await loop.run_in_executor(None, os.remove, mp3_path)
+
+                    # Delete PCM file if exists (non-blocking)
+                    if os.path.exists(pcm_path):
+                        await loop.run_in_executor(None, os.remove, pcm_path)
 
                 deleted_count += 1
 
