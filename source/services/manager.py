@@ -58,8 +58,7 @@ class ServicesManager:
         await self.sql_recording_service_manager.on_start(self)
 
         # Discord recorder
-        if self.discord_recorder_service_manager:
-            await self.discord_recorder_service_manager.on_start(self)
+        await self.discord_recorder_service_manager.on_start(self)
 
         # TODO - need to create
         # await self.transcription_file_service_manager.on_start(self)

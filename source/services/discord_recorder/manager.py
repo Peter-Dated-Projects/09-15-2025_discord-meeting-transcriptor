@@ -615,7 +615,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         meeting_id: str | None = None,
         user_id: str | None = None,
         guild_id: str | None = None,
-    ) -> bool:
+    ) -> DiscordSessionHandler | None:
         """
         Start recording audio from a Discord channel.
 
@@ -633,7 +633,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             await self.services.logging_service.warning(
                 f"Session already exists for channel {channel_id}"
             )
-            return False
+            return None
 
         # Generate meeting ID if not provided
         if not meeting_id:
@@ -644,7 +644,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             await self.services.logging_service.error(
                 "user_id and guild_id are required for SQL tracking"
             )
-            return False
+            return None
 
         # Create meeting entry in SQL database (CRITICAL: must happen before session starts)
         if self.services.sql_recording_service_manager:
@@ -665,7 +665,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Error Type: {type(e).__name__}, Details: {str(e)}. "
                     f"Cannot start recording session without meeting entry (foreign key constraint)."
                 )
-                return False
+                return None
 
         # Create session handler
         session = DiscordSessionHandler(
@@ -686,7 +686,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         await self.services.logging_service.info(
             f"Started recording session for meeting {meeting_id}, channel {channel_id}"
         )
-        return True
+        return session
 
     async def stop_session(self, channel_id: int, bot_instance: discord.Bot | None = None) -> bool:
         """

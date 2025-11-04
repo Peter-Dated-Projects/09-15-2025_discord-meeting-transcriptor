@@ -57,6 +57,18 @@ def load_cogs(servers_manager, services_manager):
 
 
 # -------------------------------------------------------------- #
+# Commands
+# -------------------------------------------------------------- #
+
+
+@bot.command(name="murder", description="Stops the bot for real")
+async def murder(ctx: discord.ApplicationContext):
+    """Stop the bot."""
+    await ctx.respond("🔪 Stopping the bot...")
+    await bot.close()
+
+
+# -------------------------------------------------------------- #
 # Events
 # -------------------------------------------------------------- #
 

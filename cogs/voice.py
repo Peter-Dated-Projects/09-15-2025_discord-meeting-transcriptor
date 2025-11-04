@@ -6,15 +6,15 @@ import discord
 from discord.ext import commands
 
 from source.server.server import ServerManager
+from source.services.discord_recorder.manager import DiscordSessionHandler
 from source.services.manager import ServicesManager
 
 logger = logging.getLogger(__name__)
 
 
-class VoiceConnectionError(Exception):
-    """Base exception for voice connection errors."""
-
-    pass
+# -------------------------------------------------------------- #
+# Cog
+# -------------------------------------------------------------- #
 
 
 class Voice(commands.Cog):
@@ -100,6 +100,25 @@ class Voice(commands.Cog):
         except discord.DiscordException as e:
             return None, f"Failed to connect to voice channel: {e}"
 
+    async def on_voice_state_update(self, member, before, after):
+        """Handle voice state updates for members.
+
+        Args:
+            member: The member whose voice state has changed
+            before: The previous voice state
+            after: The new voice state
+        """
+
+        # TODO - if there's no use for this, then remove it
+        # # Log voice state changes
+        # logger.info(
+        #     f"Voice state update for member {member.id}: "
+        #     f"before={before.channel.id if before.channel else 'None'}, "
+        #     f"after={after.channel.id if after.channel else 'None'}"
+        # )
+
+        pass
+
     # -------------------------------------------------------------- #
     # Slash Commands
     # -------------------------------------------------------------- #
@@ -143,17 +162,20 @@ class Voice(commands.Cog):
             return
 
         # Start recording with required parameters
-        success = await self.services.discord_recorder_service_manager.start_session(
+        session_instance = await self.services.discord_recorder_service_manager.start_session(
             discord_voice_client=voice_client,
             channel_id=voice_channel.id,
             user_id=str(ctx.author.id),
             guild_id=str(ctx.guild.id),
         )
 
-        if not success:
+        if not session_instance:
             await ctx.edit(content="❌ Failed to start recording session.")
             await voice_client.disconnect()
             return
+
+        # Cache within the active sessions
+        self.services.discord_recorder_service_manager.sessions[voice_channel.id] = session_instance
 
         await ctx.edit(content="✅ Recording started! Use /stop to end the transcription.")
 
@@ -216,11 +238,41 @@ class Voice(commands.Cog):
             if voice_client.is_connected():
                 await voice_client.disconnect()
                 logger.info(f"Disconnected from {voice_channel.name}")
+
+            # Remove from active sessions cache
+            self.services.discord_recorder_service_manager.sessions.pop(voice_channel.id, None)
         except Exception as e:
             logger.error(f"Error disconnecting from voice: {e}")
 
         return
 
+    # -------------------------------------------------------------- #
+    # Debug Functions
+    # -------------------------------------------------------------- #
+
+    @commands.slash_command(
+        name="debug_active_sessions", description="Debug: List active recording sessions"
+    )
+    async def debug_active_sessions(self, ctx: discord.ApplicationContext) -> None:
+        """List all active recording sessions."""
+        sessions = self.services.discord_recorder_service_manager.sessions
+        if len(sessions) == 0:
+            await ctx.send("No active recording sessions found.")
+            return
+
+        session_list = []
+        for channel_id, session in sessions.items():
+            session_list.append(f"Channel ID: {channel_id}, Meeting ID: {session.meeting_id}")
+
+        await ctx.edit("Active recording sessions:\n" + "\n".join(session_list))
+
 
 def setup(bot: discord.Bot, server: ServerManager, services: ServicesManager):
-    bot.add_cog(Voice(bot, server, services))
+    voice = Voice(bot, server, services)
+    bot.add_cog(voice)
+
+    # -------------------------------------------------------------- #
+    # Add listeners
+    # -------------------------------------------------------------- #
+
+    bot.add_listener(voice.on_voice_state_update, "on_voice_state_update")
