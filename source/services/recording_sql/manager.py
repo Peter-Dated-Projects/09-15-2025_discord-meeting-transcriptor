@@ -1,9 +1,12 @@
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, insert, select, update
 
 from source.server.server import ServerManager
 from source.server.sql_models import (
+    MeetingModel,
+    MeetingStatus,
     RecordingModel,
     TempRecordingModel,
+    TranscodeStatus,
 )
 from source.services.manager import Manager
 from source.utils import (
@@ -76,6 +79,7 @@ class SQLRecordingManagerService(Manager):
             created_at=timestamp,
             filename=filename,
             timestamp_ms=start_timestamp_ms,
+            transcode_status=TranscodeStatus.QUEUED.value,
         )
 
         # Convert to dict for insertion
@@ -86,6 +90,7 @@ class SQLRecordingManagerService(Manager):
             "created_at": temp_recording.created_at,
             "filename": temp_recording.filename,
             "timestamp_ms": temp_recording.timestamp_ms,
+            "transcode_status": temp_recording.transcode_status,
         }
 
         # Build and execute insert statement
@@ -140,6 +145,33 @@ class SQLRecordingManagerService(Manager):
         await self.server.sql_client.execute(query)
         await self.services.logging_service.info(
             f"Deleted {len(temp_recording_entry_ids)} temp recordings"
+        )
+
+    async def update_temp_recording_status(
+        self, temp_recording_id: str, status: TranscodeStatus
+    ) -> None:
+        """
+        Update the transcode status of a temp recording.
+
+        Args:
+            temp_recording_id: The ID of the temp recording to update
+            status: New TranscodeStatus value
+        """
+        # Validate input
+        if len(temp_recording_id) != 16:
+            raise ValueError("temp_recording_id must be 16 characters long")
+
+        # Build update query
+        stmt = (
+            update(TempRecordingModel)
+            .where(TempRecordingModel.id == temp_recording_id)
+            .values(transcode_status=status.value)
+        )
+
+        # Execute update
+        await self.server.sql_client.execute(stmt)
+        await self.services.logging_service.debug(
+            f"Updated temp recording {temp_recording_id} status to {status.value}"
         )
 
     # -------------------------------------------------------------- #
@@ -256,6 +288,81 @@ class SQLRecordingManagerService(Manager):
     # -------------------------------------------------------------- #
     # Meeting Methods
     # -------------------------------------------------------------- #
+
+    async def insert_meeting(
+        self,
+        meeting_id: str,
+        guild_id: str,
+        channel_id: str,
+        requested_by: str,
+    ) -> str:
+        """
+        Insert a new meeting entry when recording starts.
+
+        Args:
+            meeting_id: Meeting ID (16 chars)
+            guild_id: Discord Guild ID
+            channel_id: Discord Channel ID
+            requested_by: Discord User ID of the user who requested the recording
+
+        Returns:
+            meeting_id: The meeting ID (same as input, for consistency with other insert methods)
+        """
+        # Validate inputs
+        if len(meeting_id) != MEETING_UUID_LENGTH:
+            raise ValueError(f"meeting_id must be {MEETING_UUID_LENGTH} characters long")
+        if len(guild_id) < DISCORD_USER_ID_MIN_LENGTH:
+            raise ValueError(
+                f"guild_id must be at least {DISCORD_USER_ID_MIN_LENGTH} characters long"
+            )
+        if len(channel_id) < DISCORD_USER_ID_MIN_LENGTH:
+            raise ValueError(
+                f"channel_id must be at least {DISCORD_USER_ID_MIN_LENGTH} characters long"
+            )
+        if len(requested_by) < DISCORD_USER_ID_MIN_LENGTH:
+            raise ValueError(
+                f"requested_by must be at least {DISCORD_USER_ID_MIN_LENGTH} characters long"
+            )
+
+        timestamp = get_current_timestamp_est()
+
+        meeting = MeetingModel(
+            id=meeting_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            started_at=timestamp,
+            ended_at=timestamp,  # Will be updated when recording stops
+            updated_at=timestamp,
+            status=MeetingStatus.RECORDING.value,
+            requested_by=requested_by,
+            participants={},  # Will be populated as users join
+            recording_files={},  # Will be populated as recordings are created
+            transcript_ids={},  # Will be populated when transcripts are generated
+        )
+
+        # Convert to dict for insertion
+        meeting_data = {
+            "id": meeting.id,
+            "guild_id": meeting.guild_id,
+            "channel_id": meeting.channel_id,
+            "started_at": meeting.started_at,
+            "ended_at": meeting.ended_at,
+            "updated_at": meeting.updated_at,
+            "status": meeting.status,
+            "requested_by": meeting.requested_by,
+            "participants": meeting.participants,
+            "recording_files": meeting.recording_files,
+            "transcript_ids": meeting.transcript_ids,
+        }
+
+        # Build and execute insert statement
+        stmt = insert(MeetingModel).values(**meeting_data)
+        await self.server.sql_client.execute(stmt)
+        await self.services.logging_service.info(
+            f"Inserted meeting: {meeting_id} in guild {guild_id}, channel {channel_id}"
+        )
+
+        return meeting_id
 
     async def get_temp_recordings_for_meeting(self, meeting_id: str) -> list[dict]:
         """
