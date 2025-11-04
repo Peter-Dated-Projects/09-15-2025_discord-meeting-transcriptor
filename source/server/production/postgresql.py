@@ -354,7 +354,7 @@ class PostgreSQLServer(SQLDatabase):
                     operation = "DELETE"
                 elif "select" in stmt_str:
                     operation = "SELECT"
-            except:
+            except Exception:
                 pass  # If we can't extract metadata, just continue with 'unknown'
 
             logger.error(

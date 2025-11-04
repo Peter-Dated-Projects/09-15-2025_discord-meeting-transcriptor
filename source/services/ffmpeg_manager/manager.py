@@ -125,14 +125,20 @@ class FFmpegHandler:
             # Format options MUST come BEFORE -i for raw input
             cmd = [
                 self.ffmpeg_path,
-                "-f", "s16le",           # Input format: signed 16-bit little-endian PCM
-                "-ar", "48000",          # Input sample rate: 48kHz (Discord's native rate)
-                "-ac", "2",              # Input channels: stereo
-                "-i", input_path,        # Input file
-                "-codec:a", "libmp3lame", # MP3 encoder
-                "-b:a", bitrate,         # Output bitrate
-                "-y",                    # Overwrite output file
-                output_path
+                "-f",
+                "s16le",  # Input format: signed 16-bit little-endian PCM
+                "-ar",
+                "48000",  # Input sample rate: 48kHz (Discord's native rate)
+                "-ac",
+                "2",  # Input channels: stereo
+                "-i",
+                input_path,  # Input file
+                "-codec:a",
+                "libmp3lame",  # MP3 encoder
+                "-b:a",
+                bitrate,  # Output bitrate
+                "-y",  # Overwrite output file
+                output_path,
             ]
 
             # Run FFmpeg process in executor to avoid blocking
@@ -400,7 +406,7 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
                             job.output_path,
                             job.options,
                         )
-                    
+
                     job.fut.set_result(bool(ok))
 
                     # Log FFmpeg output
@@ -495,7 +501,7 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
                 try:
                     success = f.result()
                     asyncio.create_task(callback(success))
-                except Exception as e:
+                except Exception:
                     asyncio.create_task(callback(False))
 
             fut.add_done_callback(done_callback)

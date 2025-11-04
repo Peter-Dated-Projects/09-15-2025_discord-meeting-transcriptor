@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import discord
 
 if TYPE_CHECKING:
-    from discord import sinks
+    pass
 
 from source.server.server import ServerManager
 from source.server.sql_models import TranscodeStatus
@@ -93,7 +93,7 @@ class DiscordSessionHandler:
         self._user_bytes_read: dict[int, int] = {}
 
         # Pycord recording sink
-        self._sink: "discord.sinks.WaveSink | None" = None
+        self._sink: discord.sinks.WaveSink | None = None
 
         # Shutdown flag
         self._is_shutting_down = False
@@ -675,7 +675,6 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             return False
 
         meeting_id = session.meeting_id
-        user_id = session.user_id
 
         await self.services.logging_service.info(
             f"Stopping recording session for meeting {meeting_id}"

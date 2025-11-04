@@ -6,7 +6,6 @@ import sys
 
 import discord
 import dotenv
-from discord.ext import commands
 
 from source.constructor import ServerManagerType
 from source.server.constructor import construct_server_manager
@@ -29,7 +28,7 @@ logging.basicConfig(
 
 # Add your Discord server ID(s) here for instant command registration during development
 # You can find your server ID by right-clicking your server icon with Developer Mode enabled
-DEBUG_GUILD_IDS = [1233459903696208014]  # Example: [123456789012345678]
+DEBUG_GUILD_IDS = [1233459903696208014, 1266931275047108691]  # Example: [123456789012345678]
 # Leave empty [] for global commands (takes up to 1 hour to register)
 # Or add your guild IDs for instant registration during development
 

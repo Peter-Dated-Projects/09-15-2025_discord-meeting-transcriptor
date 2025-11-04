@@ -102,12 +102,11 @@ class FileManagerService(BaseFileServiceManager):
         async with self._acquire_file_lock(filename):
             # Create temp file in executor
             def write_temp_file():
-                tmp = tempfile.NamedTemporaryFile(dir=path.parent, delete=False)
-                tmp.write(data)
-                tmp.flush()
-                os.fsync(tmp.fileno())
-                tmp_path = Path(tmp.name)
-                tmp.close()
+                with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as tmp:
+                    tmp.write(data)
+                    tmp.flush()
+                    os.fsync(tmp.fileno())
+                    tmp_path = Path(tmp.name)
                 return tmp_path
 
             tmp_path = await loop.run_in_executor(None, write_temp_file)
