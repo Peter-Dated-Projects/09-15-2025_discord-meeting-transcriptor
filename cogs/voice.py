@@ -1,12 +1,10 @@
 import asyncio
 import logging
-import os
 
 import discord
 from discord.ext import commands
 
 from source.server.server import ServerManager
-from source.services.discord_recorder.manager import DiscordSessionHandler
 from source.services.manager import ServicesManager
 
 logger = logging.getLogger(__name__)
