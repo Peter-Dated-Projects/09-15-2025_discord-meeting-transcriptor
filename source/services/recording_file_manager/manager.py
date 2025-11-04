@@ -87,35 +87,72 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
 
     async def save_to_temp_file(self, filename: str, data: bytes) -> str:
         """Save data to a temporary file."""
-        await self.services.file_service_manager.save_file(filename, data)
-        temp_path = os.path.join(self.temp_path, filename)
-        await self.services.logging_service.info(
-            f"Saved recording to temp file: {filename} ({len(data)} bytes)"
-        )
-        return temp_path
+        try:
+            await self.services.file_service_manager.save_file(filename, data)
+            temp_path = os.path.join(self.temp_path, filename)
+            await self.services.logging_service.info(
+                f"Saved recording to temp file: {filename} ({len(data)} bytes)"
+            )
+            return temp_path
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"CRITICAL FILE ERROR: Failed to save temp file - "
+                f"Filename: {filename}, Size: {len(data)} bytes, "
+                f"Error Type: {type(e).__name__}, Details: {str(e)}, "
+                f"Path: {self.temp_path}"
+            )
+            raise
 
     async def move_temp_to_persistent(self, filename: str) -> str:
         """Move a file from temporary to persistent storage."""
         temp_file_path = os.path.join(self.temp_path, filename)
         persistent_file_path = os.path.join(self.storage_path, filename)
 
-        # Use executor for blocking os.rename
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, os.rename, temp_file_path, persistent_file_path)
+        try:
+            # Use executor for blocking os.rename
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, os.rename, temp_file_path, persistent_file_path)
 
-        await self.services.logging_service.info(
-            f"Moved recording file to persistent storage: {filename}"
-        )
-        return persistent_file_path
+            await self.services.logging_service.info(
+                f"Moved recording file to persistent storage: {filename}"
+            )
+            return persistent_file_path
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"CRITICAL FILE ERROR: Failed to move file - "
+                f"Filename: {filename}, Source: {temp_file_path}, Dest: {persistent_file_path}, "
+                f"Error Type: {type(e).__name__}, Details: {str(e)}"
+            )
+            raise
 
     async def delete_persistent_file(self, filename: str) -> None:
         """Delete a file from persistent storage."""
         persistent_file_path = os.path.join(self.storage_path, filename)
-        await self.services.file_service_manager.delete_file(persistent_file_path)
-        await self.services.logging_service.info(f"Deleted persistent recording file: {filename}")
+        try:
+            await self.services.file_service_manager.delete_file(persistent_file_path)
+            await self.services.logging_service.info(
+                f"Deleted persistent recording file: {filename}"
+            )
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"FILE ERROR: Failed to delete persistent file - "
+                f"Filename: {filename}, Path: {persistent_file_path}, "
+                f"Error Type: {type(e).__name__}, Details: {str(e)}"
+            )
+            raise
 
     async def delete_temp_file(self, filename: str) -> None:
         """Delete a file from temporary storage."""
         temp_file_path = os.path.join(self.temp_path, filename)
-        await self.services.file_service_manager.delete_file(temp_file_path)
-        await self.services.logging_service.info(f"Deleted temporary recording file: {filename}")
+        try:
+            await self.services.file_service_manager.delete_file(temp_file_path)
+            await self.services.logging_service.info(
+                f"Deleted temporary recording file: {filename}"
+            )
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"FILE ERROR: Failed to delete temp file - "
+                f"Filename: {filename}, Path: {temp_file_path}, "
+                f"Error Type: {type(e).__name__}, Details: {str(e)}"
+            )
+            raise

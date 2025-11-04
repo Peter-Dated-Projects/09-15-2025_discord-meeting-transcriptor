@@ -22,9 +22,20 @@ def construct_services_manager(
     storage_path: str,
     recording_storage_path: str,
     default_logging_path: str = "logs",
-    default_log_file: str = "app.log",
+    log_file: str | None = None,
+    use_timestamp_logs: bool = True,
 ):
-    """Construct and return a service manager instance based on the service type."""
+    """Construct and return a service manager instance based on the service type.
+    
+    Args:
+        service_type: Type of server manager (DEVELOPMENT or PRODUCTION)
+        server: ServerManager instance
+        storage_path: Path for general file storage
+        recording_storage_path: Path for recording file storage
+        default_logging_path: Directory to store log files (default: "logs")
+        log_file: Specific log file name (optional, overrides use_timestamp_logs)
+        use_timestamp_logs: If True and log_file is None, creates timestamped log files (default: True)
+    """
 
     file_service_manager = None
     recording_file_service_manager = None
@@ -35,7 +46,10 @@ def construct_services_manager(
 
     # create logger
     logging_service = AsyncLoggingService(
-        server=server, log_dir=default_logging_path, log_file=default_log_file
+        server=server, 
+        log_dir=default_logging_path, 
+        log_file=log_file,
+        use_timestamp=use_timestamp_logs,
     )
 
     # create file service manager

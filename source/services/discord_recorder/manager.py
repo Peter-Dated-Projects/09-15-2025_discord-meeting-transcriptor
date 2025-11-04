@@ -312,20 +312,27 @@ class DiscordSessionHandler:
         # Create temp recording in SQL
         temp_recording_id = None
         if self.services.sql_recording_service_manager:
-            temp_recording_id = (
-                await self.services.sql_recording_service_manager.create_temp_recording(
-                    meeting_id=self.meeting_id,
-                    user_id=str(user_id),  # Discord user ID, not bot user
-                    guild_id=self.guild_id,
-                    chunk_number=chunk_num,
-                    pcm_path=pcm_path,
-                    mp3_path=mp3_path,
-                    transcode_status=TranscodeStatus.QUEUED,
+            try:
+                temp_recording_id = (
+                    await self.services.sql_recording_service_manager.insert_temp_recording(
+                        user_id=str(user_id),  # Discord user ID, not bot user
+                        meeting_id=self.meeting_id,
+                        start_timestamp_ms=0,  # TODO: Calculate actual timestamp
+                        filename=pcm_filename,
+                    )
                 )
-            )
 
-            if temp_recording_id:
-                self._user_temp_recording_ids[user_id].append(temp_recording_id)
+                if temp_recording_id:
+                    self._user_temp_recording_ids[user_id].append(temp_recording_id)
+            except Exception as e:
+                await self.services.logging_service.error(
+                    f"CRITICAL DISCORD RECORDER SQL ERROR: Failed to create temp recording - "
+                    f"Meeting: {self.meeting_id}, User: {user_id}, Chunk: {chunk_num}, "
+                    f"Filename: {pcm_filename}, Error Type: {type(e).__name__}, Details: {str(e)}. "
+                    f"This likely indicates a missing meeting entry in the meetings table (foreign key constraint)."
+                )
+                # Don't raise - allow recording to continue even if SQL fails
+                # The file was already saved, so we can manually recover later
 
         # Queue FFmpeg transcode job
         await self._queue_pcm_to_mp3_transcode(pcm_path, mp3_path, temp_recording_id)
@@ -356,12 +363,19 @@ class DiscordSessionHandler:
         if not self.services.recording_file_service_manager:
             raise RuntimeError("Recording file manager service not available")
 
-        # Write to temp storage
-        file_path = await self.services.recording_file_service_manager.save_to_temp_file(
-            filename=filename, data=data
-        )
-
-        return file_path
+        try:
+            # Write to temp storage
+            file_path = await self.services.recording_file_service_manager.save_to_temp_file(
+                filename=filename, data=data
+            )
+            return file_path
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"CRITICAL DISCORD RECORDER ERROR: Failed to write PCM to temp - "
+                f"Meeting: {self.meeting_id}, Filename: {filename}, Size: {len(data)} bytes, "
+                f"Error Type: {type(e).__name__}, Details: {str(e)}"
+            )
+            raise
 
     # -------------------------------------------------------------- #
     # FFmpeg Integration
