@@ -26,7 +26,7 @@ def construct_services_manager(
     use_timestamp_logs: bool = True,
 ):
     """Construct and return a service manager instance based on the service type.
-    
+
     Args:
         service_type: Type of server manager (DEVELOPMENT or PRODUCTION)
         server: ServerManager instance
@@ -46,8 +46,8 @@ def construct_services_manager(
 
     # create logger
     logging_service = AsyncLoggingService(
-        server=server, 
-        log_dir=default_logging_path, 
+        server=server,
+        log_dir=default_logging_path,
         log_file=log_file,
         use_timestamp=use_timestamp_logs,
     )
