@@ -123,16 +123,41 @@ class Voice(commands.Cog):
         await ctx.edit(content="⏳ Connecting to voice channel...")
         voice_client = await voice_channel.connect(timeout=5.0, reconnect=True)
 
-        # TODO - implement transcription logic + recording service
-        # This is where you'll call: voice_client.start_recording(...)
+        # 3. Start recording session
+        await ctx.edit(content="🎙️ Starting recording...")
 
-        # Temporary: wait 5 seconds then disconnect
-        await ctx.edit(content="✅ Transcription started! (simulated for 5 seconds)")
+        # Check if discord_recorder_service_manager is available
+        if not self.services.discord_recorder_service_manager:
+            await ctx.edit(content="❌ Recording service is not available.")
+            await voice_client.disconnect()
+            return
+
+        # Start recording with required parameters
+        success = await self.services.discord_recorder_service_manager.start_session(
+            discord_voice_client=voice_client,
+            channel_id=voice_channel.id,
+            user_id=str(ctx.author.id),
+            guild_id=str(ctx.guild.id),
+        )
+
+        if not success:
+            await ctx.edit(content="❌ Failed to start recording session.")
+            await voice_client.disconnect()
+            return
+
+        # 4. Record for 5 seconds (temporary for testing)
+        await ctx.edit(content="✅ Recording started! (5 seconds for testing)")
         await asyncio.sleep(5)
 
-        # 4. Clean disconnect
+        # 5. Stop recording session
+        await ctx.edit(content="⏳ Stopping recording and processing audio...")
+        await self.services.discord_recorder_service_manager.stop_session(
+            channel_id=voice_channel.id
+        )
+
+        # 6. Clean disconnect
         await ctx.followup.send(
-            "🛑 Stopping transcription and leaving voice channel.", ephemeral=True
+            "✅ Recording complete! Audio files saved and transcoding in progress.", ephemeral=True
         )
 
         try:

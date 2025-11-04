@@ -311,15 +311,17 @@ class DiscordSessionHandler:
 
         # Create temp recording in SQL
         temp_recording_id = None
-        if self.services.sql_recording_service:
-            temp_recording_id = await self.services.sql_recording_service.create_temp_recording(
-                meeting_id=self.meeting_id,
-                user_id=str(user_id),  # Discord user ID, not bot user
-                guild_id=self.guild_id,
-                chunk_number=chunk_num,
-                pcm_path=pcm_path,
-                mp3_path=mp3_path,
-                transcode_status=TranscodeStatus.QUEUED,
+        if self.services.sql_recording_service_manager:
+            temp_recording_id = (
+                await self.services.sql_recording_service_manager.create_temp_recording(
+                    meeting_id=self.meeting_id,
+                    user_id=str(user_id),  # Discord user ID, not bot user
+                    guild_id=self.guild_id,
+                    chunk_number=chunk_num,
+                    pcm_path=pcm_path,
+                    mp3_path=mp3_path,
+                    transcode_status=TranscodeStatus.QUEUED,
+                )
             )
 
             if temp_recording_id:
@@ -351,11 +353,11 @@ class DiscordSessionHandler:
         Returns:
             Absolute path to the written PCM file
         """
-        if not self.services.recording_file_manager_service:
+        if not self.services.recording_file_service_manager:
             raise RuntimeError("Recording file manager service not available")
 
         # Write to temp storage
-        file_path = await self.services.recording_file_manager_service.save_to_temp_file(
+        file_path = await self.services.recording_file_service_manager.save_to_temp_file(
             filename=filename, data=data
         )
 
@@ -376,7 +378,7 @@ class DiscordSessionHandler:
             mp3_path: Path to output MP3 file
             temp_recording_id: Optional temp recording ID for SQL tracking
         """
-        if not self.services.ffmpeg_manager_service:
+        if not self.services.ffmpeg_service_manager:
             await self.services.logging_service.warning(
                 "FFmpeg manager service not available, skipping transcode"
             )
@@ -384,11 +386,11 @@ class DiscordSessionHandler:
 
         # Define callback to update SQL status
         async def on_transcode_complete(success: bool) -> None:
-            if not self.services.sql_recording_service or not temp_recording_id:
+            if not self.services.sql_recording_service_manager or not temp_recording_id:
                 return
 
             new_status = TranscodeStatus.DONE if success else TranscodeStatus.FAILED
-            await self.services.sql_recording_service.update_temp_recording_status(
+            await self.services.sql_recording_service_manager.update_temp_recording_status(
                 temp_recording_id=temp_recording_id, status=new_status
             )
 
@@ -403,7 +405,7 @@ class DiscordSessionHandler:
                     )
 
         # Queue FFmpeg job
-        await self.services.ffmpeg_manager_service.queue_pcm_to_mp3(
+        await self.services.ffmpeg_service_manager.queue_pcm_to_mp3(
             input_path=pcm_path,
             output_path=mp3_path,
             bitrate=DiscordRecorderConstants.MP3_BITRATE,
@@ -428,7 +430,7 @@ class DiscordSessionHandler:
     async def get_session_status(self) -> dict:
         """Get current session status including per-user SQL tracking info."""
         # Check if SQL recording service is available
-        if not self.services.sql_recording_service:
+        if not self.services.sql_recording_service_manager:
             return {
                 "is_recording": self.is_recording,
                 "meeting_id": self.meeting_id,
@@ -448,7 +450,7 @@ class DiscordSessionHandler:
             }
 
         # Query SQL for chunk statuses
-        chunks = await self.services.sql_recording_service.get_temp_recordings_for_meeting(
+        chunks = await self.services.sql_recording_service_manager.get_temp_recordings_for_meeting(
             self.meeting_id
         )
 
@@ -635,7 +637,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         await session.stop_recording()
 
         # Wait for pending transcodes
-        if self.services.sql_recording_service:
+        if self.services.sql_recording_service_manager:
             await self.services.logging_service.info(
                 f"Waiting for pending transcodes for meeting {meeting_id}..."
             )
@@ -650,26 +652,12 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Timeout waiting for transcodes on meeting {meeting_id}"
                 )
 
-            # Promote temp recordings to persistent storage
+            # Note: Temp recordings remain in temp storage and SQL
+            # They will be cleaned up by the background cleanup task
             await self.services.logging_service.info(
-                f"Promoting temp recordings for meeting {meeting_id}..."
+                f"Recording session complete for meeting {meeting_id}. "
+                f"Files are in temp storage and will be cleaned up after {DiscordRecorderConstants.TEMP_RECORDING_TTL_HOURS} hours."
             )
-
-            recording_id = (
-                await self.services.sql_recording_service.promote_temp_recordings_to_persistent(
-                    meeting_id=meeting_id,
-                    user_id=user_id,
-                )
-            )
-
-            if recording_id:
-                await self.services.logging_service.info(
-                    f"Successfully promoted temp recordings to persistent recording: {recording_id}"
-                )
-            else:
-                await self.services.logging_service.warning(
-                    f"No temp recordings to promote for meeting {meeting_id}"
-                )
 
         # Cleanup session
         del self.sessions[channel_id]
@@ -852,8 +840,10 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
         while True:
             # Query temp recordings for the meeting
-            chunks = await self.services.sql_recording_service.get_temp_recordings_for_meeting(
-                meeting_id
+            chunks = (
+                await self.services.sql_recording_service_manager.get_temp_recordings_for_meeting(
+                    meeting_id
+                )
             )
 
             # Check for pending transcodes using enum values
@@ -1001,7 +991,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         for i in range(0, len(temp_ids), batch_size):
             batch = temp_ids[i : i + batch_size]
             try:
-                await self.services.sql_recording_service.delete_temp_recordings(batch)
+                await self.services.sql_recording_service_manager.delete_temp_recordings(batch)
             except Exception as e:
                 await self.services.logging_service.error(
                     f"Failed to delete batch of {len(batch)} temp recordings: {e}"
