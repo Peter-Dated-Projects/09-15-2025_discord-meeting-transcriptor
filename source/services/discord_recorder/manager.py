@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import discord
 
 if TYPE_CHECKING:
-    from discord import sinks
+    pass
 
 from source.server.server import ServerManager
 from source.server.sql_models import TranscodeStatus
@@ -93,7 +93,7 @@ class DiscordSessionHandler:
         self._user_bytes_read: dict[int, int] = {}
 
         # Pycord recording sink
-        self._sink: "discord.sinks.WaveSink | None" = None
+        self._sink: discord.sinks.WaveSink | None = None
 
         # Shutdown flag
         self._is_shutting_down = False
@@ -143,8 +143,7 @@ class DiscordSessionHandler:
         if not self.is_recording:
             return
 
-        # Prevent race conditions - no new audio data during shutdown
-        self._is_shutting_down = True
+        # Stop recording flag first
         self.is_recording = False
 
         # Cancel flush task
@@ -157,8 +156,14 @@ class DiscordSessionHandler:
         if self.discord_voice_client.recording:
             self.discord_voice_client.stop_recording()
 
-        # Final flush of any remaining data for ALL users
-        await self._flush_all_users()
+        # Extract any final audio data from sink before flushing
+        await self._extract_user_audio_from_sink()
+
+        # Final flush of any remaining data for ALL users (regardless of buffer length)
+        await self._flush_all_users(force=True)
+
+        # Now set shutdown flag to prevent any new operations
+        self._is_shutting_down = True
 
         total_chunks = sum(len(ids) for ids in self._user_temp_recording_ids.values())
         await self.services.logging_service.info(
@@ -283,7 +288,7 @@ class DiscordSessionHandler:
             await self.services.logging_service.debug("Flush loop cancelled")
             raise
 
-    async def _flush_all_users(self) -> None:
+    async def _flush_all_users(self, force: bool = False) -> None:
         """
         Flush audio data for all users who have buffered audio.
 
@@ -292,8 +297,11 @@ class DiscordSessionHandler:
         2. Create temp recording in SQL
         3. Queue FFmpeg transcode job
         4. Clear buffer
+
+        Args:
+            force: If True, bypass shutdown check and flush all buffers regardless of length
         """
-        if self._is_shutting_down:
+        if self._is_shutting_down and not force:
             return
 
         users_with_data = 0
@@ -339,20 +347,29 @@ class DiscordSessionHandler:
         # Create temp recording in SQL with timestamp
         temp_recording_id = None
         if self.services.sql_recording_service_manager:
-            # Calculate timestamp in milliseconds from start of recording
-            start_timestamp_ms = int((get_current_timestamp_est() - self.start_time).total_seconds() * 1000)
-            
             temp_recording_id = (
-                await self.services.sql_recording_service_manager.insert_temp_recording(
-                    user_id=str(user_id),  # Discord user ID, not bot user
+                await self.services.sql_recording_service_manager.create_temp_recording(
                     meeting_id=self.meeting_id,
-                    start_timestamp_ms=start_timestamp_ms,
-                    filename=mp3_filename,
+                    user_id=str(user_id),  # Discord user ID, not bot user
+                    guild_id=self.guild_id,
+                    chunk_number=chunk_num,
+                    pcm_path=pcm_path,
+                    mp3_path=mp3_path,
+                    transcode_status=TranscodeStatus.QUEUED,
                 )
             )
 
-            if temp_recording_id:
-                self._user_temp_recording_ids[user_id].append(temp_recording_id)
+                if temp_recording_id:
+                    self._user_temp_recording_ids[user_id].append(temp_recording_id)
+            except Exception as e:
+                await self.services.logging_service.error(
+                    f"CRITICAL DISCORD RECORDER SQL ERROR: Failed to create temp recording - "
+                    f"Meeting: {self.meeting_id}, User: {user_id}, Chunk: {chunk_num}, "
+                    f"Filename: {pcm_filename}, Error Type: {type(e).__name__}, Details: {str(e)}. "
+                    f"This likely indicates a missing meeting entry in the meetings table (foreign key constraint)."
+                )
+                # Don't raise - allow recording to continue even if SQL fails
+                # The file was already saved, so we can manually recover later
 
         # Queue FFmpeg transcode job
         await self._queue_pcm_to_mp3_transcode(pcm_path, mp3_path, temp_recording_id)
@@ -387,12 +404,19 @@ class DiscordSessionHandler:
         if not self.services.recording_file_service_manager:
             raise RuntimeError("Recording file manager service not available")
 
-        # Write to temp storage
-        file_path = await self.services.recording_file_service_manager.save_to_temp_file(
-            filename=filename, data=data
-        )
-
-        return file_path
+        try:
+            # Write to temp storage
+            file_path = await self.services.recording_file_service_manager.save_to_temp_file(
+                filename=filename, data=data
+            )
+            return file_path
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"CRITICAL DISCORD RECORDER ERROR: Failed to write PCM to temp - "
+                f"Meeting: {self.meeting_id}, Filename: {filename}, Size: {len(data)} bytes, "
+                f"Error Type: {type(e).__name__}, Details: {str(e)}"
+            )
+            raise
 
     # -------------------------------------------------------------- #
     # FFmpeg Integration
@@ -423,6 +447,11 @@ class DiscordSessionHandler:
             new_status = TranscodeStatus.DONE if success else TranscodeStatus.FAILED
             await self.services.sql_recording_service_manager.update_temp_recording_status(
                 temp_recording_id=temp_recording_id, status=new_status
+            )
+
+            # Check and update meeting status based on recording state and pending transcodes
+            await self.services.sql_recording_service_manager.check_and_update_meeting_status(
+                meeting_id=self.meeting_id, is_recording=self.is_recording
             )
 
             # Delete PCM file after successful transcode (non-blocking)
@@ -613,6 +642,27 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             )
             return False
 
+        # Create meeting entry in SQL database (CRITICAL: must happen before session starts)
+        if self.services.sql_recording_service_manager:
+            try:
+                await self.services.sql_recording_service_manager.insert_meeting(
+                    meeting_id=meeting_id,
+                    guild_id=guild_id,
+                    channel_id=str(channel_id),
+                    requested_by=user_id,
+                )
+                await self.services.logging_service.info(
+                    f"Created meeting entry in database: {meeting_id}"
+                )
+            except Exception as e:
+                await self.services.logging_service.error(
+                    f"CRITICAL ERROR: Failed to create meeting entry in database - "
+                    f"Meeting: {meeting_id}, Guild: {guild_id}, Channel: {channel_id}, "
+                    f"Error Type: {type(e).__name__}, Details: {str(e)}. "
+                    f"Cannot start recording session without meeting entry (foreign key constraint)."
+                )
+                return False
+
         # Create session handler
         session = DiscordSessionHandler(
             discord_voice_client=discord_voice_client,
@@ -662,8 +712,6 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
         meeting_id = session.meeting_id
         user_id = session.user_id
-        guild_id = session.guild_id
-        recorded_user_ids = session.get_recorded_user_ids()
 
         await self.services.logging_service.info(
             f"Stopping recording session for meeting {meeting_id} with {len(recorded_user_ids)} users"
@@ -688,7 +736,21 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Timeout waiting for transcodes on meeting {meeting_id}"
                 )
 
-        # Cleanup session from active sessions first
+            # Final meeting status check (all transcodes should be done or failed)
+            final_status = (
+                await self.services.sql_recording_service_manager.check_and_update_meeting_status(
+                    meeting_id=meeting_id, is_recording=False
+                )
+            )
+
+            # Note: Temp recordings remain in temp storage and SQL
+            # They will be cleaned up by the background cleanup task
+            await self.services.logging_service.info(
+                f"Recording session complete for meeting {meeting_id}. "
+                f"Files are in temp storage and will be cleaned up after {DiscordRecorderConstants.TEMP_RECORDING_TTL_HOURS} hours."
+            )
+
+        # Cleanup session
         del self.sessions[channel_id]
 
         # Process recordings in background

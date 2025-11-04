@@ -116,6 +116,15 @@ class Voice(commands.Cog):
 
         # 1. Validate user is in a voice channel
         voice_channel = self.find_user_vc(ctx)
+
+        # Debug logging
+        logger.info(
+            f"Transcribe command called by {ctx.author.id} in guild {ctx.guild.id if ctx.guild else 'DM'}"
+        )
+        logger.info(f"ctx.author.voice: {ctx.author.voice}")
+        if ctx.author.voice:
+            logger.info(f"Voice channel: {ctx.author.voice.channel}")
+
         if not voice_channel:
             await ctx.edit(content="❌ You must be in a voice channel to use this command.")
             return
