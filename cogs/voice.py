@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 
 import discord
 from discord.ext import commands
@@ -145,19 +146,61 @@ class Voice(commands.Cog):
             await voice_client.disconnect()
             return
 
-        # 4. Record for 5 seconds (temporary for testing)
-        await ctx.edit(content="✅ Recording started! (5 seconds for testing)")
-        await asyncio.sleep(5)
+        await ctx.edit(content="✅ Recording started! Use /stop to end the transcription.")
 
-        # 5. Stop recording session
-        await ctx.edit(content="⏳ Stopping recording and processing audio...")
-        await self.services.discord_recorder_service_manager.stop_session(
-            channel_id=voice_channel.id
+    @commands.slash_command(name="stop", description="Stop transcribing the current voice channel")
+    async def stop(self, ctx: discord.ApplicationContext) -> None:
+        """Stop transcribing the voice channel the user is currently in.
+
+        Args:
+            ctx: Discord application context
+        """
+        await ctx.defer()
+        await ctx.edit(content="⏳ Stopping transcription...")
+
+        # 1. Validate user is in a voice channel
+        voice_channel = self.find_user_vc(ctx)
+        if not voice_channel:
+            await ctx.edit(content="❌ You must be in a voice channel to use this command.")
+            return
+
+        # 2. Check if bot is connected to voice channel
+        voice_client = await self.get_bot_voice_client(ctx)
+        if not voice_client or voice_client.channel.id != voice_channel.id:
+            await ctx.edit(content="❌ The bot is not connected to your voice channel.")
+            return
+
+        # 3. Verify active recording session exists
+        session = self.services.discord_recorder_service_manager.get_active_session(
+            voice_channel.id
+        )
+        if not session:
+            await ctx.edit(content="❌ No active recording session found.")
+            logger.warning(f"No active recording session found for channel {voice_channel.id}")
+            return
+
+        meeting_id = session.meeting_id
+        logger.info(
+            f"Stopping recording session: meeting_id={meeting_id}, channel={voice_channel.id}"
         )
 
-        # 6. Clean disconnect
+        # 4. Check if discord_recorder_service_manager is available
+        if not self.services.discord_recorder_service_manager:
+            await ctx.edit(content="❌ Recording service is not available.")
+            return
+
+        # 5. Stop recording session (handles transcoding, concatenation, SQL updates, and DMs)
+        await ctx.edit(content="⏳ Stopping recording and processing audio...")
+        await self.services.discord_recorder_service_manager.stop_session(
+            channel_id=voice_channel.id, bot_instance=self.bot
+        )
+        logger.info(f"Recording session stopped for meeting {meeting_id}")
+
+        # 6. Disconnect from voice channel
         await ctx.followup.send(
-            "✅ Recording complete! Audio files saved and transcoding in progress.", ephemeral=True
+            "✅ Recording stopped! Audio files are being processed in the background.\n"
+            "You will receive a DM when your recording is ready.",
+            ephemeral=True,
         )
 
         try:

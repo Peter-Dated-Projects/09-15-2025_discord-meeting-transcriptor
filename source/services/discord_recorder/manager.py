@@ -603,18 +603,21 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         )
         return True
 
-    async def stop_session(self, channel_id: int) -> bool:
+    async def stop_session(self, channel_id: int, bot_instance: discord.Bot | None = None) -> bool:
         """
-        Stop recording audio from a Discord channel and promote temp recordings.
+        Stop recording audio from a Discord channel and process recordings.
 
         Steps:
         1. Stop recording session
         2. Wait for pending transcodes to complete
-        3. Promote temp recordings to persistent storage
-        4. Cleanup session
+        3. Concatenate MP3 files per user
+        4. Create persistent recordings in SQL
+        5. Send DM notifications to users
+        6. Cleanup session
 
         Args:
             channel_id: Discord channel ID
+            bot_instance: Optional Discord bot instance for sending DMs
 
         Returns:
             True if session stopped successfully
@@ -628,9 +631,11 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
         meeting_id = session.meeting_id
         user_id = session.user_id
+        guild_id = session.guild_id
+        recorded_user_ids = session.get_recorded_user_ids()
 
         await self.services.logging_service.info(
-            f"Stopping recording session for meeting {meeting_id}"
+            f"Stopping recording session for meeting {meeting_id} with {len(recorded_user_ids)} users"
         )
 
         # Stop recording
@@ -652,15 +657,18 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Timeout waiting for transcodes on meeting {meeting_id}"
                 )
 
-            # Note: Temp recordings remain in temp storage and SQL
-            # They will be cleaned up by the background cleanup task
-            await self.services.logging_service.info(
-                f"Recording session complete for meeting {meeting_id}. "
-                f"Files are in temp storage and will be cleaned up after {DiscordRecorderConstants.TEMP_RECORDING_TTL_HOURS} hours."
-            )
-
-        # Cleanup session
+        # Cleanup session from active sessions first
         del self.sessions[channel_id]
+
+        # Process recordings in background
+        asyncio.create_task(
+            self._process_recordings_post_stop(
+                meeting_id=meeting_id,
+                recorded_user_ids=recorded_user_ids,
+                guild_id=guild_id,
+                bot_instance=bot_instance,
+            )
+        )
 
         await self.services.logging_service.info(f"Stopped recording in channel {channel_id}")
         return True
@@ -817,6 +825,227 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
     # -------------------------------------------------------------- #
     # Promotion Helper Methods
     # -------------------------------------------------------------- #
+
+    async def _process_recordings_post_stop(
+        self,
+        meeting_id: str,
+        recorded_user_ids: list[int],
+        guild_id: str,
+        bot_instance: discord.Bot | None = None,
+    ) -> None:
+        """
+        Process recordings after stopping: concatenate files and create persistent recordings.
+
+        Args:
+            meeting_id: Meeting ID for the recording session
+            recorded_user_ids: List of Discord user IDs that were recorded
+            guild_id: Discord guild ID
+            bot_instance: Optional Discord bot instance for sending DMs
+        """
+        try:
+            await self.services.logging_service.info(
+                f"Starting post-stop processing for meeting {meeting_id} with {len(recorded_user_ids)} users"
+            )
+
+            # Get all temp recordings for this meeting
+            temp_recordings = (
+                await self.services.sql_recording_service_manager.get_temp_recordings_for_meeting(
+                    meeting_id
+                )
+            )
+
+            if not temp_recordings:
+                await self.services.logging_service.warning(
+                    f"No temp recordings found for meeting {meeting_id}"
+                )
+                return
+
+            await self.services.logging_service.info(
+                f"Retrieved {len(temp_recordings)} temp recordings for meeting {meeting_id}"
+            )
+
+            # Group temp recordings by user
+            user_recordings = {}
+            for recording in temp_recordings:
+                rec_user_id = recording["user_id"]
+                if rec_user_id not in user_recordings:
+                    user_recordings[rec_user_id] = []
+                user_recordings[rec_user_id].append(recording)
+
+            await self.services.logging_service.info(
+                f"Grouped recordings by user: {len(user_recordings)} users with recordings"
+            )
+
+            # Process each user's recordings
+            for rec_user_id, recordings in user_recordings.items():
+                try:
+                    await self.services.logging_service.info(
+                        f"Processing {len(recordings)} recordings for user {rec_user_id} in meeting {meeting_id}"
+                    )
+
+                    # Sort recordings by timestamp
+                    recordings.sort(key=lambda x: x.get("timestamp_ms", 0))
+
+                    # Get MP3 file paths (only successfully transcoded files)
+                    mp3_files = []
+                    for rec in recordings:
+                        filename = rec.get("filename")
+                        if filename and filename.endswith(".mp3"):
+                            # Construct full path
+                            temp_path = (
+                                self.services.recording_file_service_manager.get_temporary_storage_path()
+                            )
+                            full_path = os.path.join(temp_path, filename)
+
+                            # Check if file exists
+                            if os.path.exists(full_path):
+                                mp3_files.append(full_path)
+                            else:
+                                await self.services.logging_service.debug(
+                                    f"MP3 file not found: {filename}"
+                                )
+
+                    if not mp3_files:
+                        await self.services.logging_service.warning(
+                            f"No MP3 files found for user {rec_user_id} in meeting {meeting_id}"
+                        )
+                        continue
+
+                    await self.services.logging_service.info(
+                        f"Found {len(mp3_files)} MP3 files for user {rec_user_id}"
+                    )
+
+                    # Concatenate MP3 files into one big file
+                    output_filename = f"{meeting_id}_user{rec_user_id}_final.mp3"
+                    output_path = await self._concatenate_mp3_files(
+                        mp3_files, output_filename, meeting_id
+                    )
+
+                    if not output_path:
+                        await self.services.logging_service.error(
+                            f"Failed to concatenate MP3 files for user {rec_user_id} in meeting {meeting_id}"
+                        )
+                        continue
+
+                    # Insert persistent recording into SQL
+                    recording_id = await self.services.sql_recording_service_manager.insert_persistent_recording(
+                        user_id=rec_user_id,
+                        meeting_id=meeting_id,
+                        filename=output_filename,
+                    )
+
+                    await self.services.logging_service.info(
+                        f"Successfully created persistent recording {recording_id} for user {rec_user_id} in meeting {meeting_id}"
+                    )
+
+                    # Send DM notification to user if bot instance is provided
+                    if bot_instance:
+                        try:
+                            user = await bot_instance.fetch_user(int(rec_user_id))
+                            if user:
+                                await user.send(
+                                    f"✅ Your recording from meeting `{meeting_id}` has been processed and saved!\n"
+                                    f"Recording ID: `{recording_id}`\n"
+                                    f"File: `{output_filename}`"
+                                )
+                                await self.services.logging_service.info(
+                                    f"Sent DM notification to user {rec_user_id}"
+                                )
+                        except discord.Forbidden:
+                            await self.services.logging_service.warning(
+                                f"Could not send DM to user {rec_user_id} - DMs disabled"
+                            )
+                        except Exception as e:
+                            await self.services.logging_service.error(
+                                f"Error sending DM to user {rec_user_id}: {e}"
+                            )
+
+                except Exception as e:
+                    await self.services.logging_service.error(
+                        f"Error processing recordings for user {rec_user_id} in meeting {meeting_id}: {e}"
+                    )
+
+            await self.services.logging_service.info(
+                f"Completed post-stop processing for meeting {meeting_id}"
+            )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Error in post-stop processing for meeting {meeting_id}: {e}"
+            )
+
+    async def _concatenate_mp3_files(
+        self, mp3_files: list[str], output_filename: str, meeting_id: str
+    ) -> str | None:
+        """
+        Concatenate multiple MP3 files into one using FFmpeg.
+
+        Args:
+            mp3_files: List of MP3 file paths to concatenate
+            output_filename: Name for the output file
+            meeting_id: Meeting ID for logging
+
+        Returns:
+            Path to the concatenated file, or None if failed
+        """
+        try:
+            if not mp3_files:
+                await self.services.logging_service.warning("No MP3 files to concatenate")
+                return None
+
+            storage_path = (
+                self.services.recording_file_service_manager.get_persistent_storage_path()
+            )
+            output_path = os.path.join(storage_path, output_filename)
+
+            if len(mp3_files) == 1:
+                # Only one file, just copy it to storage
+                await self.services.logging_service.debug(
+                    f"Single MP3 file, copying to persistent storage: {output_filename}"
+                )
+
+                # Copy file
+                import shutil
+
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, shutil.copy2, mp3_files[0], output_path)
+
+                await self.services.logging_service.info(f"Copied single MP3 file to {output_path}")
+                return output_path
+
+            # Concatenate multiple files using FFmpeg
+            await self.services.logging_service.info(
+                f"Concatenating {len(mp3_files)} MP3 files into {output_filename}"
+            )
+
+            # Build FFmpeg command with concat protocol
+            # Format: ffmpeg -i "concat:file1.mp3|file2.mp3|file3.mp3" -acodec copy output.mp3
+            concat_input = "concat:" + "|".join(mp3_files)
+
+            # Use FFmpeg to concatenate
+            success, stdout, stderr = (
+                await self.services.ffmpeg_service_manager.handler.convert_file(
+                    input_path=concat_input,
+                    output_path=output_path,
+                    options={
+                        "-acodec": "copy",
+                        "-y": None,
+                    },
+                )
+            )
+
+            if success:
+                await self.services.logging_service.info(
+                    f"Successfully concatenated {len(mp3_files)} MP3 files to {output_path}"
+                )
+                return output_path
+            else:
+                await self.services.logging_service.error(f"FFmpeg concatenation failed: {stderr}")
+                return None
+
+        except Exception as e:
+            await self.services.logging_service.error(f"Error concatenating MP3 files: {e}")
+            return None
 
     async def _wait_for_pending_transcodes(
         self,
