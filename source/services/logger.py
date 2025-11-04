@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -20,19 +21,37 @@ class AsyncLoggingService(Manager):
         self,
         server: ServerManager,
         log_dir: str = "logs",
-        log_file: str = "app.log",
+        log_file: str | None = None,
+        use_timestamp: bool = True,
+        console_output: bool = True,
     ):
         """Initialize the async logging service.
 
         Args:
             server: ServerManager instance
             log_dir: Directory to store log files
-            log_file: Name of the log file
+            log_file: Name of the log file (if None and use_timestamp is True,
+                     a timestamped filename will be generated)
+            use_timestamp: If True and log_file is None, create a timestamped log file.
+                          If False, uses "app.log" as default.
+            console_output: If True, all log messages are also printed to console (stdout).
         """
         super().__init__(server)
         self.log_dir = Path(log_dir)
-        self.log_file = log_file
-        self.log_path = self.log_dir / log_file
+        self.console_output = console_output
+
+        # Generate log file name
+        if log_file is None:
+            if use_timestamp:
+                # Create timestamped log file: app_2025-11-03_14-30-45.log
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                self.log_file = f"app_{timestamp}.log"
+            else:
+                self.log_file = "app.log"
+        else:
+            self.log_file = log_file
+
+        self.log_path = self.log_dir / self.log_file
 
         # Create lock for serializing writes
         self._write_lock = asyncio.Lock()
@@ -54,6 +73,9 @@ class AsyncLoggingService(Manager):
 
         # Start background writer task
         self._writer_task = asyncio.create_task(self._process_log_queue())
+
+        # Log the initialization with the log file name
+        await self.info(f"AsyncLoggingService initialized. Logging to: {self.log_path}")
 
     async def on_close(self) -> None:
         """Clean up on close."""
@@ -124,8 +146,9 @@ class AsyncLoggingService(Manager):
         Args:
             message: The formatted log message to write
         """
-        # Print to console for all events
-        print(message, flush=True)
+        # Always print to console (stdout) with immediate flush for all log messages
+        if self.console_output:
+            print(message, file=sys.stdout, flush=True)
 
         async with self._write_lock:
             try:
@@ -133,7 +156,8 @@ class AsyncLoggingService(Manager):
                     await f.write(message + "\n")
             except Exception as e:
                 # Print to stderr if file write fails
-                print(f"Failed to write to log file: {e}", flush=True)
+                error_msg = f"[ERROR] Failed to write to log file: {e}"
+                print(error_msg, file=sys.stderr, flush=True)
 
     async def _flush_queue(self) -> None:
         """Flush all remaining messages from the queue."""
