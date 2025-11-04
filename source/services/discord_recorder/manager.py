@@ -30,7 +30,7 @@ class DiscordRecorderConstants:
     MP3_BITRATE = "128k"  # 128 kbps
 
     # Transcode timeout
-    TRANSCODE_TIMEOUT_SECONDS = 300  # 5 minutes
+    TRANSCODE_TIMEOUT_SECONDS = 360  # 6 minutes
 
     # Cleanup configuration
     CLEANUP_INTERVAL_SECONDS = 3600  # 1 hour
@@ -259,14 +259,25 @@ class DiscordSessionHandler:
         2. Flushes audio for each user with buffered data
         """
         try:
+            flush_count = 0
             while self.is_recording and not self._is_shutting_down:
                 await asyncio.sleep(DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS)
+                flush_count += 1
+
+                await self.services.logging_service.info(
+                    f"Running flush cycle #{flush_count} for meeting {self.meeting_id} "
+                    f"(interval: {DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS}s)"
+                )
 
                 # Extract latest audio from sink
                 await self._extract_user_audio_from_sink()
 
                 # Flush all users
                 await self._flush_all_users()
+
+                await self.services.logging_service.info(
+                    f"Completed flush cycle #{flush_count} for meeting {self.meeting_id}"
+                )
 
         except asyncio.CancelledError:
             await self.services.logging_service.debug("Flush loop cancelled")
@@ -285,11 +296,26 @@ class DiscordSessionHandler:
         if self._is_shutting_down:
             return
 
+        users_with_data = 0
+        total_buffer_size = 0
+
         for user_id, buffer in list(self._user_audio_buffers.items()):
             if len(buffer) == 0:
                 continue
 
+            users_with_data += 1
+            total_buffer_size += len(buffer)
             await self._flush_user(user_id, buffer)
+
+        if users_with_data > 0:
+            await self.services.logging_service.info(
+                f"Flushed audio for {users_with_data} user(s), "
+                f"total buffer size: {total_buffer_size:,} bytes ({total_buffer_size / 1024 / 1024:.2f} MB)"
+            )
+        else:
+            await self.services.logging_service.debug(
+                f"No audio data to flush in meeting {self.meeting_id}"
+            )
 
     async def _flush_user(self, user_id: int, buffer: bytearray) -> None:
         """
@@ -302,6 +328,7 @@ class DiscordSessionHandler:
         # Generate unique chunk filename
         chunk_num = self._user_chunk_counters[user_id]
         pcm_filename = f"{self.meeting_id}_user{user_id}_chunk{chunk_num:04d}.pcm"
+        mp3_filename = f"{self.meeting_id}_user{user_id}_chunk{chunk_num:04d}.mp3"
 
         # Write PCM to temp storage
         pcm_path = await self._write_pcm_to_temp(pcm_filename, bytes(buffer))
@@ -309,18 +336,18 @@ class DiscordSessionHandler:
         # Generate MP3 path
         mp3_path = pcm_path.replace(".pcm", ".mp3")
 
-        # Create temp recording in SQL
+        # Create temp recording in SQL with timestamp
         temp_recording_id = None
         if self.services.sql_recording_service_manager:
+            # Calculate timestamp in milliseconds from start of recording
+            start_timestamp_ms = int((get_current_timestamp_est() - self.start_time).total_seconds() * 1000)
+            
             temp_recording_id = (
-                await self.services.sql_recording_service_manager.create_temp_recording(
-                    meeting_id=self.meeting_id,
+                await self.services.sql_recording_service_manager.insert_temp_recording(
                     user_id=str(user_id),  # Discord user ID, not bot user
-                    guild_id=self.guild_id,
-                    chunk_number=chunk_num,
-                    pcm_path=pcm_path,
-                    mp3_path=mp3_path,
-                    transcode_status=TranscodeStatus.QUEUED,
+                    meeting_id=self.meeting_id,
+                    start_timestamp_ms=start_timestamp_ms,
+                    filename=mp3_filename,
                 )
             )
 
@@ -330,12 +357,16 @@ class DiscordSessionHandler:
         # Queue FFmpeg transcode job
         await self._queue_pcm_to_mp3_transcode(pcm_path, mp3_path, temp_recording_id)
 
+        # Get buffer size before clearing for logging
+        buffer_size = len(buffer)
+
         # Clear buffer and increment counter
         buffer.clear()
         self._user_chunk_counters[user_id] += 1
 
-        await self.services.logging_service.debug(
-            f"Flushed chunk {chunk_num} for user {user_id} in meeting {self.meeting_id}"
+        await self.services.logging_service.info(
+            f"Flushed chunk {chunk_num} for user {user_id} in meeting {self.meeting_id} "
+            f"(PCM: {pcm_filename}, size: {buffer_size:,} bytes)"
         )
 
     # -------------------------------------------------------------- #
