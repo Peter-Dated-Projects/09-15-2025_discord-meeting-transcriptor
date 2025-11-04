@@ -335,5 +335,42 @@ class PostgreSQLServer(SQLDatabase):
                     await connection.execute(query)
                     return []
         except Exception as e:
-            logger.error(f"[{self.name}] Execute error: {e}")
+            # Extract table name from the statement for better error context
+            table_name = "unknown"
+            operation = "unknown"
+            try:
+                if hasattr(stmt, "table"):
+                    table_name = str(stmt.table.name)
+                elif hasattr(stmt, "froms") and stmt.froms:
+                    table_name = str(stmt.froms[0].name)
+
+                # Determine operation type
+                stmt_str = str(type(stmt).__name__).lower()
+                if "insert" in stmt_str:
+                    operation = "INSERT"
+                elif "update" in stmt_str:
+                    operation = "UPDATE"
+                elif "delete" in stmt_str:
+                    operation = "DELETE"
+                elif "select" in stmt_str:
+                    operation = "SELECT"
+            except:
+                pass  # If we can't extract metadata, just continue with 'unknown'
+
+            logger.error(
+                f"CRITICAL SQL ERROR [{self.name}] - Operation: {operation}, Table: {table_name}, "
+                f"Error Type: {type(e).__name__}, Details: {str(e)}"
+            )
+            if "query" in locals():
+                logger.error(f"[{self.name}] Query: {query}")
+
+            # Additional context for foreign key violations
+            error_str = str(e).lower()
+            if "foreign key" in error_str or "constraint" in error_str:
+                logger.error(
+                    f"[{self.name}] FOREIGN KEY CONSTRAINT VIOLATION detected! "
+                    f"This typically means a referenced record doesn't exist in the parent table. "
+                    f"Check that all foreign key references (e.g., meeting_id) exist before inserting."
+                )
+
             raise

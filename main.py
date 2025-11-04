@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sys
 
 import discord
 import dotenv
@@ -13,7 +14,14 @@ from source.services.constructor import construct_services_manager
 
 dotenv.load_dotenv(dotenv_path=".env.local")
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging to output to console (stdout) with proper formatting
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True,  # Override any existing configuration
+)
 
 # -------------------------------------------------------------- #
 # Discord Bot Setup
