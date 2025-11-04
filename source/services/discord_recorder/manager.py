@@ -6,12 +6,13 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import discord
+from sqlalchemy import select
 
 if TYPE_CHECKING:
     pass
 
 from source.server.server import ServerManager
-from source.server.sql_models import TranscodeStatus
+from source.server.sql_models import TempRecordingModel, TranscodeStatus
 from source.services.manager import BaseDiscordRecorderServiceManager, ServicesManager
 from source.utils import generate_16_char_uuid, get_current_timestamp_est
 
@@ -24,13 +25,13 @@ class DiscordRecorderConstants:
     """Configuration constants for Discord recording."""
 
     # Flush cycle
-    FLUSH_INTERVAL_SECONDS = 10  # Configurable: flush buffer every N seconds
+    FLUSH_INTERVAL_SECONDS = 30  # Configurable: flush buffer every N seconds
 
     # FFmpeg encoding
     MP3_BITRATE = "128k"  # 128 kbps
 
     # Transcode timeout
-    TRANSCODE_TIMEOUT_SECONDS = 300  # 5 minutes
+    TRANSCODE_TIMEOUT_SECONDS = 360  # 6 minutes
 
     # Cleanup configuration
     CLEANUP_INTERVAL_SECONDS = 3600  # 1 hour
@@ -264,14 +265,25 @@ class DiscordSessionHandler:
         2. Flushes audio for each user with buffered data
         """
         try:
+            flush_count = 0
             while self.is_recording and not self._is_shutting_down:
                 await asyncio.sleep(DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS)
+                flush_count += 1
+
+                await self.services.logging_service.info(
+                    f"Running flush cycle #{flush_count} for meeting {self.meeting_id} "
+                    f"(interval: {DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS}s)"
+                )
 
                 # Extract latest audio from sink
                 await self._extract_user_audio_from_sink()
 
                 # Flush all users
                 await self._flush_all_users()
+
+                await self.services.logging_service.info(
+                    f"Completed flush cycle #{flush_count} for meeting {self.meeting_id}"
+                )
 
         except asyncio.CancelledError:
             await self.services.logging_service.debug("Flush loop cancelled")
@@ -293,11 +305,26 @@ class DiscordSessionHandler:
         if self._is_shutting_down and not force:
             return
 
+        users_with_data = 0
+        total_buffer_size = 0
+
         for user_id, buffer in list(self._user_audio_buffers.items()):
             if len(buffer) == 0:
                 continue
 
+            users_with_data += 1
+            total_buffer_size += len(buffer)
             await self._flush_user(user_id, buffer)
+
+        if users_with_data > 0:
+            await self.services.logging_service.info(
+                f"Flushed audio for {users_with_data} user(s), "
+                f"total buffer size: {total_buffer_size:,} bytes ({total_buffer_size / 1024 / 1024:.2f} MB)"
+            )
+        else:
+            await self.services.logging_service.debug(
+                f"No audio data to flush in meeting {self.meeting_id}"
+            )
 
     async def _flush_user(self, user_id: int, buffer: bytearray) -> None:
         """
@@ -310,6 +337,7 @@ class DiscordSessionHandler:
         # Generate unique chunk filename
         chunk_num = self._user_chunk_counters[user_id]
         pcm_filename = f"{self.meeting_id}_user{user_id}_chunk{chunk_num:04d}.pcm"
+        mp3_filename = f"{self.meeting_id}_user{user_id}_chunk{chunk_num:04d}.mp3"
 
         # Write PCM to temp storage
         pcm_path = await self._write_pcm_to_temp(pcm_filename, bytes(buffer))
@@ -317,15 +345,20 @@ class DiscordSessionHandler:
         # Generate MP3 path
         mp3_path = pcm_path.replace(".pcm", ".mp3")
 
-        # Create temp recording in SQL
+        # Create temp recording in SQL with timestamp
         temp_recording_id = None
         if self.services.sql_recording_service_manager:
             try:
+                # Calculate start timestamp for this chunk (in milliseconds)
+                start_timestamp_ms = (
+                    chunk_num * DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS * 1000
+                )
+
                 temp_recording_id = (
                     await self.services.sql_recording_service_manager.insert_temp_recording(
-                        user_id=str(user_id),  # Discord user ID, not bot user
+                        user_id=str(user_id),  # Discord user ID
                         meeting_id=self.meeting_id,
-                        start_timestamp_ms=0,  # TODO: Calculate actual timestamp
+                        start_timestamp_ms=start_timestamp_ms,
                         filename=pcm_filename,
                     )
                 )
@@ -334,7 +367,7 @@ class DiscordSessionHandler:
                     self._user_temp_recording_ids[user_id].append(temp_recording_id)
             except Exception as e:
                 await self.services.logging_service.error(
-                    f"CRITICAL DISCORD RECORDER SQL ERROR: Failed to create temp recording - "
+                    f"CRITICAL DISCORD RECORDER SQL ERROR: Failed to insert temp recording - "
                     f"Meeting: {self.meeting_id}, User: {user_id}, Chunk: {chunk_num}, "
                     f"Filename: {pcm_filename}, Error Type: {type(e).__name__}, Details: {str(e)}. "
                     f"This likely indicates a missing meeting entry in the meetings table (foreign key constraint)."
@@ -345,12 +378,16 @@ class DiscordSessionHandler:
         # Queue FFmpeg transcode job
         await self._queue_pcm_to_mp3_transcode(pcm_path, mp3_path, temp_recording_id)
 
+        # Get buffer size before clearing for logging
+        buffer_size = len(buffer)
+
         # Clear buffer and increment counter
         buffer.clear()
         self._user_chunk_counters[user_id] += 1
 
-        await self.services.logging_service.debug(
-            f"Flushed chunk {chunk_num} for user {user_id} in meeting {self.meeting_id}"
+        await self.services.logging_service.info(
+            f"Flushed chunk {chunk_num} for user {user_id} in meeting {self.meeting_id} "
+            f"(PCM: {pcm_filename}, size: {buffer_size:,} bytes)"
         )
 
     # -------------------------------------------------------------- #
@@ -651,18 +688,21 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         )
         return True
 
-    async def stop_session(self, channel_id: int) -> bool:
+    async def stop_session(self, channel_id: int, bot_instance: discord.Bot | None = None) -> bool:
         """
-        Stop recording audio from a Discord channel and promote temp recordings.
+        Stop recording audio from a Discord channel and process recordings.
 
         Steps:
         1. Stop recording session
         2. Wait for pending transcodes to complete
-        3. Promote temp recordings to persistent storage
-        4. Cleanup session
+        3. Concatenate MP3 files per user
+        4. Create persistent recordings in SQL
+        5. Send DM notifications to users
+        6. Cleanup session
 
         Args:
             channel_id: Discord channel ID
+            bot_instance: Optional Discord bot instance for sending DMs
 
         Returns:
             True if session stopped successfully
@@ -675,9 +715,12 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             return False
 
         meeting_id = session.meeting_id
+        user_id = session.user_id
+        guild_id = session.guild_id
+        recorded_user_ids = session.get_recorded_user_ids()
 
         await self.services.logging_service.info(
-            f"Stopping recording session for meeting {meeting_id}"
+            f"Stopping recording session for meeting {meeting_id} with {len(recorded_user_ids)} users"
         )
 
         # Stop recording
@@ -710,12 +753,21 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             # They will be cleaned up by the background cleanup task
             await self.services.logging_service.info(
                 f"Recording session complete for meeting {meeting_id}. "
-                f"Final status: {final_status.value}. "
                 f"Files are in temp storage and will be cleaned up after {DiscordRecorderConstants.TEMP_RECORDING_TTL_HOURS} hours."
             )
 
         # Cleanup session
         del self.sessions[channel_id]
+
+        # Process recordings in background
+        asyncio.create_task(
+            self._process_recordings_post_stop(
+                meeting_id=meeting_id,
+                recorded_user_ids=recorded_user_ids,
+                guild_id=guild_id,
+                bot_instance=bot_instance,
+            )
+        )
 
         await self.services.logging_service.info(f"Stopped recording in channel {channel_id}")
         return True
@@ -873,6 +925,230 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
     # Promotion Helper Methods
     # -------------------------------------------------------------- #
 
+    async def _process_recordings_post_stop(
+        self,
+        meeting_id: str,
+        recorded_user_ids: list[int],
+        guild_id: str,
+        bot_instance: discord.Bot | None = None,
+    ) -> None:
+        """
+        Process recordings after stopping: concatenate files and create persistent recordings.
+
+        Args:
+            meeting_id: Meeting ID for the recording session
+            recorded_user_ids: List of Discord user IDs that were recorded
+            guild_id: Discord guild ID
+            bot_instance: Optional Discord bot instance for sending DMs
+        """
+        try:
+            await self.services.logging_service.info(
+                f"Starting post-stop processing for meeting {meeting_id} with {len(recorded_user_ids)} users"
+            )
+
+            # Get all temp recordings for this meeting
+            temp_recordings = (
+                await self.services.sql_recording_service_manager.get_temp_recordings_for_meeting(
+                    meeting_id
+                )
+            )
+
+            if not temp_recordings:
+                await self.services.logging_service.warning(
+                    f"No temp recordings found for meeting {meeting_id}"
+                )
+                return
+
+            await self.services.logging_service.info(
+                f"Retrieved {len(temp_recordings)} temp recordings for meeting {meeting_id}"
+            )
+
+            # Group temp recordings by user
+            user_recordings = {}
+            for recording in temp_recordings:
+                rec_user_id = recording["user_id"]
+                if rec_user_id not in user_recordings:
+                    user_recordings[rec_user_id] = []
+                user_recordings[rec_user_id].append(recording)
+
+            await self.services.logging_service.info(
+                f"Grouped recordings by user: {len(user_recordings)} users with recordings"
+            )
+
+            # Process each user's recordings
+            for rec_user_id, recordings in user_recordings.items():
+                try:
+                    await self.services.logging_service.info(
+                        f"Processing {len(recordings)} recordings for user {rec_user_id} in meeting {meeting_id}"
+                    )
+
+                    # Sort recordings by timestamp
+                    recordings.sort(key=lambda x: x.get("timestamp_ms", 0))
+
+                    # Get MP3 file paths (only successfully transcoded files)
+                    mp3_files = []
+                    for rec in recordings:
+                        filename = rec.get("filename")
+                        if filename:
+                            # SQL stores PCM filename, convert to MP3 filename
+                            mp3_filename = filename.replace(".pcm", ".mp3")
+
+                            # Construct full path
+                            temp_path = (
+                                self.services.recording_file_service_manager.get_temporary_storage_path()
+                            )
+                            full_path = os.path.join(temp_path, mp3_filename)
+
+                            # Check if file exists
+                            if os.path.exists(full_path):
+                                mp3_files.append(full_path)
+                            else:
+                                await self.services.logging_service.debug(
+                                    f"MP3 file not found: {mp3_filename}"
+                                )
+
+                    if not mp3_files:
+                        await self.services.logging_service.warning(
+                            f"No MP3 files found for user {rec_user_id} in meeting {meeting_id}"
+                        )
+                        continue
+
+                    await self.services.logging_service.info(
+                        f"Found {len(mp3_files)} MP3 files for user {rec_user_id}"
+                    )
+
+                    # Concatenate MP3 files into one big file
+                    output_filename = f"{meeting_id}_user{rec_user_id}_final.mp3"
+                    output_path = await self._concatenate_mp3_files(
+                        mp3_files, output_filename, meeting_id
+                    )
+
+                    if not output_path:
+                        await self.services.logging_service.error(
+                            f"Failed to concatenate MP3 files for user {rec_user_id} in meeting {meeting_id}"
+                        )
+                        continue
+
+                    # Insert persistent recording into SQL (use full path for file operations)
+                    recording_id = await self.services.sql_recording_service_manager.insert_persistent_recording(
+                        user_id=rec_user_id,
+                        meeting_id=meeting_id,
+                        filename=output_path,  # Use full path for SHA256 and duration calculation
+                    )
+
+                    await self.services.logging_service.info(
+                        f"Successfully created persistent recording {recording_id} for user {rec_user_id} in meeting {meeting_id}"
+                    )
+
+                    # Send DM notification to user if bot instance is provided
+                    if bot_instance:
+                        try:
+                            user = await bot_instance.fetch_user(int(rec_user_id))
+                            if user:
+                                await user.send(
+                                    f"✅ Your recording from meeting `{meeting_id}` has been processed and saved!\n"
+                                    f"Recording ID: `{recording_id}`\n"
+                                    f"File: `{output_filename}`"
+                                )
+                                await self.services.logging_service.info(
+                                    f"Sent DM notification to user {rec_user_id}"
+                                )
+                        except discord.Forbidden:
+                            await self.services.logging_service.warning(
+                                f"Could not send DM to user {rec_user_id} - DMs disabled"
+                            )
+                        except Exception as e:
+                            await self.services.logging_service.error(
+                                f"Error sending DM to user {rec_user_id}: {e}"
+                            )
+
+                except Exception as e:
+                    await self.services.logging_service.error(
+                        f"Error processing recordings for user {rec_user_id} in meeting {meeting_id}: {e}"
+                    )
+
+            await self.services.logging_service.info(
+                f"Completed post-stop processing for meeting {meeting_id}"
+            )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Error in post-stop processing for meeting {meeting_id}: {e}"
+            )
+
+    async def _concatenate_mp3_files(
+        self, mp3_files: list[str], output_filename: str, meeting_id: str
+    ) -> str | None:
+        """
+        Concatenate multiple MP3 files into one using FFmpeg.
+
+        Args:
+            mp3_files: List of MP3 file paths to concatenate
+            output_filename: Name for the output file
+            meeting_id: Meeting ID for logging
+
+        Returns:
+            Path to the concatenated file, or None if failed
+        """
+        try:
+            if not mp3_files:
+                await self.services.logging_service.warning("No MP3 files to concatenate")
+                return None
+
+            storage_path = (
+                self.services.recording_file_service_manager.get_persistent_storage_path()
+            )
+            output_path = os.path.join(storage_path, output_filename)
+
+            if len(mp3_files) == 1:
+                # Only one file, just copy it to storage
+                await self.services.logging_service.debug(
+                    f"Single MP3 file, copying to persistent storage: {output_filename}"
+                )
+
+                # Copy file
+                import shutil
+
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, shutil.copy2, mp3_files[0], output_path)
+
+                await self.services.logging_service.info(f"Copied single MP3 file to {output_path}")
+                return output_path
+
+            # Concatenate multiple files using FFmpeg
+            await self.services.logging_service.info(
+                f"Concatenating {len(mp3_files)} MP3 files into {output_filename}"
+            )
+
+            # Build FFmpeg command with concat protocol
+            # Format: ffmpeg -i "concat:file1.mp3|file2.mp3|file3.mp3" -acodec copy output.mp3
+            concat_input = "concat:" + "|".join(mp3_files)
+
+            # Use FFmpeg to concatenate
+            success, stdout, stderr = (
+                await self.services.ffmpeg_service_manager.handler.convert_file(
+                    input_path=concat_input,
+                    output_path=output_path,
+                    options={
+                        "-acodec": "copy",
+                        "-y": None,
+                    },
+                )
+            )
+
+            if success:
+                await self.services.logging_service.info(
+                    f"Successfully concatenated {len(mp3_files)} MP3 files to {output_path}"
+                )
+                return output_path
+            else:
+                await self.services.logging_service.error(f"FFmpeg concatenation failed: {stderr}")
+                return None
+
+        except Exception as e:
+            await self.services.logging_service.error(f"Error concatenating MP3 files: {e}")
+            return None
+
     async def _wait_for_pending_transcodes(
         self,
         meeting_id: str,
@@ -973,20 +1249,15 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         """
         cutoff_time = datetime.utcnow() - timedelta(hours=ttl_hours)
 
-        # Query old temp recordings using enum values
-        query = """
-            SELECT id, mp3_path, pcm_path
-            FROM temp_recordings
-            WHERE created_at < :cutoff
-            AND transcode_status IN (:status_done, :status_failed)
-        """
-        params = {
-            "cutoff": cutoff_time,
-            "status_done": TranscodeStatus.DONE.value,
-            "status_failed": TranscodeStatus.FAILED.value,
-        }
+        # Query old temp recordings using SQLAlchemy
+        query = select(TempRecordingModel).where(
+            TempRecordingModel.created_at < cutoff_time,
+            TempRecordingModel.transcode_status.in_(
+                [TranscodeStatus.DONE.value, TranscodeStatus.FAILED.value]
+            ),
+        )
 
-        old_recordings = await self.server.sql_client.query(query, params)
+        old_recordings = await self.server.sql_client.execute(query)
 
         if not old_recordings:
             await self.services.logging_service.debug("No old temp recordings to clean up")
@@ -1000,19 +1271,31 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         deleted_count = 0
         for record in old_recordings:
             temp_id = record["id"]
-            mp3_path = record.get("mp3_path")
-            pcm_path = record.get("pcm_path")
+            # Note: The TempRecordingModel only stores filename, not full paths
+            # We need to construct the paths from the filename
+            filename = record.get("filename")
 
             try:
-                loop = asyncio.get_event_loop()
+                if filename:
+                    temp_path = (
+                        self.services.recording_file_service_manager.get_temporary_storage_path()
+                    )
 
-                # Delete MP3 file if exists (non-blocking)
-                if mp3_path and os.path.exists(mp3_path):
-                    await loop.run_in_executor(None, os.remove, mp3_path)
+                    # Construct PCM and MP3 paths
+                    pcm_filename = filename
+                    mp3_filename = filename.replace(".pcm", ".mp3")
+                    pcm_path = os.path.join(temp_path, pcm_filename)
+                    mp3_path = os.path.join(temp_path, mp3_filename)
 
-                # Delete PCM file if exists (non-blocking)
-                if pcm_path and os.path.exists(pcm_path):
-                    await loop.run_in_executor(None, os.remove, pcm_path)
+                    loop = asyncio.get_event_loop()
+
+                    # Delete MP3 file if exists (non-blocking)
+                    if os.path.exists(mp3_path):
+                        await loop.run_in_executor(None, os.remove, mp3_path)
+
+                    # Delete PCM file if exists (non-blocking)
+                    if os.path.exists(pcm_path):
+                        await loop.run_in_executor(None, os.remove, pcm_path)
 
                 deleted_count += 1
 
