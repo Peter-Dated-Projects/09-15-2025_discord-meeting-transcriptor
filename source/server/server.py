@@ -6,6 +6,10 @@ and operations with external services.
 """
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from source.context import Context
 
 # -------------------------------------------------------------- #
 # Base Server Handlers
@@ -100,7 +104,8 @@ class BaseSQLServerHandler(ABC):
 class ServerManager:
     """Manager for handling multiple server instances."""
 
-    def __init__(self, sql_client: BaseSQLServerHandler):
+    def __init__(self, context: "Context", sql_client: BaseSQLServerHandler):
+        self.context = context
         self._initialized = False
         self._sql_client = sql_client
         self._servers = {"sql": sql_client}

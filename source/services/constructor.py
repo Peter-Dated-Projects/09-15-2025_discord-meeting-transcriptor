@@ -1,10 +1,13 @@
 import os
 import platform
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
+if TYPE_CHECKING:
+    from source.context import Context
+
 from source.constructor import ServerManagerType
-from source.server.server import ServerManager
 from source.services.logger import AsyncLoggingService
 from source.services.manager import ServicesManager
 
@@ -18,7 +21,7 @@ load_dotenv(dotenv_path=".env.local")
 
 def construct_services_manager(
     service_type: ServerManagerType,
-    server: ServerManager,
+    context: "Context",
     storage_path: str,
     recording_storage_path: str,
     default_logging_path: str = "logs",
@@ -29,7 +32,7 @@ def construct_services_manager(
 
     Args:
         service_type: Type of server manager (DEVELOPMENT or PRODUCTION)
-        server: ServerManager instance
+        context: Context instance containing server and services
         storage_path: Path for general file storage
         recording_storage_path: Path for recording file storage
         default_logging_path: Directory to store log files (default: "logs")
@@ -46,7 +49,7 @@ def construct_services_manager(
 
     # create logger
     logging_service = AsyncLoggingService(
-        server=server,
+        context=context,
         log_dir=default_logging_path,
         log_file=log_file,
         use_timestamp=use_timestamp_logs,
@@ -68,9 +71,9 @@ def construct_services_manager(
             RecordingFileManagerService,
         )
 
-        file_service_manager = FileManagerService(server=server, storage_path=storage_path)
+        file_service_manager = FileManagerService(context=context, storage_path=storage_path)
         recording_file_service_manager = RecordingFileManagerService(
-            server=server, recording_storage_path=recording_storage_path
+            context=context, recording_storage_path=recording_storage_path
         )
 
         # Decide ffmpeg binary path based on environment and platform
@@ -81,7 +84,7 @@ def construct_services_manager(
 
         ffmpeg_path = ffmpeg_env
 
-        ffmpeg_service_manager = FFmpegManagerService(server=server, ffmpeg_path=ffmpeg_path)
+        ffmpeg_service_manager = FFmpegManagerService(context=context, ffmpeg_path=ffmpeg_path)
 
         # -------------------------------------------------------------- #
         # DB Interfaces Setup
@@ -89,7 +92,7 @@ def construct_services_manager(
 
         from source.services.recording_sql.manager import SQLRecordingManagerService
 
-        sql_recording_service_manager = SQLRecordingManagerService(server=server)
+        sql_recording_service_manager = SQLRecordingManagerService(context=context)
 
         # -------------------------------------------------------------- #
         # Discord Recorder Setup
@@ -97,7 +100,7 @@ def construct_services_manager(
 
         from source.services.discord_recorder.manager import DiscordRecorderManagerService
 
-        discord_recorder_service_manager = DiscordRecorderManagerService(server=server)
+        discord_recorder_service_manager = DiscordRecorderManagerService(context=context)
 
     # TODO: https://www.notion.so/DISC-19-create-ffmpeg-service-29c5eca3b9df805a949fdcd5850eaf5a?source=copy_link
     # # create ffmpeg service manager
@@ -111,7 +114,7 @@ def construct_services_manager(
         raise ValueError(f"Unsupported service type: {service_type}")
 
     return ServicesManager(
-        server=server,
+        context=context,
         file_service_manager=file_service_manager,
         recording_file_service_manager=recording_file_service_manager,
         transcription_file_service_manager=transcription_file_service_manager,

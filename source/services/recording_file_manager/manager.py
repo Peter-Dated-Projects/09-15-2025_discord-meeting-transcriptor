@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+from typing import TYPE_CHECKING
 
-from source.server.server import ServerManager
+if TYPE_CHECKING:
+    from source.context import Context
+
 from source.services.manager import BaseRecordingFileServiceManager
 
 # -------------------------------------------------------------- #
@@ -14,8 +17,8 @@ from source.services.manager import BaseRecordingFileServiceManager
 class RecordingFileManagerService(BaseRecordingFileServiceManager):
     """Service for managing recording files."""
 
-    def __init__(self, server: ServerManager, recording_storage_path: str):
-        super().__init__(server)
+    def __init__(self, context: Context, recording_storage_path: str):
+        super().__init__(context)
         self.recording_storage_path = recording_storage_path
 
         self.temp_path = os.path.join(self.recording_storage_path, "temp")

@@ -12,10 +12,10 @@ from typing import Any
 
 import asyncpg
 from asyncpg import Pool
-from sqlalchemy import (
-    create_engine,
-)
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import DDL
+from sqlalchemy.sql import ddl
 
 from source.server.db_models import SQL_DATABASE_MODELS
 
@@ -137,14 +137,13 @@ class PostgreSQLServer(SQLDatabase):
             for model in SQL_DATABASE_MODELS:
                 table_name = model.__tablename__
 
-                # Check if table exists
-                async with self._get_connection() as connection:
-                    result = await connection.fetchval(
-                        "SELECT COUNT(*) FROM information_schema.tables "
-                        "WHERE table_schema = 'public' AND table_name = $1",
-                        table_name,
-                    )
-                    table_exists = result > 0
+                # Check if table exists using SQLAlchemy Inspector
+                temp_connection_string = f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+                temp_engine = create_engine(temp_connection_string)
+                inspector = inspect(temp_engine)
+
+                table_exists = table_name in inspector.get_table_names()
+                temp_engine.dispose()
 
                 if not table_exists:
                     # Create new table
@@ -171,76 +170,105 @@ class PostgreSQLServer(SQLDatabase):
             table_name: Name of the table to update
         """
         try:
-            # Get current columns from database
-            async with self._get_connection() as connection:
-                db_columns_rows = await connection.fetch(
-                    "SELECT column_name, data_type, is_nullable, udt_name "
-                    "FROM information_schema.columns "
-                    "WHERE table_schema = 'public' AND table_name = $1",
-                    table_name,
+            # Use SQLAlchemy Inspector to get current columns from database
+            temp_connection_string = f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+            temp_engine = create_engine(temp_connection_string)
+            inspector = inspect(temp_engine)
+
+            # Get database columns info
+            db_columns_list = inspector.get_columns(table_name)
+            db_columns = {col["name"]: col for col in db_columns_list}
+            temp_engine.dispose()
+
+            # Get model columns
+            model_columns = {col.name: col for col in model.__table__.columns}
+
+            # Find columns to add
+            columns_to_add = set(model_columns.keys()) - set(db_columns.keys())
+            # Find columns to remove
+            columns_to_remove = set(db_columns.keys()) - set(model_columns.keys())
+            # Find columns to potentially modify
+            columns_to_check = set(model_columns.keys()) & set(db_columns.keys())
+
+            # Add missing columns using SQLAlchemy DDL
+            for col_name in columns_to_add:
+                col = model_columns[col_name]
+                # Get the actual Column object from the model
+                column_to_add = model.__table__.columns[col_name]
+
+                # Compile the column type for PostgreSQL
+                col_type = column_to_add.type.compile(dialect=postgresql.dialect())
+                nullable = "NULL" if column_to_add.nullable else "NOT NULL"
+
+                # Build DDL statement
+                add_column_ddl = (
+                    f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type} {nullable}"
                 )
-                db_columns = {row["column_name"]: row for row in db_columns_rows}
+                stmt = DDL(add_column_ddl)
 
-                # Get model columns
-                model_columns = {col.name: col for col in model.__table__.columns}
+                await self.execute(stmt)
+                logger.info(f"[{self.name}] Added column `{col_name}` to table `{table_name}`")
 
-                # Find columns to add
-                columns_to_add = set(model_columns.keys()) - set(db_columns.keys())
-                # Find columns to remove
-                columns_to_remove = set(db_columns.keys()) - set(model_columns.keys())
-                # Find columns to potentially modify
-                columns_to_check = set(model_columns.keys()) & set(db_columns.keys())
+            # Modify existing columns if needed
+            # PostgreSQL uses ALTER COLUMN TYPE syntax
+            for col_name in columns_to_check:
+                col = model_columns[col_name]
+                db_col = db_columns[col_name]
 
-                # Add missing columns
-                for col_name in columns_to_add:
-                    col = model_columns[col_name]
-                    col_type = self._get_postgresql_column_type(col)
-                    nullable = "" if col.nullable else "NOT NULL"
-                    default = ""
+                # Check if column needs modification
+                model_col_type = self._get_postgresql_column_type(col)
+                # Inspector returns type object, need to convert to string for comparison
+                db_col_type = str(db_col["type"]).upper()
+
+                # Compare types (normalize for comparison)
+                if (
+                    model_col_type.upper() not in db_col_type
+                    and db_col_type not in model_col_type.upper()
+                ):
+                    # Use DDL for ALTER COLUMN TYPE (PostgreSQL-specific)
+                    # Note: PostgreSQL requires separate ALTER statements for type, nullable, and default
+                    stmt = ddl.DDL(
+                        f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" TYPE {model_col_type}'
+                    )
+                    await self.execute(stmt)
+
+                    # Set nullable constraint if needed
+                    if not col.nullable:
+                        stmt = ddl.DDL(
+                            f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" SET NOT NULL'
+                        )
+                        await self.execute(stmt)
+                    else:
+                        stmt = ddl.DDL(
+                            f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" DROP NOT NULL'
+                        )
+                        await self.execute(stmt)
+
+                    # Set default value if specified
                     if col.default is not None and hasattr(col.default, "arg"):
                         default_val = col.default.arg
                         if isinstance(default_val, str):
-                            default = f"DEFAULT '{default_val}'"
+                            stmt = ddl.DDL(
+                                f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" SET DEFAULT \'{default_val}\''
+                            )
                         else:
-                            default = f"DEFAULT {default_val}"
+                            stmt = ddl.DDL(
+                                f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" SET DEFAULT {default_val}'
+                            )
+                        await self.execute(stmt)
 
-                    alter_query = f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {col_type} {nullable} {default}'
-                    await connection.execute(alter_query)
-                    logger.info(f"[{self.name}] Added column `{col_name}` to table `{table_name}`")
-
-                # Modify existing columns if needed
-                for col_name in columns_to_check:
-                    col = model_columns[col_name]
-                    db_col = db_columns[col_name]
-
-                    # Check if column needs modification
-                    model_col_type = self._get_postgresql_column_type(col)
-                    db_col_type = db_col["data_type"].upper()
-
-                    # Compare types (normalize for comparison)
-                    if model_col_type.upper() != db_col_type:
-                        nullable = "" if col.nullable else "NOT NULL"
-                        default = ""
-                        if col.default is not None and hasattr(col.default, "arg"):
-                            default_val = col.default.arg
-                            if isinstance(default_val, str):
-                                default = f"DEFAULT '{default_val}'"
-                            else:
-                                default = f"DEFAULT {default_val}"
-
-                        alter_query = f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" TYPE {model_col_type} {nullable} {default}'
-                        await connection.execute(alter_query)
-                        logger.info(
-                            f"[{self.name}] Modified column `{col_name}` in table `{table_name}` from {db_col_type} to {model_col_type}"
-                        )
-
-                # Remove extra columns
-                for col_name in columns_to_remove:
-                    alter_query = f'ALTER TABLE "{table_name}" DROP COLUMN "{col_name}"'
-                    await connection.execute(alter_query)
                     logger.info(
-                        f"[{self.name}] Removed column `{col_name}` from table `{table_name}`"
+                        f"[{self.name}] Modified column `{col_name}` in table `{table_name}` from {db_col_type} to {model_col_type}"
                     )
+
+            # Remove extra columns using SQLAlchemy DDL
+            for col_name in columns_to_remove:
+                # Build DDL statement to drop column
+                drop_column_ddl = f"ALTER TABLE {table_name} DROP COLUMN {col_name}"
+                stmt = DDL(drop_column_ddl)
+
+                await self.execute(stmt)
+                logger.info(f"[{self.name}] Removed column `{col_name}` from table `{table_name}`")
 
         except Exception as e:
             logger.error(f"[{self.name}] Error updating table schema for {table_name}: {e}")

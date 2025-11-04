@@ -8,15 +8,16 @@ and operations with MySQL database using SQLAlchemy Core for query building.
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from typing import Any
 
 import aiomysql
 from aiomysql import Pool
-from sqlalchemy import (
-    create_engine,
-)
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.dialects import mysql
+from sqlalchemy.schema import DDL
+from sqlalchemy.sql import ddl
 
 from source.server.db_models import SQL_DATABASE_MODELS
 
@@ -143,18 +144,15 @@ class MySQLServer(SQLDatabase):
             for model in SQL_DATABASE_MODELS:
                 table_name = model.__tablename__
 
-                # Check if table exists
-                async with (
-                    self._get_connection() as connection,
-                    connection.cursor(aiomysql.DictCursor) as cursor,
-                ):
-                    await cursor.execute(
-                        "SELECT COUNT(*) as count FROM information_schema.tables "
-                        "WHERE table_schema = %s AND table_name = %s",
-                        (self.database, table_name),
-                    )
-                    result = await cursor.fetchone()
-                    table_exists = result["count"] > 0
+                # Check if table exists using SQLAlchemy Inspector
+
+                # Create a temporary engine to use inspector
+                temp_connection_string = f"mysql+pymysql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+                temp_engine = create_engine(temp_connection_string)
+                inspector = inspect(temp_engine)
+
+                table_exists = table_name in inspector.get_table_names()
+                temp_engine.dispose()
 
                 if not table_exists:
                     # Create new table
@@ -180,34 +178,63 @@ class MySQLServer(SQLDatabase):
             model: SQLAlchemy model class
             table_name: Name of the table to update
         """
-        async with (
-            self._get_connection() as connection,
-            connection.cursor(aiomysql.DictCursor) as cursor,
-        ):
-            try:
-                # Get current columns from database
-                await cursor.execute(
-                    "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_TYPE "
-                    "FROM information_schema.columns "
-                    "WHERE table_schema = %s AND table_name = %s",
-                    (self.database, table_name),
+        try:
+            # Use SQLAlchemy Inspector to get current columns from database
+            temp_connection_string = f"mysql+pymysql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+            temp_engine = create_engine(temp_connection_string)
+            inspector = inspect(temp_engine)
+
+            # Get database columns info
+            db_columns_list = inspector.get_columns(table_name)
+            db_columns = {col["name"]: col for col in db_columns_list}
+            temp_engine.dispose()
+
+            # Get model columns
+            model_columns = {col.name: col for col in model.__table__.columns}
+
+            # Find columns to add
+            columns_to_add = set(model_columns.keys()) - set(db_columns.keys())
+            # Find columns to remove
+            columns_to_remove = set(db_columns.keys()) - set(model_columns.keys())
+            # Find columns to potentially modify
+            columns_to_check = set(model_columns.keys()) & set(db_columns.keys())
+
+            # Add missing columns using SQLAlchemy DDL
+            for col_name in columns_to_add:
+                col = model_columns[col_name]
+                # Get the actual Column object from the model
+                column_to_add = model.__table__.columns[col_name]
+
+                # Compile the column type for MySQL
+                col_type = column_to_add.type.compile(dialect=mysql.dialect())
+                nullable = "NULL" if column_to_add.nullable else "NOT NULL"
+
+                # Build DDL statement
+                add_column_ddl = (
+                    f"ALTER TABLE `{table_name}` ADD COLUMN `{col_name}` {col_type} {nullable}"
                 )
-                db_columns = {row["COLUMN_NAME"]: row for row in await cursor.fetchall()}
+                stmt = DDL(add_column_ddl)
 
-                # Get model columns
-                model_columns = {col.name: col for col in model.__table__.columns}
+                await self.execute(stmt)
+                logger.info(f"[{self.name}] Added column `{col_name}` to table `{table_name}`")
 
-                # Find columns to add
-                columns_to_add = set(model_columns.keys()) - set(db_columns.keys())
-                # Find columns to remove
-                columns_to_remove = set(db_columns.keys()) - set(model_columns.keys())
-                # Find columns to potentially modify
-                columns_to_check = set(model_columns.keys()) & set(db_columns.keys())
+            # Modify existing columns if needed
+            # Note: SQLAlchemy doesn't have a built-in AlterColumn for modifications,
+            # so we use DDL() for MySQL-specific MODIFY COLUMN syntax
+            for col_name in columns_to_check:
+                col = model_columns[col_name]
+                db_col = db_columns[col_name]
 
-                # Add missing columns
-                for col_name in columns_to_add:
-                    col = model_columns[col_name]
-                    col_type = self._get_mysql_column_type(col)
+                # Check if column needs modification
+                model_col_type = self._get_mysql_column_type(col)
+                # Inspector returns type object, need to convert to string for comparison
+                db_col_type = str(db_col["type"]).upper()
+
+                # Compare types (normalize for comparison)
+                if (
+                    model_col_type.upper() not in db_col_type
+                    and db_col_type not in model_col_type.upper()
+                ):
                     nullable = "NULL" if col.nullable else "NOT NULL"
                     default = ""
                     if col.default is not None and hasattr(col.default, "arg"):
@@ -217,50 +244,27 @@ class MySQLServer(SQLDatabase):
                         else:
                             default = f"DEFAULT {default_val}"
 
-                    alter_query = f"ALTER TABLE `{table_name}` ADD COLUMN `{col_name}` {col_type} {nullable} {default}"
-                    await cursor.execute(alter_query)
-                    await connection.commit()
-                    logger.info(f"[{self.name}] Added column `{col_name}` to table `{table_name}`")
-
-                # Modify existing columns if needed
-                for col_name in columns_to_check:
-                    col = model_columns[col_name]
-                    db_col = db_columns[col_name]
-
-                    # Check if column needs modification
-                    model_col_type = self._get_mysql_column_type(col)
-                    db_col_type = db_col["COLUMN_TYPE"].upper()
-
-                    # Compare types (normalize for comparison)
-                    if model_col_type.upper() != db_col_type:
-                        nullable = "NULL" if col.nullable else "NOT NULL"
-                        default = ""
-                        if col.default is not None and hasattr(col.default, "arg"):
-                            default_val = col.default.arg
-                            if isinstance(default_val, str):
-                                default = f"DEFAULT '{default_val}'"
-                            else:
-                                default = f"DEFAULT {default_val}"
-
-                        alter_query = f"ALTER TABLE `{table_name}` MODIFY COLUMN `{col_name}` {model_col_type} {nullable} {default}"
-                        await cursor.execute(alter_query)
-                        await connection.commit()
-                        logger.info(
-                            f"[{self.name}] Modified column `{col_name}` in table `{table_name}` from {db_col_type} to {model_col_type}"
-                        )
-
-                # Remove extra columns
-                for col_name in columns_to_remove:
-                    alter_query = f"ALTER TABLE `{table_name}` DROP COLUMN `{col_name}`"
-                    await cursor.execute(alter_query)
-                    await connection.commit()
+                    # Use DDL for MODIFY COLUMN (MySQL-specific)
+                    stmt = ddl.DDL(
+                        f"ALTER TABLE `{table_name}` MODIFY COLUMN `{col_name}` {model_col_type} {nullable} {default}"
+                    )
+                    await self.execute(stmt)
                     logger.info(
-                        f"[{self.name}] Removed column `{col_name}` from table `{table_name}`"
+                        f"[{self.name}] Modified column `{col_name}` in table `{table_name}` from {db_col_type} to {model_col_type}"
                     )
 
-            except Exception as e:
-                logger.error(f"[{self.name}] Error updating table schema for {table_name}: {e}")
-                raise
+            # Remove extra columns using SQLAlchemy DDL
+            for col_name in columns_to_remove:
+                # Build DDL statement to drop column
+                drop_column_ddl = f"ALTER TABLE `{table_name}` DROP COLUMN `{col_name}`"
+                stmt = DDL(drop_column_ddl)
+
+                await self.execute(stmt)
+                logger.info(f"[{self.name}] Removed column `{col_name}` from table `{table_name}`")
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Error updating table schema for {table_name}: {e}")
+            raise
 
     def _get_mysql_column_type(self, column) -> str:
         """
@@ -359,7 +363,6 @@ class MySQLServer(SQLDatabase):
                     processed_params[key] = value
 
             # Extract parameter names in order from the query
-            import re
 
             # Check for POSTCOMPILE parameters (used for IN clause expansion)
             postcompile_pattern = re.compile(r"__\[POSTCOMPILE_(\w+)\]")

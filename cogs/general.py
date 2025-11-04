@@ -1,17 +1,18 @@
 import discord
 from discord.ext import commands
 
-from source.server.server import ServerManager
-from source.services.manager import ServicesManager
+from source.context import Context
 
 
 class General(commands.Cog):
     """General purpose commands."""
 
-    def __init__(self, bot: discord.Bot, server: ServerManager, services: ServicesManager):
-        self.bot = bot
-        self.server = server
-        self.services = services
+    def __init__(self, context: Context):
+        self.context = context
+        # Backward compatibility properties
+        self.bot = context.bot
+        self.server = context.server_manager
+        self.services = context.services_manager
 
     # -------------------------------------------------------------- #
     # Slash Commands
@@ -54,6 +55,6 @@ class General(commands.Cog):
         await ctx.respond(embed=embed)
 
 
-def setup(bot: discord.Bot, server: ServerManager, services: ServicesManager):
-    general = General(bot, server, services)
-    bot.add_cog(general)
+def setup(context: Context):
+    general = General(context)
+    context.bot.add_cog(general)

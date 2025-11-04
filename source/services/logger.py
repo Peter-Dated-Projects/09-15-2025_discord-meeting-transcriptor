@@ -3,10 +3,13 @@ import contextlib
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiofiles
 
-from source.server.server import ServerManager
+if TYPE_CHECKING:
+    from source.context import Context
+
 from source.services.manager import Manager
 
 # -------------------------------------------------------------- #
@@ -19,7 +22,7 @@ class AsyncLoggingService(Manager):
 
     def __init__(
         self,
-        server: ServerManager,
+        context: "Context",
         log_dir: str = "logs",
         log_file: str | None = None,
         use_timestamp: bool = True,
@@ -28,7 +31,7 @@ class AsyncLoggingService(Manager):
         """Initialize the async logging service.
 
         Args:
-            server: ServerManager instance
+            context: Context instance containing server and services
             log_dir: Directory to store log files
             log_file: Name of the log file (if None and use_timestamp is True,
                      a timestamped filename will be generated)
@@ -36,7 +39,7 @@ class AsyncLoggingService(Manager):
                           If False, uses "app.log" as default.
             console_output: If True, all log messages are also printed to console (stdout).
         """
-        super().__init__(server)
+        super().__init__(context)
         self.log_dir = Path(log_dir)
         self.console_output = console_output
 

@@ -4,10 +4,13 @@ import sys
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiofiles
 
-from source.server.server import ServerManager
+if TYPE_CHECKING:
+    from source.context import Context
+
 from source.services.manager import BaseFileServiceManager
 
 # -------------------------------------------------------------- #
@@ -18,8 +21,8 @@ from source.services.manager import BaseFileServiceManager
 class FileManagerService(BaseFileServiceManager):
     """Service for managing file storage and retrieval."""
 
-    def __init__(self, server: ServerManager, storage_path: str):
-        super().__init__(server)
+    def __init__(self, context: "Context", storage_path: str):
+        super().__init__(context)
 
         self.storage_path = storage_path
 
@@ -84,6 +87,27 @@ class FileManagerService(BaseFileServiceManager):
             if self._waiters[key] == 0:
                 self._locks.pop(key, None)
                 self._waiters.pop(key, None)
+
+    async def _acquire_file_lock_oneshot(self, filename: str):
+        """Acquire a file lock for atomic operations (non-context manager)."""
+        key = self._lock_key(filename)
+        lock = self._locks.setdefault(key, asyncio.Lock())
+        self._waiters[key] = self._waiters.get(key, 0) + 1
+        await lock.acquire()
+
+    async def _release_file_lock_oneshot(self, filename: str):
+        """Release a file lock (non-context manager)."""
+        key = self._lock_key(filename)
+        if key in self._locks:
+            self._locks[key].release()
+            self._waiters[key] -= 1
+            if self._waiters[key] == 0:
+                self._locks.pop(key, None)
+                self._waiters.pop(key, None)
+
+    # -------------------------------------------------------------- #
+    # Public File Operations
+    # -------------------------------------------------------------- #
 
     async def save_file(self, filename: str, data: bytes) -> None:
         """Save a file to the storage path atomically."""
@@ -201,20 +225,3 @@ class FileManagerService(BaseFileServiceManager):
             exists = await loop.run_in_executor(None, os.path.exists, parent_dir)
             if not exists:
                 await loop.run_in_executor(None, os.makedirs, parent_dir, True)
-
-    async def _acquire_file_lock_oneshot(self, filename: str):
-        """Acquire a file lock for atomic operations (non-context manager)."""
-        key = self._lock_key(filename)
-        lock = self._locks.setdefault(key, asyncio.Lock())
-        self._waiters[key] = self._waiters.get(key, 0) + 1
-        await lock.acquire()
-
-    async def _release_file_lock_oneshot(self, filename: str):
-        """Release a file lock (non-context manager)."""
-        key = self._lock_key(filename)
-        if key in self._locks:
-            self._locks[key].release()
-            self._waiters[key] -= 1
-            if self._waiters[key] == 0:
-                self._locks.pop(key, None)
-                self._waiters.pop(key, None)
