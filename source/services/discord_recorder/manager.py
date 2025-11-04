@@ -347,17 +347,18 @@ class DiscordSessionHandler:
         # Create temp recording in SQL with timestamp
         temp_recording_id = None
         if self.services.sql_recording_service_manager:
-            temp_recording_id = (
-                await self.services.sql_recording_service_manager.create_temp_recording(
-                    meeting_id=self.meeting_id,
-                    user_id=str(user_id),  # Discord user ID, not bot user
-                    guild_id=self.guild_id,
-                    chunk_number=chunk_num,
-                    pcm_path=pcm_path,
-                    mp3_path=mp3_path,
-                    transcode_status=TranscodeStatus.QUEUED,
+            try:
+                temp_recording_id = (
+                    await self.services.sql_recording_service_manager.create_temp_recording(
+                        meeting_id=self.meeting_id,
+                        user_id=str(user_id),  # Discord user ID, not bot user
+                        guild_id=self.guild_id,
+                        chunk_number=chunk_num,
+                        pcm_path=pcm_path,
+                        mp3_path=mp3_path,
+                        transcode_status=TranscodeStatus.QUEUED,
+                    )
                 )
-            )
 
                 if temp_recording_id:
                     self._user_temp_recording_ids[user_id].append(temp_recording_id)
@@ -712,6 +713,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
         meeting_id = session.meeting_id
         user_id = session.user_id
+        guild_id = session.guild_id
+        recorded_user_ids = session.get_recorded_user_ids()
 
         await self.services.logging_service.info(
             f"Stopping recording session for meeting {meeting_id} with {len(recorded_user_ids)} users"
