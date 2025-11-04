@@ -8,6 +8,7 @@ import discord
 import dotenv
 
 from source.constructor import ServerManagerType
+from source.context import Context
 from source.server.constructor import construct_server_manager
 from source.services.constructor import construct_services_manager
 
@@ -39,20 +40,19 @@ intents.voice_states = True
 bot = discord.Bot(intents=intents, debug_guilds=DEBUG_GUILD_IDS)
 
 
-def load_cogs(servers_manager, services_manager):
-    """Load all cog extensions with server and services managers.
+def load_cogs(context: Context):
+    """Load all cog extensions with context.
 
     Args:
-        servers_manager: The server manager instance
-        services_manager: The services manager instance
+        context: The application context instance
     """
     from cogs.general import setup as setup_general
     from cogs.voice import setup as setup_voice
 
-    setup_general(bot, servers_manager, services_manager)
+    setup_general(context)
     print("✓ Loaded cogs.general")
 
-    setup_voice(bot, servers_manager, services_manager)
+    setup_voice(context)
     print("✓ Loaded cogs.voice")
 
 
@@ -134,8 +134,12 @@ async def main():
     print("=" * 40)
     print("Syncing services...")
 
+    # Create context object
+    context = Context()
+
     # init server manager
-    servers_manager = construct_server_manager(ServerManagerType.DEVELOPMENT)
+    servers_manager = construct_server_manager(ServerManagerType.DEVELOPMENT, context)
+    context.set_server_manager(servers_manager)
     await servers_manager.connect_all()
     print("[OK] Connected all servers.")
 
@@ -144,22 +148,26 @@ async def main():
 
     services_manager = construct_services_manager(
         ServerManagerType.DEVELOPMENT,
-        server=servers_manager,
+        context=context,
         storage_path=storage_path,
         recording_storage_path=recording_storage_path,
     )
+    context.set_services_manager(services_manager)
     await services_manager.initialize_all()
     print("[OK] Initialized all services.")
 
-    # Store services_manager on bot for access in cogs
-    bot.services_manager = services_manager
+    # Set bot instance on context
+    context.set_bot(bot)
+
+    # Store context on bot for access in cogs
+    bot.context = context
 
     # -------------------------------------------------------------- #
     # Start Discord Bot
     # -------------------------------------------------------------- #
 
     async with bot:
-        load_cogs(servers_manager, services_manager)
+        load_cogs(context)
         token = os.getenv("DISCORD_API_TOKEN")
         if not token:
             print("Error: DISCORD_API_TOKEN not found in environment variables")

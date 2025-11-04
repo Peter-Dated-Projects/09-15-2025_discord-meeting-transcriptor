@@ -2,8 +2,11 @@ import asyncio
 import subprocess
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from source.server.server import ServerManager
+if TYPE_CHECKING:
+    from source.context import Context
+
 from source.services.manager import BaseFFmpegServiceManager
 
 # -------------------------------------------------------------- #
@@ -337,8 +340,8 @@ class FFmpegConversionStream:
 class FFmpegManagerService(BaseFFmpegServiceManager):
     """Service for managing FFmpeg operations."""
 
-    def __init__(self, server: ServerManager, ffmpeg_path: str):
-        super().__init__(server)
+    def __init__(self, context: "Context", ffmpeg_path: str):
+        super().__init__(context)
 
         self.ffmpeg_path = ffmpeg_path
         self.handler = FFmpegHandler(self, ffmpeg_path)

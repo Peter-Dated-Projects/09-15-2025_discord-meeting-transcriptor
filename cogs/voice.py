@@ -4,8 +4,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from source.server.server import ServerManager
-from source.services.manager import ServicesManager
+from source.context import Context
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +17,12 @@ logger = logging.getLogger(__name__)
 class Voice(commands.Cog):
     """Voice based commands."""
 
-    def __init__(self, bot: discord.Bot, server: ServerManager, services: ServicesManager):
-        self.bot = bot
-        self.server = server
-        self.services = services
+    def __init__(self, context: Context):
+        self.context = context
+        # Backward compatibility properties
+        self.bot = context.bot
+        self.server = context.server_manager
+        self.services = context.services_manager
 
     # -------------------------------------------------------------- #
     # Utils
@@ -266,12 +267,12 @@ class Voice(commands.Cog):
         await ctx.edit("Active recording sessions:\n" + "\n".join(session_list))
 
 
-def setup(bot: discord.Bot, server: ServerManager, services: ServicesManager):
-    voice = Voice(bot, server, services)
-    bot.add_cog(voice)
+def setup(context: Context):
+    voice = Voice(context)
+    context.bot.add_cog(voice)
 
     # -------------------------------------------------------------- #
     # Add listeners
     # -------------------------------------------------------------- #
 
-    bot.add_listener(voice.on_voice_state_update, "on_voice_state_update")
+    context.bot.add_listener(voice.on_voice_state_update, "on_voice_state_update")

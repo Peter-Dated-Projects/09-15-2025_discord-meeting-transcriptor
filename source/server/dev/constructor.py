@@ -1,6 +1,10 @@
 import os
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from source.context import Context
 
 from source.server.dev.mysql import MySQLServer
 from source.server.server import ServerManager
@@ -28,13 +32,12 @@ def load_sql_client() -> MySQLServer:
     return sql_handler
 
 
-def construct_server_manager() -> ServerManager:
+def construct_server_manager(context: "Context") -> ServerManager:
     """
     Construct and return a ServerManager instance.
 
     Args:
-        manager_type: Type of server manager (DEVELOPMENT or PRODUCTION)
-        storage_path: Path for storing data (optional for SQL-based storage)
+        context: Context instance to pass to ServerManager
 
     Returns:
         Configured ServerManager instance
@@ -42,6 +45,6 @@ def construct_server_manager() -> ServerManager:
     sql_handler = load_sql_client()
 
     # create server manager
-    server_manager = ServerManager(sql_client=sql_handler)
+    server_manager = ServerManager(context=context, sql_client=sql_handler)
 
     return server_manager

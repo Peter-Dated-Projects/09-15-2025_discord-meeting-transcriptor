@@ -1,6 +1,10 @@
+from typing import TYPE_CHECKING
+
 from sqlalchemy import delete, insert, select, update
 
-from source.server.server import ServerManager
+if TYPE_CHECKING:
+    from source.context import Context
+
 from source.server.sql_models import (
     MeetingModel,
     MeetingStatus,
@@ -26,8 +30,8 @@ from source.utils import (
 class SQLRecordingManagerService(Manager):
     """Service for managing SQL recording operations (temp and persistent)."""
 
-    def __init__(self, server: ServerManager):
-        super().__init__(server)
+    def __init__(self, context: "Context"):
+        super().__init__(context)
 
     # -------------------------------------------------------------- #
     # Manager Methods

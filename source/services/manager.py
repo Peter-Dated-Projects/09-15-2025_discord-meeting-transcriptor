@@ -4,9 +4,8 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    pass
+    from source.context import Context
 
-from source.server.server import ServerManager
 
 # -------------------------------------------------------------- #
 # Services Manager Class
@@ -18,7 +17,7 @@ class ServicesManager:
 
     def __init__(
         self,
-        server: ServerManager,
+        context: Context,
         logging_service: BaseAsyncLoggingService,
         file_service_manager: BaseFileServiceManager,
         recording_file_service_manager: BaseRecordingFileServiceManager,
@@ -27,7 +26,9 @@ class ServicesManager:
         sql_recording_service_manager: BaseSQLRecordingServiceManager,
         discord_recorder_service_manager: BaseDiscordRecorderServiceManager | None = None,
     ):
-        self.server = server
+        self.context = context
+        # Backward compatibility - keep server reference
+        self.server = context.server_manager
 
         self.logging_service = logging_service
 
@@ -72,8 +73,10 @@ class ServicesManager:
 class Manager(ABC):
     """Base class for all manager services."""
 
-    def __init__(self, server: ServerManager):
-        self.server = server
+    def __init__(self, context: Context):
+        self.context = context
+        # Backward compatibility - keep server reference
+        self.server = context.server_manager
         self.services = None
 
         # check if server has been initialized
@@ -103,8 +106,8 @@ class Manager(ABC):
 class BaseFileServiceManager(Manager):
     """Specialized manager for file services."""
 
-    def __init__(self, server):
-        super().__init__(server)
+    def __init__(self, context):
+        super().__init__(context)
 
     @abstractmethod
     def get_storage_path(self) -> str:
@@ -170,8 +173,8 @@ class BaseFileServiceManager(Manager):
 class BaseRecordingFileServiceManager(Manager):
     """Specialized manager for recording file services."""
 
-    def __init__(self, server):
-        super().__init__(server)
+    def __init__(self, context):
+        super().__init__(context)
 
     @abstractmethod
     def get_persistent_storage_path(self) -> str:
@@ -217,8 +220,8 @@ class BaseRecordingFileServiceManager(Manager):
 class BaseAsyncLoggingService(Manager):
     """Specialized manager for asynchronous logging services."""
 
-    def __init__(self, server):
-        super().__init__(server)
+    def __init__(self, context):
+        super().__init__(context)
 
     @abstractmethod
     async def log(self, message: str) -> None:
@@ -254,15 +257,15 @@ class BaseAsyncLoggingService(Manager):
 class BaseSQLLoggingServiceManager(Manager):
     """Specialized manager for SQL logging services."""
 
-    def __init__(self, server):
-        super().__init__(server)
+    def __init__(self, context):
+        super().__init__(context)
 
 
 class BaseSQLRecordingServiceManager(Manager):
     """Specialized manager for SQL recording services (temp and persistent)."""
 
-    def __init__(self, server):
-        super().__init__(server)
+    def __init__(self, context):
+        super().__init__(context)
 
     @abstractmethod
     async def insert_temp_recording(
@@ -311,8 +314,8 @@ class BaseSQLRecordingServiceManager(Manager):
 class BaseFFmpegServiceManager(Manager):
     """Specialized manager for FFmpeg services."""
 
-    def __init__(self, server):
-        super().__init__(server)
+    def __init__(self, context):
+        super().__init__(context)
 
     @abstractmethod
     def get_ffmpeg_path(self) -> str:
@@ -345,15 +348,15 @@ class BaseFFmpegServiceManager(Manager):
 class BaseTranscriptionFileServiceManager(Manager):
     """Specialized manager for transcription file services."""
 
-    def __init__(self, server):
-        super().__init__(server)
+    def __init__(self, context):
+        super().__init__(context)
 
 
 class BaseDiscordRecorderServiceManager(Manager):
     """Specialized manager for Discord recorder services."""
 
-    def __init__(self, server):
-        super().__init__(server)
+    def __init__(self, context):
+        super().__init__(context)
 
     @abstractmethod
     async def start_session(

@@ -4,10 +4,13 @@ import sys
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiofiles
 
-from source.server.server import ServerManager
+if TYPE_CHECKING:
+    from source.context import Context
+
 from source.services.manager import BaseFileServiceManager
 
 # -------------------------------------------------------------- #
@@ -18,8 +21,8 @@ from source.services.manager import BaseFileServiceManager
 class FileManagerService(BaseFileServiceManager):
     """Service for managing file storage and retrieval."""
 
-    def __init__(self, server: ServerManager, storage_path: str):
-        super().__init__(server)
+    def __init__(self, context: "Context", storage_path: str):
+        super().__init__(context)
 
         self.storage_path = storage_path
 

@@ -1,6 +1,9 @@
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from source.server.server import ServerManager
+if TYPE_CHECKING:
+    from source.context import Context
+
 from source.server.sql_models import JobsStatus, JobsStatusModel, JobsType
 from source.services.manager import BaseSQLLoggingServiceManager
 from source.utils import generate_16_char_uuid
@@ -13,8 +16,8 @@ from source.utils import generate_16_char_uuid
 class SQLLoggingManagerService(BaseSQLLoggingServiceManager):
     """Service for managing SQL logging."""
 
-    def __init__(self, server: ServerManager):
-        super().__init__(server)
+    def __init__(self, context: "Context"):
+        super().__init__(context)
 
     # -------------------------------------------------------------- #
     # Manager Methods

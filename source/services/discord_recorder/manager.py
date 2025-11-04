@@ -9,9 +9,8 @@ import discord
 from sqlalchemy import select
 
 if TYPE_CHECKING:
-    pass
+    from source.context import Context
 
-from source.server.server import ServerManager
 from source.server.sql_models import TempRecordingModel, TranscodeStatus
 from source.services.manager import BaseDiscordRecorderServiceManager, ServicesManager
 from source.utils import generate_16_char_uuid, get_current_timestamp_est
@@ -84,7 +83,7 @@ class DiscordSessionHandler:
         meeting_id: str,
         user_id: str,
         guild_id: str,
-        services: "ServicesManager",
+        context: "Context",
         bot_instance: discord.Bot | None = None,
     ):
         self.discord_voice_client = discord_voice_client
@@ -92,7 +91,9 @@ class DiscordSessionHandler:
         self.meeting_id = meeting_id
         self.user_id = user_id  # Bot user ID (for SQL tracking)
         self.guild_id = guild_id
-        self.services = services
+        self.context = context
+        # Backward compatibility
+        self.services = context.services_manager
         self.bot_instance = bot_instance  # Store bot instance for auto-stop DMs
         self.start_time = get_current_timestamp_est()
         self.is_recording = False
@@ -711,7 +712,8 @@ class DiscordSessionHandler:
                 "seconds": self.get_recording_duration_seconds(),
                 "hours": self.get_recording_duration_seconds() / 3600,
                 "max_duration_seconds": DiscordRecorderConstants.MAX_RECORDING_DURATION_SECONDS,
-                "max_duration_hours": DiscordRecorderConstants.MAX_RECORDING_DURATION_SECONDS / 3600,
+                "max_duration_hours": DiscordRecorderConstants.MAX_RECORDING_DURATION_SECONDS
+                / 3600,
                 "will_auto_stop_next_cycle": self._has_exceeded_max_duration(),
             },
             "empty_call_detection": {
@@ -738,8 +740,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
     - Background cleanup of old temp records
     """
 
-    def __init__(self, server: ServerManager):
-        super().__init__(server)
+    def __init__(self, context: "Context"):
+        super().__init__(context)
 
         self.sessions: dict[int, DiscordSessionHandler] = {}
         self._cleanup_task: asyncio.Task | None = None
@@ -854,7 +856,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             meeting_id=meeting_id,
             user_id=user_id,
             guild_id=guild_id,
-            services=self.services,
+            context=self.context,
             bot_instance=bot_instance,
         )
 
