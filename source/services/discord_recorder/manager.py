@@ -24,7 +24,7 @@ class DiscordRecorderConstants:
     """Configuration constants for Discord recording."""
 
     # Flush cycle
-    FLUSH_INTERVAL_SECONDS = 10  # Configurable: flush buffer every N seconds
+    FLUSH_INTERVAL_SECONDS = 30  # Configurable: flush buffer every N seconds
 
     # FFmpeg encoding
     MP3_BITRATE = "128k"  # 128 kbps
