@@ -223,7 +223,7 @@ class Voice(commands.Cog):
         # 5. Stop recording session (handles transcoding, concatenation, SQL updates, and DMs)
         await ctx.edit(content="⏳ Stopping recording and processing audio...")
         await self.services.discord_recorder_service_manager.stop_session(
-            channel_id=voice_channel.id, bot_instance=self.bot
+            channel_id=voice_channel.id
         )
         logger.info(f"Recording session stopped for meeting {meeting_id}")
 

@@ -371,7 +371,7 @@ class BaseDiscordRecorderServiceManager(Manager):
         pass
 
     @abstractmethod
-    async def stop_session(self, channel_id: int, bot_instance: Any | None = None) -> bool:
+    async def stop_session(self, channel_id: int) -> bool:
         """Stop a recording session."""
         pass
 
