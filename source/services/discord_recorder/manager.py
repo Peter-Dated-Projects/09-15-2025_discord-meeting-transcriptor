@@ -25,7 +25,21 @@ class DiscordRecorderConstants:
     """Configuration constants for Discord recording."""
 
     # Flush cycle
+    # Note: keep flush at 30 seconds. Flush determines our grace period for empty call times
+    #       before we consider the call ended. Shorter intervals increase DB load.
+    #       Longer intervals may delay the end of the call.
     FLUSH_INTERVAL_SECONDS = 30  # Configurable: flush buffer every N seconds
+
+    # Empty call detection
+    # After this many consecutive empty flush cycles, automatically stop recording
+    # Empty = no users in channel except bot, or no audio data
+    # Example: 2 cycles * 30 seconds = 60 seconds grace period
+    EMPTY_CALL_FLUSH_CYCLES_THRESHOLD = 2
+
+    # Maximum recording duration
+    # Forcibly stop recording after this many seconds to prevent excessive resource usage
+    # 5 hours = 18000 seconds
+    MAX_RECORDING_DURATION_SECONDS = 18000  # 5 hours
 
     # FFmpeg encoding
     MP3_BITRATE = "128k"  # 128 kbps
@@ -71,6 +85,7 @@ class DiscordSessionHandler:
         user_id: str,
         guild_id: str,
         services: "ServicesManager",
+        bot_instance: discord.Bot | None = None,
     ):
         self.discord_voice_client = discord_voice_client
         self.channel_id = channel_id
@@ -78,6 +93,7 @@ class DiscordSessionHandler:
         self.user_id = user_id  # Bot user ID (for SQL tracking)
         self.guild_id = guild_id
         self.services = services
+        self.bot_instance = bot_instance  # Store bot instance for auto-stop DMs
         self.start_time = get_current_timestamp_est()
         self.is_recording = False
 
@@ -100,6 +116,9 @@ class DiscordSessionHandler:
         self._is_shutting_down = False
 
         self._flush_task: asyncio.Task | None = None
+
+        # Empty call detection
+        self._consecutive_empty_flush_cycles = 0
 
     # -------------------------------------------------------------- #
     # Session Lifecycle Methods
@@ -175,6 +194,59 @@ class DiscordSessionHandler:
     # -------------------------------------------------------------- #
     # Audio Buffering Methods
     # -------------------------------------------------------------- #
+
+    def _is_call_empty(self) -> bool:
+        """
+        Check if the voice call is empty (no human users, only bot).
+
+        A call is considered empty if:
+        1. Voice client is not connected, OR
+        2. No users in channel except the bot itself
+
+        Returns:
+            True if call is empty, False otherwise
+        """
+        if not self.discord_voice_client or not self.discord_voice_client.is_connected():
+            return True
+
+        # Get channel members
+        channel = self.discord_voice_client.channel
+        if not channel:
+            return True
+
+        # Count non-bot members
+        human_members = [member for member in channel.members if not member.bot]
+
+        return len(human_members) == 0
+
+    def _has_exceeded_max_duration(self) -> bool:
+        """
+        Check if the recording has exceeded the maximum allowed duration.
+
+        Returns:
+            True if recording duration exceeds MAX_RECORDING_DURATION_SECONDS, False otherwise
+        """
+        if not self.start_time:
+            return False
+
+        # Calculate elapsed time
+        current_time = get_current_timestamp_est()
+        elapsed_seconds = (current_time - self.start_time).total_seconds()
+
+        return elapsed_seconds >= DiscordRecorderConstants.MAX_RECORDING_DURATION_SECONDS
+
+    def get_recording_duration_seconds(self) -> float:
+        """
+        Get the current recording duration in seconds.
+
+        Returns:
+            Duration in seconds since recording started
+        """
+        if not self.start_time:
+            return 0.0
+
+        current_time = get_current_timestamp_est()
+        return (current_time - self.start_time).total_seconds()
 
     async def _recording_finished_callback(self, _sink: "discord.sinks.WaveSink", *_args) -> None:
         """
@@ -263,6 +335,8 @@ class DiscordSessionHandler:
         Runs every FLUSH_INTERVAL_SECONDS and:
         1. Extracts audio from Pycord sink
         2. Flushes audio for each user with buffered data
+        3. Checks if call is empty and triggers auto-stop after threshold
+        4. Checks if recording has exceeded maximum duration and triggers auto-stop
         """
         try:
             flush_count = 0
@@ -277,6 +351,48 @@ class DiscordSessionHandler:
 
                 # Extract latest audio from sink
                 await self._extract_user_audio_from_sink()
+
+                # Check if recording has exceeded maximum duration
+                if self._has_exceeded_max_duration():
+                    duration_hours = self.get_recording_duration_seconds() / 3600
+                    await self.services.logging_service.warning(
+                        f"Recording for meeting {self.meeting_id} has exceeded maximum duration "
+                        f"({duration_hours:.2f} hours). Forcibly stopping recording."
+                    )
+                    # Trigger auto-stop by breaking the loop
+                    break
+
+                # Check if call is empty (no human users)
+                is_empty = self._is_call_empty()
+
+                if is_empty:
+                    self._consecutive_empty_flush_cycles += 1
+                    await self.services.logging_service.info(
+                        f"Empty call detected for meeting {self.meeting_id} "
+                        f"(consecutive empty cycles: {self._consecutive_empty_flush_cycles}/"
+                        f"{DiscordRecorderConstants.EMPTY_CALL_FLUSH_CYCLES_THRESHOLD})"
+                    )
+
+                    # Check if we've exceeded the threshold
+                    if (
+                        self._consecutive_empty_flush_cycles
+                        >= DiscordRecorderConstants.EMPTY_CALL_FLUSH_CYCLES_THRESHOLD
+                    ):
+                        await self.services.logging_service.info(
+                            f"Call has been empty for {self._consecutive_empty_flush_cycles} consecutive cycles. "
+                            f"Auto-stopping recording for meeting {self.meeting_id}."
+                        )
+                        # Trigger auto-stop by breaking the loop
+                        # The stop_recording will be called by the manager
+                        break
+                else:
+                    # Reset counter if call has users
+                    if self._consecutive_empty_flush_cycles > 0:
+                        await self.services.logging_service.info(
+                            f"Call is active again for meeting {self.meeting_id}. "
+                            f"Resetting empty cycle counter (was {self._consecutive_empty_flush_cycles})."
+                        )
+                    self._consecutive_empty_flush_cycles = 0
 
                 # Flush all users
                 await self._flush_all_users()
@@ -491,6 +607,41 @@ class DiscordSessionHandler:
         """Get list of Discord user IDs that have been recorded in this session."""
         return list(self._user_audio_buffers.keys())
 
+    def was_auto_stopped_due_to_empty_call(self) -> bool:
+        """
+        Check if the session was auto-stopped due to empty call detection.
+
+        Returns:
+            True if session ended because call was empty for threshold cycles
+        """
+        return (
+            self._consecutive_empty_flush_cycles
+            >= DiscordRecorderConstants.EMPTY_CALL_FLUSH_CYCLES_THRESHOLD
+        )
+
+    def was_auto_stopped_due_to_max_duration(self) -> bool:
+        """
+        Check if the session was auto-stopped due to exceeding maximum duration.
+
+        Returns:
+            True if session ended because it exceeded max duration
+        """
+        return self._has_exceeded_max_duration()
+
+    def get_auto_stop_reason(self) -> str | None:
+        """
+        Get the reason for auto-stop, if applicable.
+
+        Returns:
+            String describing the auto-stop reason, or None if not auto-stopped
+        """
+        if self.was_auto_stopped_due_to_max_duration():
+            duration_hours = self.get_recording_duration_seconds() / 3600
+            return f"Maximum duration exceeded ({duration_hours:.2f} hours)"
+        elif self.was_auto_stopped_due_to_empty_call():
+            return f"Empty call for {self._consecutive_empty_flush_cycles} consecutive cycles"
+        return None
+
     async def get_session_status(self) -> dict:
         """Get current session status including per-user SQL tracking info."""
         # Check if SQL recording service is available
@@ -556,6 +707,23 @@ class DiscordSessionHandler:
             "total_chunks": sum(len(ids) for ids in self._user_temp_recording_ids.values()),
             "per_user_stats": per_user_stats,
             "chunk_statuses": status_counts,
+            "recording_duration": {
+                "seconds": self.get_recording_duration_seconds(),
+                "hours": self.get_recording_duration_seconds() / 3600,
+                "max_duration_seconds": DiscordRecorderConstants.MAX_RECORDING_DURATION_SECONDS,
+                "max_duration_hours": DiscordRecorderConstants.MAX_RECORDING_DURATION_SECONDS / 3600,
+                "will_auto_stop_next_cycle": self._has_exceeded_max_duration(),
+            },
+            "empty_call_detection": {
+                "consecutive_empty_cycles": self._consecutive_empty_flush_cycles,
+                "threshold": DiscordRecorderConstants.EMPTY_CALL_FLUSH_CYCLES_THRESHOLD,
+                "is_call_empty": self._is_call_empty(),
+                "will_auto_stop_next_cycle": (
+                    self._consecutive_empty_flush_cycles
+                    >= DiscordRecorderConstants.EMPTY_CALL_FLUSH_CYCLES_THRESHOLD - 1
+                ),
+            },
+            "auto_stop_reason": self.get_auto_stop_reason(),
         }
 
 
@@ -575,6 +743,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
         self.sessions: dict[int, DiscordSessionHandler] = {}
         self._cleanup_task: asyncio.Task | None = None
+        self._monitor_task: asyncio.Task | None = None
 
     # -------------------------------------------------------------- #
     # Discord Recorder Manager Methods
@@ -589,6 +758,9 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         if self.services.sql_recording_service_manager:
             self._cleanup_task = asyncio.create_task(self._cleanup_old_temp_recordings())
 
+        # Start background monitor task for auto-stopping sessions (empty calls and max duration)
+        self._monitor_task = asyncio.create_task(self._monitor_sessions())
+
     async def on_close(self) -> bool:
         """Stop the Discord Recorder Service Manager."""
         # Stop all active sessions
@@ -600,6 +772,12 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             self._cleanup_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._cleanup_task
+
+        # Cancel monitor task
+        if self._monitor_task:
+            self._monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._monitor_task
 
         await self.services.logging_service.info("Discord Recorder Service Manager stopped")
         return True
@@ -615,7 +793,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         meeting_id: str | None = None,
         user_id: str | None = None,
         guild_id: str | None = None,
-    ) -> bool:
+        bot_instance: discord.Bot | None = None,
+    ) -> DiscordSessionHandler | None:
         """
         Start recording audio from a Discord channel.
 
@@ -625,6 +804,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             meeting_id: Optional meeting ID (generated if not provided)
             user_id: Optional Discord user ID (required for SQL tracking)
             guild_id: Optional Discord guild ID (required for SQL tracking)
+            bot_instance: Optional Discord bot instance for sending DMs on auto-stop
 
         Returns:
             True if session started successfully
@@ -633,7 +813,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             await self.services.logging_service.warning(
                 f"Session already exists for channel {channel_id}"
             )
-            return False
+            return None
 
         # Generate meeting ID if not provided
         if not meeting_id:
@@ -644,7 +824,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             await self.services.logging_service.error(
                 "user_id and guild_id are required for SQL tracking"
             )
-            return False
+            return None
 
         # Create meeting entry in SQL database (CRITICAL: must happen before session starts)
         if self.services.sql_recording_service_manager:
@@ -665,7 +845,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Error Type: {type(e).__name__}, Details: {str(e)}. "
                     f"Cannot start recording session without meeting entry (foreign key constraint)."
                 )
-                return False
+                return None
 
         # Create session handler
         session = DiscordSessionHandler(
@@ -675,6 +855,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             user_id=user_id,
             guild_id=guild_id,
             services=self.services,
+            bot_instance=bot_instance,
         )
 
         # Start recording
@@ -686,7 +867,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         await self.services.logging_service.info(
             f"Started recording session for meeting {meeting_id}, channel {channel_id}"
         )
-        return True
+        return session
 
     async def stop_session(self, channel_id: int, bot_instance: discord.Bot | None = None) -> bool:
         """
@@ -1208,6 +1389,79 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             await asyncio.sleep(poll_interval)
             # Exponential backoff
             poll_interval = min(poll_interval * 1.5, max_poll_interval)
+
+    # -------------------------------------------------------------- #
+    # Background Monitoring Methods
+    # -------------------------------------------------------------- #
+
+    async def _monitor_sessions(self) -> None:
+        """
+        Background task to monitor and auto-stop sessions when:
+        1. Calls are empty (no human users)
+        2. Recording exceeds maximum duration
+
+        This runs periodically to check if any session's flush loop has detected
+        either condition and automatically stops the recording following the /stop logic.
+        """
+        # Check every 10 seconds for sessions that need auto-stopping
+        monitor_interval = 10
+
+        await self.services.logging_service.info(
+            f"Started session monitor task (interval: {monitor_interval}s)"
+        )
+
+        try:
+            while True:
+                await asyncio.sleep(monitor_interval)
+
+                # Check all active sessions
+                for channel_id in list(self.sessions.keys()):
+                    session = self.sessions.get(channel_id)
+                    if not session:
+                        continue
+
+                    # Check if session should be auto-stopped
+                    # The flush loop will break when either threshold is reached, so check if it's still recording
+                    should_stop = False
+                    stop_reason = None
+
+                    if not session.is_recording:
+                        if session.was_auto_stopped_due_to_max_duration():
+                            should_stop = True
+                            duration_hours = session.get_recording_duration_seconds() / 3600
+                            stop_reason = f"maximum duration exceeded ({duration_hours:.2f} hours)"
+                        elif session.was_auto_stopped_due_to_empty_call():
+                            should_stop = True
+                            stop_reason = "empty call detection"
+
+                    if should_stop and stop_reason:
+                        await self.services.logging_service.info(
+                            f"Auto-stopping session for channel {channel_id} (meeting {session.meeting_id}) "
+                            f"due to {stop_reason} - following /stop logic"
+                        )
+
+                        # Store voice client reference before stop_session removes the session
+                        voice_client = session.discord_voice_client
+                        bot_instance = session.bot_instance
+
+                        # Execute /stop logic:
+                        # 1. Stop recording session (handles transcoding, concatenation, SQL updates, and DMs)
+                        await self.stop_session(channel_id=channel_id, bot_instance=bot_instance)
+
+                        # 2. Disconnect from voice channel
+                        try:
+                            if voice_client and voice_client.is_connected():
+                                await voice_client.disconnect()
+                                await self.services.logging_service.info(
+                                    f"Disconnected bot from channel {channel_id} after auto-stop"
+                                )
+                        except Exception as e:
+                            await self.services.logging_service.error(
+                                f"Error disconnecting from voice channel {channel_id}: {e}"
+                            )
+
+        except asyncio.CancelledError:
+            await self.services.logging_service.info("Session monitor task cancelled")
 
     # -------------------------------------------------------------- #
     # Background Cleanup Methods

@@ -55,4 +55,5 @@ class General(commands.Cog):
 
 
 def setup(bot: discord.Bot, server: ServerManager, services: ServicesManager):
-    bot.add_cog(General(bot, server, services))
+    general = General(bot, server, services)
+    bot.add_cog(general)
