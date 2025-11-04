@@ -14,7 +14,7 @@ dependencies = [
     "isort>=7.0.0",
     "ninja>=1.13.0",
     "psycopg2-binary>=2.9.11",
-    "py-cord[voice]>=2.6.1",
+    "py-cord[voice]",
     "pydantic>=2.0.0",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
@@ -103,3 +103,6 @@ known_third_party = [
     "aiomysql",
     "psycopg2",
 ]
+
+[tool.uv.sources]
+py-cord = { git = "https://github.com/Pycord-Development/pycord" }

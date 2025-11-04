@@ -37,9 +37,7 @@ class Voice(commands.Cog):
         Returns:
             Voice channel if user is connected, None otherwise
         """
-        if not ctx.author.voice:
-            return None
-        return ctx.author.voice.channel
+        return ctx.author.voice.channel if ctx.author.voice else None
 
     async def get_bot_voice_client(
         self,
@@ -90,11 +88,13 @@ class Voice(commands.Cog):
                     return voice_client, None
 
                 # Move to new channel
+                await voice_client.disconnect(force=True)
+                await asyncio.sleep(0.2)
                 await voice_client.move_to(target_channel)
                 return voice_client, None
 
             # Not connected - establish new connection
-            voice_client = await target_channel.connect(timeout=5.0, reconnect=True)
+            voice_client = await target_channel.connect()
             return voice_client, None
         except discord.DiscordException as e:
             return None, f"Failed to connect to voice channel: {e}"
@@ -110,8 +110,8 @@ class Voice(commands.Cog):
         Args:
             ctx: Discord application context
         """
-        # Defer response for better UX (processing can take time)
-        await ctx.defer(ephemeral=True)
+        await ctx.defer()
+        await ctx.edit(content="⏳ Joining Discord Call...")
 
         # 1. Validate user is in a voice channel
         voice_channel = self.find_user_vc(ctx)
@@ -120,30 +120,14 @@ class Voice(commands.Cog):
             return
 
         # 2. Connect to voice channel with robust error handling
-        voice_client, error = await self.connect_to_vc(ctx, voice_channel)
-
-        if error:
-            # Connection failed - send user-friendly error message
-            await ctx.edit(content=f"❌ {error}")
-            logger.warning(f"Failed to connect for user {ctx.author}: {error}")
-            return
-
-        if not voice_client:
-            # Should not happen if error is None, but guard anyway
-            await ctx.edit(content="❌ Failed to connect to voice channel.")
-            return
-
-        # 3. Confirm connection
-        is_new_connection = voice_client.channel.id != voice_channel.id
-        if is_new_connection:
-            await ctx.edit(content=f"🔊 Joined voice channel: **{voice_channel.name}**")
-        else:
-            await ctx.edit(content=f"🔊 Already transcribing in **{voice_channel.name}**")
+        await ctx.edit(content="⏳ Connecting to voice channel...")
+        voice_client = await voice_channel.connect(timeout=5.0, reconnect=True)
 
         # TODO - implement transcription logic + recording service
         # This is where you'll call: voice_client.start_recording(...)
 
         # Temporary: wait 5 seconds then disconnect
+        await ctx.edit(content="✅ Transcription started! (simulated for 5 seconds)")
         await asyncio.sleep(5)
 
         # 4. Clean disconnect
