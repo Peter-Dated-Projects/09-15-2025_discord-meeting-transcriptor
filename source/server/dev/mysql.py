@@ -14,9 +14,9 @@ from typing import Any
 
 import aiomysql
 from aiomysql import Pool
-from sqlalchemy import Column, String, create_engine, inspect
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.dialects import mysql
-from sqlalchemy.schema import AddColumn, DropColumn
+from sqlalchemy.schema import DDL
 from sqlalchemy.sql import ddl
 
 from source.server.db_models import SQL_DATABASE_MODELS
@@ -205,7 +205,16 @@ class MySQLServer(SQLDatabase):
                 # Get the actual Column object from the model
                 column_to_add = model.__table__.columns[col_name]
 
-                stmt = AddColumn(table_name, column_to_add)
+                # Compile the column type for MySQL
+                col_type = column_to_add.type.compile(dialect=mysql.dialect())
+                nullable = "NULL" if column_to_add.nullable else "NOT NULL"
+
+                # Build DDL statement
+                add_column_ddl = (
+                    f"ALTER TABLE `{table_name}` ADD COLUMN `{col_name}` {col_type} {nullable}"
+                )
+                stmt = DDL(add_column_ddl)
+
                 await self.execute(stmt)
                 logger.info(f"[{self.name}] Added column `{col_name}` to table `{table_name}`")
 
@@ -246,10 +255,10 @@ class MySQLServer(SQLDatabase):
 
             # Remove extra columns using SQLAlchemy DDL
             for col_name in columns_to_remove:
-                # Create a temporary Column object for DropColumn
-                temp_col = Column(col_name, String)
+                # Build DDL statement to drop column
+                drop_column_ddl = f"ALTER TABLE `{table_name}` DROP COLUMN `{col_name}`"
+                stmt = DDL(drop_column_ddl)
 
-                stmt = DropColumn(table_name, temp_col)
                 await self.execute(stmt)
                 logger.info(f"[{self.name}] Removed column `{col_name}` from table `{table_name}`")
 

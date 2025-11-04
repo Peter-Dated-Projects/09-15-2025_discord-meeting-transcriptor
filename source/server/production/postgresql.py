@@ -199,11 +199,13 @@ class PostgreSQLServer(SQLDatabase):
                 # Compile the column type for PostgreSQL
                 col_type = column_to_add.type.compile(dialect=postgresql.dialect())
                 nullable = "NULL" if column_to_add.nullable else "NOT NULL"
-                
+
                 # Build DDL statement
-                add_column_ddl = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type} {nullable}"
+                add_column_ddl = (
+                    f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type} {nullable}"
+                )
                 stmt = DDL(add_column_ddl)
-                
+
                 await self.execute(stmt)
                 logger.info(f"[{self.name}] Added column `{col_name}` to table `{table_name}`")
 
@@ -264,7 +266,7 @@ class PostgreSQLServer(SQLDatabase):
                 # Build DDL statement to drop column
                 drop_column_ddl = f"ALTER TABLE {table_name} DROP COLUMN {col_name}"
                 stmt = DDL(drop_column_ddl)
-                
+
                 await self.execute(stmt)
                 logger.info(f"[{self.name}] Removed column `{col_name}` from table `{table_name}`")
 
