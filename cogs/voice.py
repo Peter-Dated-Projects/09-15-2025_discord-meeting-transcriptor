@@ -167,6 +167,7 @@ class Voice(commands.Cog):
             channel_id=voice_channel.id,
             user_id=str(ctx.author.id),
             guild_id=str(ctx.guild.id),
+            bot_instance=self.bot,
         )
 
         if not session_instance:
