@@ -416,6 +416,11 @@ class DiscordSessionHandler:
                 temp_recording_id=temp_recording_id, status=new_status
             )
 
+            # Check and update meeting status based on recording state and pending transcodes
+            await self.services.sql_recording_service_manager.check_and_update_meeting_status(
+                meeting_id=self.meeting_id, is_recording=self.is_recording
+            )
+
             # Delete PCM file after successful transcode (non-blocking)
             if success and os.path.exists(pcm_path):
                 try:
@@ -695,10 +700,18 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Timeout waiting for transcodes on meeting {meeting_id}"
                 )
 
+            # Final meeting status check (all transcodes should be done or failed)
+            final_status = (
+                await self.services.sql_recording_service_manager.check_and_update_meeting_status(
+                    meeting_id=meeting_id, is_recording=False
+                )
+            )
+
             # Note: Temp recordings remain in temp storage and SQL
             # They will be cleaned up by the background cleanup task
             await self.services.logging_service.info(
                 f"Recording session complete for meeting {meeting_id}. "
+                f"Final status: {final_status.value}. "
                 f"Files are in temp storage and will be cleaned up after {DiscordRecorderConstants.TEMP_RECORDING_TTL_HOURS} hours."
             )
 

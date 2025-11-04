@@ -364,6 +364,82 @@ class SQLRecordingManagerService(Manager):
 
         return meeting_id
 
+    async def update_meeting_status(self, meeting_id: str, status: MeetingStatus) -> None:
+        """
+        Update the status of a meeting.
+
+        Args:
+            meeting_id: Meeting ID (16 chars)
+            status: New MeetingStatus value
+        """
+        # Validate input
+        if len(meeting_id) != MEETING_UUID_LENGTH:
+            raise ValueError(f"meeting_id must be {MEETING_UUID_LENGTH} characters long")
+
+        timestamp = get_current_timestamp_est()
+
+        # Build update query
+        stmt = (
+            update(MeetingModel)
+            .where(MeetingModel.id == meeting_id)
+            .values(status=status.value, updated_at=timestamp)
+        )
+
+        # Execute update
+        await self.server.sql_client.execute(stmt)
+        await self.services.logging_service.info(
+            f"Updated meeting {meeting_id} status to {status.value}"
+        )
+
+    async def check_and_update_meeting_status(
+        self, meeting_id: str, is_recording: bool
+    ) -> MeetingStatus:
+        """
+        Check transcode status and update meeting status accordingly.
+
+        Logic:
+        - If is_recording=True: status = RECORDING
+        - If is_recording=False and transcodes pending: status = PROCESSING
+        - If is_recording=False and all transcodes done: status = COMPLETED
+
+        Args:
+            meeting_id: Meeting ID
+            is_recording: Whether recording is still active
+
+        Returns:
+            The new MeetingStatus that was set
+        """
+        # If still recording, keep RECORDING status
+        if is_recording:
+            await self.update_meeting_status(meeting_id, MeetingStatus.RECORDING)
+            return MeetingStatus.RECORDING
+
+        # Recording stopped - check transcode status
+        temp_recordings = await self.get_temp_recordings_for_meeting(meeting_id)
+
+        # Count pending transcodes
+        pending_count = sum(
+            1
+            for rec in temp_recordings
+            if rec["transcode_status"]
+            in [TranscodeStatus.QUEUED.value, TranscodeStatus.IN_PROGRESS.value]
+        )
+
+        if pending_count > 0:
+            # Still processing
+            await self.update_meeting_status(meeting_id, MeetingStatus.PROCESSING)
+            await self.services.logging_service.info(
+                f"Meeting {meeting_id} has {pending_count} pending transcodes - status: PROCESSING"
+            )
+            return MeetingStatus.PROCESSING
+        else:
+            # All done
+            await self.update_meeting_status(meeting_id, MeetingStatus.COMPLETED)
+            await self.services.logging_service.info(
+                f"Meeting {meeting_id} all transcodes complete - status: COMPLETED"
+            )
+            return MeetingStatus.COMPLETED
+
     async def get_temp_recordings_for_meeting(self, meeting_id: str) -> list[dict]:
         """
         Get all temp recordings for a meeting, optionally filtered by status.
