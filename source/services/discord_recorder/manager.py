@@ -348,15 +348,17 @@ class DiscordSessionHandler:
         temp_recording_id = None
         if self.services.sql_recording_service_manager:
             try:
+                # Calculate start timestamp for this chunk (in milliseconds)
+                start_timestamp_ms = (
+                    chunk_num * DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS * 1000
+                )
+
                 temp_recording_id = (
-                    await self.services.sql_recording_service_manager.create_temp_recording(
+                    await self.services.sql_recording_service_manager.insert_temp_recording(
+                        user_id=str(user_id),  # Discord user ID
                         meeting_id=self.meeting_id,
-                        user_id=str(user_id),  # Discord user ID, not bot user
-                        guild_id=self.guild_id,
-                        chunk_number=chunk_num,
-                        pcm_path=pcm_path,
-                        mp3_path=mp3_path,
-                        transcode_status=TranscodeStatus.QUEUED,
+                        start_timestamp_ms=start_timestamp_ms,
+                        filename=pcm_filename,
                     )
                 )
 
@@ -364,7 +366,7 @@ class DiscordSessionHandler:
                     self._user_temp_recording_ids[user_id].append(temp_recording_id)
             except Exception as e:
                 await self.services.logging_service.error(
-                    f"CRITICAL DISCORD RECORDER SQL ERROR: Failed to create temp recording - "
+                    f"CRITICAL DISCORD RECORDER SQL ERROR: Failed to insert temp recording - "
                     f"Meeting: {self.meeting_id}, User: {user_id}, Chunk: {chunk_num}, "
                     f"Filename: {pcm_filename}, Error Type: {type(e).__name__}, Details: {str(e)}. "
                     f"This likely indicates a missing meeting entry in the meetings table (foreign key constraint)."
@@ -986,19 +988,22 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     mp3_files = []
                     for rec in recordings:
                         filename = rec.get("filename")
-                        if filename and filename.endswith(".mp3"):
+                        if filename:
+                            # SQL stores PCM filename, convert to MP3 filename
+                            mp3_filename = filename.replace(".pcm", ".mp3")
+
                             # Construct full path
                             temp_path = (
                                 self.services.recording_file_service_manager.get_temporary_storage_path()
                             )
-                            full_path = os.path.join(temp_path, filename)
+                            full_path = os.path.join(temp_path, mp3_filename)
 
                             # Check if file exists
                             if os.path.exists(full_path):
                                 mp3_files.append(full_path)
                             else:
                                 await self.services.logging_service.debug(
-                                    f"MP3 file not found: {filename}"
+                                    f"MP3 file not found: {mp3_filename}"
                                 )
 
                     if not mp3_files:
@@ -1023,11 +1028,11 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                         )
                         continue
 
-                    # Insert persistent recording into SQL
+                    # Insert persistent recording into SQL (use full path for file operations)
                     recording_id = await self.services.sql_recording_service_manager.insert_persistent_recording(
                         user_id=rec_user_id,
                         meeting_id=meeting_id,
-                        filename=output_filename,
+                        filename=output_path,  # Use full path for SHA256 and duration calculation
                     )
 
                     await self.services.logging_service.info(
