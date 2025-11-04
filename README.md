@@ -160,7 +160,7 @@ Please read [DEVELOPMENT.md](DEVELOPMENT.md) and [AGENT.md](AGENT.md) for code s
 
 ## 📋 Tech Stack
 
-- **Discord.py** - Discord bot framework
+- **Py-Cord** - Discord bot framework with voice support
 - **PostgreSQL + asyncpg** - Database and async driver
 - **Python 3.10** - Core language
 - **Ruff + Black** - Code formatting and linting
@@ -173,7 +173,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🔗 Links
 
-- [Discord.py Documentation](https://discordpy.readthedocs.io/)
+- [Py-Cord Documentation](https://docs.pycord.dev/)
 - [Development Guide](DEVELOPMENT.md)
 - [Agent Documentation](AGENT.md)
 

@@ -33,9 +33,13 @@ class FileManagerService(BaseFileServiceManager):
 
     async def on_start(self, services):
         await super().on_start(services)
+
+        # Run blocking filesystem operations in executor
+        loop = asyncio.get_event_loop()
+
         # check if folder exists
-        if not os.path.exists(self.storage_path):
-            os.makedirs(self.storage_path)
+        if not await loop.run_in_executor(None, os.path.exists, self.storage_path):
+            await loop.run_in_executor(None, os.makedirs, self.storage_path)
 
         await self.services.logging_service.info(
             f"FileManagerService initialized with storage path: {self.storage_path}"
@@ -83,33 +87,48 @@ class FileManagerService(BaseFileServiceManager):
 
     async def save_file(self, filename: str, data: bytes) -> None:
         """Save a file to the storage path atomically."""
-        if os.path.exists(os.path.join(self.storage_path, filename)):
+        file_path = os.path.join(self.storage_path, filename)
+
+        # Run blocking os.path.exists in executor
+        loop = asyncio.get_event_loop()
+        if await loop.run_in_executor(None, os.path.exists, file_path):
             raise FileExistsError(f"File {filename} already exists.")
 
         path = Path(self.storage_path, filename)
-        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Run blocking mkdir in executor
+        await loop.run_in_executor(None, path.parent.mkdir, True, True)
 
         async with self._acquire_file_lock(filename):
-            # write to tmp in the same dir
-            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as tmp:
+            # Create temp file in executor
+            def write_temp_file():
+                tmp = tempfile.NamedTemporaryFile(dir=path.parent, delete=False)
                 tmp.write(data)
                 tmp.flush()
                 os.fsync(tmp.fileno())
                 tmp_path = Path(tmp.name)
+                tmp.close()
+                return tmp_path
 
-            # atomic rename on same filesystem
-            os.replace(tmp_path, path)
+            tmp_path = await loop.run_in_executor(None, write_temp_file)
+
+            # atomic rename on same filesystem (non-blocking)
+            await loop.run_in_executor(None, os.replace, tmp_path, path)
 
         await self.services.logging_service.info(f"Saved file: {filename} ({len(data)} bytes)")
 
     async def read_file(self, filename: str) -> bytes:
         """Read a file from the storage path."""
-        if not os.path.exists(os.path.join(self.storage_path, filename)):
+        file_path = os.path.join(self.storage_path, filename)
+
+        # Run blocking os.path.exists in executor
+        loop = asyncio.get_event_loop()
+        if not await loop.run_in_executor(None, os.path.exists, file_path):
             raise FileNotFoundError(f"File {filename} does not exist.")
 
         async with (
             self._acquire_file_lock(filename),
-            aiofiles.open(os.path.join(self.storage_path, filename), "rb") as f,
+            aiofiles.open(file_path, "rb") as f,
         ):
             data = await f.read()
 
@@ -118,22 +137,30 @@ class FileManagerService(BaseFileServiceManager):
 
     async def delete_file(self, filename: str) -> None:
         """Delete a file from the storage path."""
-        if not os.path.exists(os.path.join(self.storage_path, filename)):
+        file_path = os.path.join(self.storage_path, filename)
+
+        # Run blocking os.path.exists in executor
+        loop = asyncio.get_event_loop()
+        if not await loop.run_in_executor(None, os.path.exists, file_path):
             raise FileNotFoundError(f"File {filename} does not exist.")
 
         async with self._acquire_file_lock(filename):
-            os.remove(os.path.join(self.storage_path, filename))
+            await loop.run_in_executor(None, os.remove, file_path)
 
         await self.services.logging_service.info(f"Deleted file: {filename}")
 
     async def update_file(self, filename: str, data: bytes) -> None:
         """Update a file in the storage path."""
-        if not os.path.exists(os.path.join(self.storage_path, filename)):
+        file_path = os.path.join(self.storage_path, filename)
+
+        # Run blocking os.path.exists in executor
+        loop = asyncio.get_event_loop()
+        if not await loop.run_in_executor(None, os.path.exists, file_path):
             raise FileNotFoundError(f"File {filename} does not exist.")
 
         async with (
             self._acquire_file_lock(filename),
-            aiofiles.open(os.path.join(self.storage_path, filename), "wb") as f,
+            aiofiles.open(file_path, "wb") as f,
         ):
             await f.write(data)
 
@@ -141,11 +168,15 @@ class FileManagerService(BaseFileServiceManager):
 
     async def get_folder_contents(self) -> list[str]:
         """Get a list of files in the storage path."""
-        return os.listdir(self.storage_path)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, os.listdir, self.storage_path)
 
     async def file_exists(self, filename: str) -> bool:
         """Check if a file exists in the storage path."""
-        return os.path.exists(os.path.join(self.storage_path, filename))
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, os.path.exists, os.path.join(self.storage_path, filename)
+        )
 
     async def create_file(self, filename: str) -> None:
         """Create an empty file in the storage path."""
@@ -157,7 +188,7 @@ class FileManagerService(BaseFileServiceManager):
 
         await self.services.logging_service.info(f"Created empty file: {filename}")
 
-    def ensure_parent_dir(self, filepath: str) -> None:
+    async def ensure_parent_dir(self, filepath: str) -> None:
         """
         Ensure the parent directory of the given filepath exists.
         Creates nested directories if needed.
@@ -166,8 +197,11 @@ class FileManagerService(BaseFileServiceManager):
             filepath: Full path to a file (not just filename)
         """
         parent_dir = os.path.dirname(filepath)
-        if parent_dir and not os.path.exists(parent_dir):
-            os.makedirs(parent_dir, exist_ok=True)
+        if parent_dir:
+            loop = asyncio.get_event_loop()
+            exists = await loop.run_in_executor(None, os.path.exists, parent_dir)
+            if not exists:
+                await loop.run_in_executor(None, os.makedirs, parent_dir, True)
 
     async def _acquire_file_lock_oneshot(self, filename: str):
         """Acquire a file lock for atomic operations (non-context manager)."""

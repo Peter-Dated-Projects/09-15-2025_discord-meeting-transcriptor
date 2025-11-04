@@ -52,7 +52,7 @@ repos:
       - id: mypy
         additional_dependencies:
           - types-python-dotenv
-          - discord.py>=2.6.4
+          - py-cord[voice]>=2.6.1
         args: [--config-file=pyproject.toml]
         exclude: ^tests/
 

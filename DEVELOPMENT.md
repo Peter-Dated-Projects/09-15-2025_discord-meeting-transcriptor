@@ -180,9 +180,9 @@ pre-commit install
 make clean
 ```
 
-### MyPy errors with discord.py
+### MyPy errors with py-cord
 
-The project is configured to ignore missing imports for discord.py. If you get type errors, they might be legitimate issues to fix.
+The project is configured to ignore missing imports for py-cord. If you get type errors, they might be legitimate issues to fix.
 
 ## Contributing
 

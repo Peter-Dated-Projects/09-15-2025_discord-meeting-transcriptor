@@ -1,20 +1,24 @@
 import discord
-from discord import app_commands
 from discord.ext import commands
+
+from source.server.server import ServerManager
+from source.services.manager import ServicesManager
 
 
 class General(commands.Cog):
     """General purpose commands."""
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: discord.Bot, server: ServerManager, services: ServicesManager):
         self.bot = bot
+        self.server = server
+        self.services = services
 
     # -------------------------------------------------------------- #
     # Slash Commands
     # -------------------------------------------------------------- #
 
-    @app_commands.command(name="whoami", description="Display information about the bot")
-    async def whoami(self, interaction: discord.Interaction):
+    @commands.slash_command(name="whoami", description="Display information about the bot")
+    async def whoami(self, ctx: discord.ApplicationContext):
         """Display bot information with an embed."""
 
         # Create embed with bot information
@@ -42,13 +46,13 @@ class General(commands.Cog):
 
         # Set footer
         embed.set_footer(
-            text=f"Requested by {interaction.user.name}",
-            icon_url=interaction.user.avatar.url if interaction.user.avatar else None,
+            text=f"Requested by {ctx.author.name}",
+            icon_url=ctx.author.avatar.url if ctx.author.avatar else None,
         )
 
         # Send the embed as a response
-        await interaction.response.send_message(embed=embed)
+        await ctx.respond(embed=embed)
 
 
-async def setup(bot: commands.Bot):
-    await bot.add_cog(General(bot))
+def setup(bot: discord.Bot, server: ServerManager, services: ServicesManager):
+    bot.add_cog(General(bot, server, services))

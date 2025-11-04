@@ -20,42 +20,31 @@ class SQLDatabase(BaseSQLServerHandler):
         self.connection = None
 
     # ------------------------------------------------------ #
-    # CRUD
+    # Utils
     # ------------------------------------------------------ #
 
     @abstractmethod
-    async def query(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def compile_query_object(self, stmt) -> str:
         """
-        Execute a SQL query.
+        Compile a SQLAlchemy statement object into a SQL query string.
 
         Args:
-            query: SQL query string
-            params: Optional parameters for the query
+            stmt: SQLAlchemy statement object
 
         Returns:
-            List of result rows as dictionaries
+            Compiled SQL query string
         """
         pass
 
     @abstractmethod
-    async def insert(self, table: str, data: dict[str, Any]) -> None:
+    async def execute(self, stmt) -> list[dict[str, Any]]:
         """
-        Insert data into a table.
+        Execute a SQLAlchemy statement and return results.
 
         Args:
-            table: Table name
-            data: Data to insert as a dictionary
-        """
-        pass
+            stmt: SQLAlchemy statement object (select, insert, update, delete)
 
-    @abstractmethod
-    async def update(self, table: str, data: dict[str, Any], conditions: dict[str, Any]) -> None:
-        """
-        Update data in a table.
-
-        Args:
-            table: Table name
-            data: Data to update as a dictionary
-            conditions: Conditions for the update as a dictionary
+        Returns:
+            List of result rows as dictionaries (empty list for non-SELECT queries)
         """
         pass

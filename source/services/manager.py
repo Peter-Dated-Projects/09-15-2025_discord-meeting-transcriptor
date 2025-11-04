@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    pass
 
 from source.server.server import ServerManager
 
@@ -16,27 +19,47 @@ class ServicesManager:
     def __init__(
         self,
         server: ServerManager,
+        logging_service: BaseAsyncLoggingService,
         file_service_manager: BaseFileServiceManager,
         recording_file_service_manager: BaseRecordingFileServiceManager,
         transcription_file_service_manager: BaseTranscriptionFileServiceManager,
         ffmpeg_service_manager: BaseFFmpegServiceManager,
-        logging_service: BaseAsyncLoggingService,
+        sql_recording_service_manager: BaseSQLRecordingServiceManager,
+        discord_recorder_service_manager: BaseDiscordRecorderServiceManager | None = None,
     ):
         self.server = server
+
+        self.logging_service = logging_service
 
         # add service managers as attributes
         self.file_service_manager = file_service_manager
         self.recording_file_service_manager = recording_file_service_manager
         self.transcription_file_service_manager = transcription_file_service_manager
         self.ffmpeg_service_manager = ffmpeg_service_manager
-        self.logging_service = logging_service
+
+        # DB interfaces
+        self.sql_recording_service_manager = sql_recording_service_manager
+
+        # Discord recorder
+        self.discord_recorder_service_manager = discord_recorder_service_manager
 
     async def initialize_all(self) -> None:
         """Initialize all service managers."""
+
+        # Logging
         await self.logging_service.on_start(self)
+
+        # Services managers
         await self.file_service_manager.on_start(self)
         await self.recording_file_service_manager.on_start(self)
         await self.ffmpeg_service_manager.on_start(self)
+
+        # DB interfaces
+        await self.sql_recording_service_manager.on_start(self)
+
+        # Discord recorder
+        if self.discord_recorder_service_manager:
+            await self.discord_recorder_service_manager.on_start(self)
 
         # TODO - need to create
         # await self.transcription_file_service_manager.on_start(self)
@@ -130,7 +153,7 @@ class BaseFileServiceManager(Manager):
         pass
 
     @abstractmethod
-    def ensure_parent_dir(self, filepath: str) -> None:
+    async def ensure_parent_dir(self, filepath: str) -> None:
         """Ensure the parent directory of the given filepath exists."""
         pass
 
@@ -236,6 +259,56 @@ class BaseSQLLoggingServiceManager(Manager):
         super().__init__(server)
 
 
+class BaseSQLRecordingServiceManager(Manager):
+    """Specialized manager for SQL recording services (temp and persistent)."""
+
+    def __init__(self, server):
+        super().__init__(server)
+
+    @abstractmethod
+    async def insert_temp_recording(
+        self, meeting_id: str, user_id: str, guild_id: str, pcm_path: str, created_at=None
+    ) -> str:
+        """Insert a new temp recording chunk."""
+        pass
+
+    @abstractmethod
+    async def update_temp_recording_transcode_started(self, temp_recording_id: str) -> None:
+        """Update temp recording when transcode starts."""
+        pass
+
+    @abstractmethod
+    async def update_temp_recording_transcode_completed(
+        self, temp_recording_id: str, mp3_path: str, sha256: str | None, duration_ms: int | None
+    ) -> None:
+        """Update temp recording when transcode completes."""
+        pass
+
+    @abstractmethod
+    async def update_temp_recording_transcode_failed(self, temp_recording_id: str) -> None:
+        """Update temp recording when transcode fails."""
+        pass
+
+    @abstractmethod
+    async def mark_temp_recording_cleaned(self, temp_recording_id: str) -> None:
+        """Mark temp recording as cleaned (PCM deleted)."""
+        pass
+
+    @abstractmethod
+    async def get_temp_recordings_for_meeting(
+        self, meeting_id: str, status_filter=None
+    ) -> list[dict]:
+        """Get all temp recordings for a meeting."""
+        pass
+
+    @abstractmethod
+    async def promote_temp_recordings_to_persistent(
+        self, meeting_id: str, user_id: str | None = None
+    ) -> str | None:
+        """Promote temp recordings to persistent storage."""
+        pass
+
+
 class BaseFFmpegServiceManager(Manager):
     """Specialized manager for FFmpeg services."""
 
@@ -275,3 +348,37 @@ class BaseTranscriptionFileServiceManager(Manager):
 
     def __init__(self, server):
         super().__init__(server)
+
+
+class BaseDiscordRecorderServiceManager(Manager):
+    """Specialized manager for Discord recorder services."""
+
+    def __init__(self, server):
+        super().__init__(server)
+
+    @abstractmethod
+    async def start_session(
+        self,
+        discord_voice_client: Any,  # discord.VoiceClient
+        channel_id: int,
+        meeting_id: str | None = None,
+        user_id: str | None = None,
+        guild_id: str | None = None,
+    ) -> bool:
+        """Start a new recording session."""
+        pass
+
+    @abstractmethod
+    async def stop_session(self, channel_id: int) -> bool:
+        """Stop a recording session."""
+        pass
+
+    @abstractmethod
+    async def pause_session(self, channel_id: int) -> bool:
+        """Pause a recording session."""
+        pass
+
+    @abstractmethod
+    async def resume_session(self, channel_id: int) -> bool:
+        """Resume a paused recording session."""
+        pass
