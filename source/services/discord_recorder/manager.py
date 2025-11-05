@@ -84,7 +84,6 @@ class DiscordSessionHandler:
         user_id: str,
         guild_id: str,
         context: "Context",
-        bot_instance: discord.Bot | None = None,
     ):
         self.discord_voice_client = discord_voice_client
         self.channel_id = channel_id
@@ -94,7 +93,6 @@ class DiscordSessionHandler:
         self.context = context
         # Backward compatibility
         self.services = context.services_manager
-        self.bot_instance = bot_instance  # Store bot instance for auto-stop DMs
         self.start_time = get_current_timestamp_est()
         self.is_recording = False
 
@@ -120,6 +118,7 @@ class DiscordSessionHandler:
 
         # Empty call detection
         self._consecutive_empty_flush_cycles = 0
+        self._empty_call_notification_sent = False  # Track if we've sent the empty call DM
 
     # -------------------------------------------------------------- #
     # Session Lifecycle Methods
@@ -329,6 +328,53 @@ class DiscordSessionHandler:
     # Flush Cycle (Core Integration Point)
     # -------------------------------------------------------------- #
 
+    async def _send_empty_call_notification(self) -> None:
+        """
+        Send a DM to the user who requested the meeting about an empty call.
+
+        This notifies them that the recording is still running but no users are in the call,
+        and they should run /stop or wait for auto-cleanup.
+        """
+        try:
+            # Check if bot instance is available
+            if not self.context.bot:
+                await self.services.logging_service.warning(
+                    "Bot instance not available, cannot send empty call notification"
+                )
+                return
+
+            # Get guild name from voice client
+            guild_name = "the server"  # Default fallback
+            if self.discord_voice_client and self.discord_voice_client.channel:
+                channel = self.discord_voice_client.channel
+                if hasattr(channel, "guild") and channel.guild:
+                    guild_name = channel.guild.name
+
+            # Construct message
+            message = (
+                f"Your meeting in **{guild_name}** is still running but there are no active users in the call. "
+                f"Run `/stop` in the guild to stop the recording, or leave it and we'll clean it up in "
+                f"{DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS} seconds."
+            )
+
+            # Send DM to the user who requested the meeting
+            success = await BotUtils.send_dm(self.context.bot, self.user_id, message)
+
+            if success:
+                await self.services.logging_service.info(
+                    f"Sent empty call notification to user {self.user_id} for meeting {self.meeting_id}"
+                )
+            else:
+                await self.services.logging_service.warning(
+                    f"Failed to send empty call notification to user {self.user_id} for meeting {self.meeting_id}"
+                )
+
+        except Exception as e:
+            # Catch all exceptions to prevent disrupting the flush loop
+            await self.services.logging_service.error(
+                f"Error sending empty call notification for meeting {self.meeting_id}: {e}"
+            )
+
     async def _flush_loop(self) -> None:
         """
         Periodic flush loop that processes audio for ALL users.
@@ -374,6 +420,14 @@ class DiscordSessionHandler:
                         f"{DiscordRecorderConstants.EMPTY_CALL_FLUSH_CYCLES_THRESHOLD})"
                     )
 
+                    # Send notification on first empty cycle (only once)
+                    if (
+                        self._consecutive_empty_flush_cycles == 1
+                        and not self._empty_call_notification_sent
+                    ):
+                        await self._send_empty_call_notification()
+                        self._empty_call_notification_sent = True
+
                     # Check if we've exceeded the threshold
                     if (
                         self._consecutive_empty_flush_cycles
@@ -394,6 +448,9 @@ class DiscordSessionHandler:
                             f"Resetting empty cycle counter (was {self._consecutive_empty_flush_cycles})."
                         )
                     self._consecutive_empty_flush_cycles = 0
+                    self._empty_call_notification_sent = (
+                        False  # Reset notification flag when call is active again
+                    )
 
                 # Flush all users
                 await self._flush_all_users()
@@ -798,7 +855,6 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         meeting_id: str | None = None,
         user_id: str | None = None,
         guild_id: str | None = None,
-        bot_instance: discord.Bot | None = None,
     ) -> DiscordSessionHandler | None:
         """
         Start recording audio from a Discord channel.
@@ -809,7 +865,6 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             meeting_id: Optional meeting ID (generated if not provided)
             user_id: Optional Discord user ID (required for SQL tracking)
             guild_id: Optional Discord guild ID (required for SQL tracking)
-            bot_instance: Optional Discord bot instance for sending DMs on auto-stop
 
         Returns:
             True if session started successfully
@@ -860,7 +915,6 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             user_id=user_id,
             guild_id=guild_id,
             context=self.context,
-            bot_instance=bot_instance,
         )
 
         # Start recording
