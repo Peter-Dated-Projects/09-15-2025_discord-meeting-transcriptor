@@ -500,7 +500,7 @@ class DiscordSessionHandler:
 
             users_with_data += 1
             total_buffer_size += len(buffer)
-            await self._flush_user(user_id, buffer)
+            await self._flush_user(user_id, buffer, is_final_flush=force)
 
         if users_with_data > 0:
             await self.services.logging_service.info(
@@ -512,13 +512,17 @@ class DiscordSessionHandler:
                 f"No audio data to flush in meeting {self.meeting_id}"
             )
 
-    async def _flush_user(self, user_id: int, buffer: bytearray) -> None:
+    async def _flush_user(
+        self, user_id: int, buffer: bytearray, is_final_flush: bool = False
+    ) -> None:
         """
         Flush audio buffer for a single user.
 
         Args:
             user_id: Discord user ID
             buffer: Audio buffer to flush
+            is_final_flush: If True, this is the final flush when stopping recording.
+                           Skip padding to avoid adding silence when user ends early.
         """
         # Generate unique chunk filename
         chunk_num = self._user_chunk_counters[user_id]
@@ -526,8 +530,9 @@ class DiscordSessionHandler:
         mp3_filename = f"{self.meeting_id}_user{user_id}_chunk{chunk_num:04d}.mp3"
 
         # Pad audio if this is the first chunk and user joined late
+        # BUT: Skip padding on final flush to avoid filling short recordings with silence
         audio_data = bytes(buffer)
-        if chunk_num == 0:
+        if chunk_num == 0 and not is_final_flush:
             # Calculate expected audio length for the flush interval
             expected_duration_ms = DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS * 1000
             expected_bytes = calculate_pcm_bytes(
@@ -565,6 +570,19 @@ class DiscordSessionHandler:
                     f"with {missing_duration_ms}ms ({len(padding):,} bytes) of silence. "
                     f"Original: {actual_bytes:,} bytes, Final: {len(audio_data):,} bytes"
                 )
+        elif chunk_num == 0 and is_final_flush:
+            # Log that we're skipping padding on final flush
+            actual_bytes = len(buffer)
+            duration_ms = calculate_pcm_duration_ms(
+                actual_bytes,
+                sample_rate=DiscordRecorderConstants.DISCORD_SAMPLE_RATE,
+                bits_per_sample=DiscordRecorderConstants.DISCORD_BITS_PER_SAMPLE,
+                channels=DiscordRecorderConstants.DISCORD_CHANNELS,
+            )
+            await self.services.logging_service.info(
+                f"Skipping padding for final flush - user {user_id} in meeting {self.meeting_id} "
+                f"has {actual_bytes:,} bytes ({duration_ms}ms) of actual audio"
+            )
 
         # Write PCM to temp storage
         pcm_path = await self._write_pcm_to_temp(pcm_filename, audio_data)
