@@ -12,6 +12,11 @@ if TYPE_CHECKING:
     from source.context import Context
 
 from source.server.sql_models import TempRecordingModel, TranscodeStatus
+from source.services.discord_recorder.pcm_generator import (
+    SilentPCM,
+    calculate_pcm_bytes,
+    calculate_pcm_duration_ms,
+)
 from source.services.manager import BaseDiscordRecorderServiceManager, ServicesManager
 from source.utils import BotUtils, generate_16_char_uuid, get_current_timestamp_est
 
@@ -22,6 +27,13 @@ from source.utils import BotUtils, generate_16_char_uuid, get_current_timestamp_
 
 class DiscordRecorderConstants:
     """Configuration constants for Discord recording."""
+
+    # Discord audio format (from Pycord WaveSink and Opus specs)
+    # These match Discord's internal audio format as documented in discord.opus._OpusStruct
+    DISCORD_SAMPLE_RATE = 48000  # 48 kHz
+    DISCORD_BITS_PER_SAMPLE = 16  # 16-bit signed PCM
+    DISCORD_CHANNELS = 2  # Stereo
+    DISCORD_UNSIGNED_8BIT = False  # Signed PCM
 
     # Flush cycle
     # Note: keep flush at 30 seconds. Flush determines our grace period for empty call times
@@ -513,8 +525,49 @@ class DiscordSessionHandler:
         pcm_filename = f"{self.meeting_id}_user{user_id}_chunk{chunk_num:04d}.pcm"
         mp3_filename = f"{self.meeting_id}_user{user_id}_chunk{chunk_num:04d}.mp3"
 
+        # Pad audio if this is the first chunk and user joined late
+        audio_data = bytes(buffer)
+        if chunk_num == 0:
+            # Calculate expected audio length for the flush interval
+            expected_duration_ms = DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS * 1000
+            expected_bytes = calculate_pcm_bytes(
+                expected_duration_ms,
+                sample_rate=DiscordRecorderConstants.DISCORD_SAMPLE_RATE,
+                bits_per_sample=DiscordRecorderConstants.DISCORD_BITS_PER_SAMPLE,
+                channels=DiscordRecorderConstants.DISCORD_CHANNELS,
+            )
+            actual_bytes = len(buffer)
+
+            # If audio is shorter than expected, pad with silence at the front
+            if actual_bytes < expected_bytes:
+                missing_duration_ms = calculate_pcm_duration_ms(
+                    expected_bytes - actual_bytes,
+                    sample_rate=DiscordRecorderConstants.DISCORD_SAMPLE_RATE,
+                    bits_per_sample=DiscordRecorderConstants.DISCORD_BITS_PER_SAMPLE,
+                    channels=DiscordRecorderConstants.DISCORD_CHANNELS,
+                )
+
+                # Generate silent PCM to pad the beginning
+                # Use Discord's audio format constants
+                silent_pcm_generator = SilentPCM(
+                    sample_rate=DiscordRecorderConstants.DISCORD_SAMPLE_RATE,
+                    bits_per_sample=DiscordRecorderConstants.DISCORD_BITS_PER_SAMPLE,
+                    channels=DiscordRecorderConstants.DISCORD_CHANNELS,
+                    unsigned_8bit=DiscordRecorderConstants.DISCORD_UNSIGNED_8BIT,
+                )
+                padding = silent_pcm_generator.generate(missing_duration_ms)
+
+                # Prepend silence to the actual audio
+                audio_data = padding + audio_data
+
+                await self.services.logging_service.info(
+                    f"Padded first chunk for user {user_id} in meeting {self.meeting_id} "
+                    f"with {missing_duration_ms}ms ({len(padding):,} bytes) of silence. "
+                    f"Original: {actual_bytes:,} bytes, Final: {len(audio_data):,} bytes"
+                )
+
         # Write PCM to temp storage
-        pcm_path = await self._write_pcm_to_temp(pcm_filename, bytes(buffer))
+        pcm_path = await self._write_pcm_to_temp(pcm_filename, audio_data)
 
         # Build MP3 output path in temp storage
         temp_storage_path = (
@@ -527,9 +580,9 @@ class DiscordSessionHandler:
         if self.services.sql_recording_service_manager:
             try:
                 # Calculate start timestamp for this chunk (in milliseconds)
-                start_timestamp_ms = (
-                    chunk_num * DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS * 1000
-                )
+                # Each chunk represents one flush interval worth of audio
+                flush_interval_ms = DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS * 1000
+                start_timestamp_ms = chunk_num * flush_interval_ms
 
                 temp_recording_id = (
                     await self.services.sql_recording_service_manager.insert_temp_recording(
