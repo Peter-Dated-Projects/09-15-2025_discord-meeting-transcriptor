@@ -315,6 +315,73 @@ class Voice(commands.Cog):
             await ctx.edit(content="❌ Failed to pause recording session.")
             logger.error(f"Failed to pause recording session for meeting {meeting_id}")
 
+    @commands.slash_command(name="resume", description="Resume a paused recording session")
+    async def resume(self, ctx: discord.ApplicationContext) -> None:
+        """Resume a paused recording session.
+
+        This command will:
+        - Resume recording audio in the voice channel
+        - Continue the existing meeting session
+        - Update the meeting status to RECORDING
+
+        Args:
+            ctx: Discord application context
+        """
+        await ctx.defer()
+        await ctx.edit(content="⏳ Resuming recording...")
+
+        # 1. Validate user is in a voice channel
+        voice_channel = self.find_user_vc(ctx)
+        if not voice_channel:
+            await ctx.edit(content="❌ You must be in a voice channel to use this command.")
+            return
+
+        # 2. Check if bot is connected to voice channel
+        voice_client = await self.get_bot_voice_client(ctx)
+        if not voice_client or voice_client.channel.id != voice_channel.id:
+            await ctx.edit(content="❌ The bot is not connected to your voice channel.")
+            return
+
+        # 3. Verify active recording session exists
+        session = self.services.discord_recorder_service_manager.get_active_session(
+            voice_channel.id
+        )
+        if not session:
+            await ctx.edit(content="❌ No active recording session found.")
+            logger.warning(f"No active recording session found for channel {voice_channel.id}")
+            return
+
+        # 4. Check if NOT paused
+        if not session.is_paused:
+            await ctx.edit(content="⚠️ Recording is not currently paused. Cannot resume.")
+            return
+
+        # 5. Check if discord_recorder_service_manager is available
+        if not self.services.discord_recorder_service_manager:
+            await ctx.edit(content="❌ Recording service is not available.")
+            return
+
+        # 6. Resume recording session
+        meeting_id = session.meeting_id
+        logger.info(
+            f"Resuming recording session: meeting_id={meeting_id}, channel={voice_channel.id}"
+        )
+
+        success = await self.services.discord_recorder_service_manager.resume_session(
+            channel_id=voice_channel.id
+        )
+
+        if success:
+            await ctx.edit(
+                content="▶️ **Recording Resumed**\n\n"
+                "Recording has resumed and is now actively capturing audio.\n"
+                "You will receive a DM with confirmation details."
+            )
+            logger.info(f"Recording session resumed for meeting {meeting_id}")
+        else:
+            await ctx.edit(content="❌ Failed to resume recording session.")
+            logger.error(f"Failed to resume recording session for meeting {meeting_id}")
+
     # -------------------------------------------------------------- #
     # Debug Functions
     # -------------------------------------------------------------- #
