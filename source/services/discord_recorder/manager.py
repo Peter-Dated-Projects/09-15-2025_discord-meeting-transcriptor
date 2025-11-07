@@ -1661,7 +1661,6 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             return False
 
         meeting_id = session.meeting_id
-        user_id = session.user_id
 
         # Pause the session using the session handler's pause method
         await session.pause_recording()
@@ -1709,7 +1708,6 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             return False
 
         meeting_id = session.meeting_id
-        user_id = session.user_id
 
         # Resume recording using the session handler's resume method
         await session.resume_recording()
