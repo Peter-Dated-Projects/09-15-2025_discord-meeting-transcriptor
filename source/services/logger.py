@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from source.context import Context
 
 from source.services.manager import Manager
+from source.utils import get_current_timestamp_est
 
 # -------------------------------------------------------------- #
 # Logging Handler to Bridge Built-in Logging to AsyncLoggingService
@@ -93,7 +94,7 @@ class AsyncLoggingService(Manager):
         if log_file is None:
             if use_timestamp:
                 # Create timestamped log file: app_2025-11-03_14-30-45.log
-                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                timestamp = get_current_timestamp_est().strftime("%Y-%m-%d_%H-%M-%S")
                 self.log_file = f"app_{timestamp}.log"
             else:
                 self.log_file = "app.log"
@@ -185,7 +186,7 @@ class AsyncLoggingService(Manager):
             message: The log message
             level: Log level (INFO, DEBUG, WARNING, ERROR, CRITICAL)
         """
-        timestamp = datetime.now().isoformat()
+        timestamp = get_current_timestamp_est().isoformat()
         formatted_message = f"[{timestamp}] [{level}] {message}"
 
         # If writer task isn't ready yet, write eagerly to ensure no logs are lost
