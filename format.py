@@ -43,7 +43,7 @@ def main() -> int:
         0 if all formatting succeeds, 1 if any formatting fails
     """
     # Directories to format
-    targets = ["source", "cogs", "tests", "lint.py", "format.py", "main.py", "playground.py"]
+    targets = ["source", "cogs", "tests", "format.py", "main.py", "playground.py"]
 
     formatters = [
         # Ruff fix (auto-fix issues)

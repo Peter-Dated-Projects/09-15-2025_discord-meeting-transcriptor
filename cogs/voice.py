@@ -245,6 +245,76 @@ class Voice(commands.Cog):
 
         return
 
+    @commands.slash_command(
+        name="pause", description="Pause the current recording and save accumulated audio"
+    )
+    async def pause(self, ctx: discord.ApplicationContext) -> None:
+        """Pause the recording session and save all audio accumulated so far.
+
+        When paused:
+        - Recording stops temporarily
+        - All audio data recorded up to this point is saved to temporary storage
+        - Session remains active and can be resumed with /resume
+
+        Args:
+            ctx: Discord application context
+        """
+        await ctx.defer()
+        await ctx.edit(content="⏳ Pausing recording...")
+
+        # 1. Validate user is in a voice channel
+        voice_channel = self.find_user_vc(ctx)
+        if not voice_channel:
+            await ctx.edit(content="❌ You must be in a voice channel to use this command.")
+            return
+
+        # 2. Check if bot is connected to voice channel
+        voice_client = await self.get_bot_voice_client(ctx)
+        if not voice_client or voice_client.channel.id != voice_channel.id:
+            await ctx.edit(content="❌ The bot is not connected to your voice channel.")
+            return
+
+        # 3. Verify active recording session exists
+        session = self.services.discord_recorder_service_manager.get_active_session(
+            voice_channel.id
+        )
+        if not session:
+            await ctx.edit(content="❌ No active recording session found.")
+            logger.warning(f"No active recording session found for channel {voice_channel.id}")
+            return
+
+        # 4. Check if already paused
+        if session.is_paused:
+            await ctx.edit(content="⚠️ Recording is already paused.")
+            return
+
+        # 5. Check if discord_recorder_service_manager is available
+        if not self.services.discord_recorder_service_manager:
+            await ctx.edit(content="❌ Recording service is not available.")
+            return
+
+        # 6. Pause recording session (stops recording and saves accumulated audio)
+        meeting_id = session.meeting_id
+        logger.info(
+            f"Pausing recording session: meeting_id={meeting_id}, channel={voice_channel.id}"
+        )
+
+        success = await self.services.discord_recorder_service_manager.pause_session(
+            channel_id=voice_channel.id
+        )
+
+        if success:
+            await ctx.edit(
+                content="⏸️ **Recording Paused**\n\n"
+                "All audio recorded during this session has been saved to temporary storage.\n"
+                "You will receive a DM with details.\n\n"
+                "Use `/resume` to continue recording from this point."
+            )
+            logger.info(f"Recording session paused for meeting {meeting_id}")
+        else:
+            await ctx.edit(content="❌ Failed to pause recording session.")
+            logger.error(f"Failed to pause recording session for meeting {meeting_id}")
+
     # -------------------------------------------------------------- #
     # Debug Functions
     # -------------------------------------------------------------- #

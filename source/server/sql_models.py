@@ -15,6 +15,7 @@ Base = declarative_base()
 class MeetingStatus(enum.Enum):
     SCHEDULED = "scheduled"
     RECORDING = "recording"
+    PAUSED = "paused"
     PROCESSING = "processing"
     CLEANING = "cleaning"
     COMPLETED = "completed"
