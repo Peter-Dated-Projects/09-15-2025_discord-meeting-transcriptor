@@ -122,13 +122,14 @@ class ServerManager:
         logger.info("=" * 60)
         logger.info("[ServerManager] Connecting all servers...")
 
-        for server in self.servers:
+        for server in self._servers.values():
             logger.info(f"[ServerManager] Connecting to '{server.name}' server...")
             await server.connect()
             logger.info(f"[ServerManager] Executing startup actions for '{server.name}' server...")
             await server.on_startup()
             logger.info(f"[ServerManager] '{server.name}' server is ready.")
 
+        self._initialized = True
         logger.info("[ServerManager] All servers connected successfully.")
         logger.info("=" * 60)
 
@@ -137,7 +138,7 @@ class ServerManager:
         logger.info("=" * 60)
         logger.info("[ServerManager] Disconnecting all servers...")
 
-        for server in self.servers:
+        for server in self._servers.values():
             logger.info(f"[ServerManager] Executing close actions for '{server.name}' server...")
             await server.on_close()
             logger.info(f"[ServerManager] Disconnecting from '{server.name}' server...")

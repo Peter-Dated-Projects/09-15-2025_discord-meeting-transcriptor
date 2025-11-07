@@ -24,6 +24,8 @@ class FFJob:
     fut: asyncio.Future  # Set to True/False on completion
     is_pcm_to_mp3: bool = False  # Flag to use specialized PCM conversion
     bitrate: str = "128k"  # Only used for PCM to MP3 jobs
+    job_id: str | None = None  # Job ID for tracking in jobs_status table
+    meeting_id: str | None = None  # Meeting ID for tracking in jobs_status table
 
 
 class FFmpegHandler:
@@ -395,6 +397,27 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
                 await self.services.logging_service.info(
                     f"Processing FFmpeg conversion: {job.input_path} -> {job.output_path}"
                 )
+
+                # Log job start in jobs_status table if job tracking is enabled
+                if job.job_id and job.meeting_id and self.services.sql_logging_service_manager:
+                    from datetime import datetime
+                    from source.server.sql_models import JobsStatus, JobsType
+                    from source.utils import get_current_timestamp_est
+
+                    try:
+                        await self.services.sql_logging_service_manager.log_job_status_event(
+                            job_type=JobsType.TEMP_TRANSCODING,
+                            job_id=job.job_id,
+                            meeting_id=job.meeting_id,
+                            created_at=get_current_timestamp_est(),
+                            status=JobsStatus.IN_PROGRESS,
+                            started_at=get_current_timestamp_est(),
+                        )
+                    except Exception as e:
+                        await self.services.logging_service.error(
+                            f"Failed to log temp transcoding job start status: {str(e)}"
+                        )
+
                 try:
                     # Choose conversion method based on job type
                     if job.is_pcm_to_mp3:
@@ -426,11 +449,52 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
                         await self.services.logging_service.error(
                             f"FFmpeg conversion failed for {job.input_path} to {job.output_path}"
                         )
+
+                    # Log job completion in jobs_status table if job tracking is enabled
+                    if job.job_id and job.meeting_id and self.services.sql_logging_service_manager:
+                        from datetime import datetime
+                        from source.server.sql_models import JobsStatus, JobsType
+                        from source.utils import get_current_timestamp_est
+
+                        try:
+                            await self.services.sql_logging_service_manager.log_job_status_event(
+                                job_type=JobsType.TEMP_TRANSCODING,
+                                job_id=job.job_id,
+                                meeting_id=job.meeting_id,
+                                created_at=get_current_timestamp_est(),
+                                status=JobsStatus.COMPLETED if ok else JobsStatus.FAILED,
+                                finished_at=get_current_timestamp_est(),
+                            )
+                        except Exception as e:
+                            await self.services.logging_service.error(
+                                f"Failed to log temp transcoding job completion status: {str(e)}"
+                            )
+
                 except Exception as e:
                     job.fut.set_exception(e)
                     await self.services.logging_service.error(
                         f"FFmpeg conversion exception for {job.input_path}: {str(e)}"
                     )
+
+                    # Log job failure in jobs_status table if job tracking is enabled
+                    if job.job_id and job.meeting_id and self.services.sql_logging_service_manager:
+                        from datetime import datetime
+                        from source.server.sql_models import JobsStatus, JobsType
+                        from source.utils import get_current_timestamp_est
+
+                        try:
+                            await self.services.sql_logging_service_manager.log_job_status_event(
+                                job_type=JobsType.TEMP_TRANSCODING,
+                                job_id=job.job_id,
+                                meeting_id=job.meeting_id,
+                                created_at=get_current_timestamp_est(),
+                                status=JobsStatus.FAILED,
+                                finished_at=get_current_timestamp_est(),
+                            )
+                        except Exception as log_error:
+                            await self.services.logging_service.error(
+                                f"Failed to log temp transcoding job failure status: {str(log_error)}"
+                            )
                 finally:
                     self._jobs.task_done()
             except asyncio.CancelledError:
@@ -459,15 +523,19 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
         output_path: str,
         bitrate: str = "128k",
         callback: callable = None,
+        job_id: str | None = None,
+        meeting_id: str | None = None,
     ) -> bool:
         """
-        Queue a PCM to MP3 conversion job with optional callback.
+        Queue a PCM to MP3 conversion job with optional callback and job tracking.
 
         Args:
             input_path: Path to the input PCM file
             output_path: Path to the output MP3 file
             bitrate: MP3 bitrate (default: 128k)
             callback: Optional async callback function called with success status on completion
+            job_id: Optional 16-character job ID for tracking in jobs_status table
+            meeting_id: Optional 16-character meeting ID for tracking in jobs_status table
 
         Returns:
             True if job was queued successfully, False otherwise
@@ -494,6 +562,24 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
         # Ensure parent directory exists
         await self.services.file_service_manager.ensure_parent_dir(output_path)
 
+        # Log initial PENDING status if job tracking is enabled
+        if job_id and meeting_id and self.services.sql_logging_service_manager:
+            from source.server.sql_models import JobsStatus, JobsType
+            from source.utils import get_current_timestamp_est
+
+            try:
+                await self.services.sql_logging_service_manager.log_job_status_event(
+                    job_type=JobsType.TEMP_TRANSCODING,
+                    job_id=job_id,
+                    meeting_id=meeting_id,
+                    created_at=get_current_timestamp_est(),
+                    status=JobsStatus.PENDING,
+                )
+            except Exception as e:
+                await self.services.logging_service.error(
+                    f"Failed to log temp transcoding job pending status: {str(e)}"
+                )
+
         # Create a Future for this specific job
         fut = asyncio.get_running_loop().create_future()
 
@@ -517,6 +603,8 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
             fut=fut,
             is_pcm_to_mp3=True,
             bitrate=bitrate,
+            job_id=job_id,
+            meeting_id=meeting_id,
         )
 
         # Enqueue the job

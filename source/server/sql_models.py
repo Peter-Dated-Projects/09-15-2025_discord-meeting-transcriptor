@@ -22,6 +22,7 @@ class MeetingStatus(enum.Enum):
 
 
 class JobsType(enum.Enum):
+    TEMP_TRANSCODING = "temp_transcoding"
     TRANSCODING = "transcoding"
     TRANSCRIBING = "transcribing"
     CLEANING = "cleaning"

@@ -1253,6 +1253,9 @@ class DiscordSessionHandler:
             )
             return
 
+        # Generate a unique job ID for this FFmpeg job
+        job_id = generate_16_char_uuid()
+
         # Define callback to update SQL status
         async def on_transcode_complete(success: bool) -> None:
             if not self.services.sql_recording_service_manager or not temp_recording_id:
@@ -1278,12 +1281,14 @@ class DiscordSessionHandler:
                         f"Failed to delete PCM file {pcm_path}: {e}"
                     )
 
-        # Queue FFmpeg job
+        # Queue FFmpeg job with job tracking
         await self.services.ffmpeg_service_manager.queue_pcm_to_mp3(
             input_path=pcm_path,
             output_path=mp3_path,
             bitrate=DiscordRecorderConstants.MP3_BITRATE,
             callback=on_transcode_complete,
+            job_id=job_id,
+            meeting_id=self.meeting_id,
         )
 
     # -------------------------------------------------------------- #
