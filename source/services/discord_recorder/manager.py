@@ -2147,7 +2147,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         Returns:
             True if all transcodes completed, False if timeout
         """
-        start_time = datetime.utcnow()
+        start_time = get_current_timestamp_est()
         poll_interval = 1  # Start with 1 second
         max_poll_interval = 10  # Cap at 10 seconds
 
@@ -2174,7 +2174,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                 return True
 
             # Check timeout
-            elapsed = (datetime.utcnow() - start_time).total_seconds()
+            elapsed = (get_current_timestamp_est() - start_time).total_seconds()
             if elapsed > max_wait_seconds:
                 await self.services.logging_service.warning(
                     f"Timeout waiting for {len(pending)} transcodes on meeting {meeting_id}"
@@ -2301,7 +2301,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         Args:
             ttl_hours: Delete temp recordings older than this many hours
         """
-        cutoff_time = datetime.utcnow() - timedelta(hours=ttl_hours)
+        cutoff_time = get_current_timestamp_est() - timedelta(hours=ttl_hours)
 
         # Query old temp recordings using SQLAlchemy
         query = select(TempRecordingModel).where(
