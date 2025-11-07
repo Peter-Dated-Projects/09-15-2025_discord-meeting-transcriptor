@@ -257,13 +257,18 @@ class DiscordSessionHandler:
         When paused:
         - Recording flag is set to False (stops flush cycle)
         - Flush task is cancelled
-        - Audio data is extracted from sink and flushed to temp files (saved, not discarded)
+        - All audio accumulated UP TO the pause point is extracted and saved to temp files
+        - Discord voice recording is STOPPED (no audio collected during pause)
+        - Sink is cleared to release resources
         - All audio buffers are cleared after saving
         - Pause time is recorded for timeline adjustment on resume
         - is_paused flag is set to True
 
-        This ensures that when the user stops a paused recording, the temp files exist
-        for concatenation and DM notifications to work properly.
+        Audio Handling:
+        - Audio collected BEFORE pause: SAVED to temp files
+        - Audio collected DURING pause: NONE (Discord recording stopped)
+
+        This ensures clean data flow without silent gaps during paused periods.
         """
         if not self.is_recording:
             await self.services.logging_service.warning(
@@ -286,6 +291,16 @@ class DiscordSessionHandler:
         await self._extract_user_audio_from_sink()
         await self._flush_all_users(force=True)
 
+        # Stop Discord recording to prevent audio collection during pause
+        if self.discord_voice_client.recording:
+            self.discord_voice_client.stop_recording()
+            await self.services.logging_service.info(
+                f"Stopped Discord voice recording for meeting {self.meeting_id}"
+            )
+
+        # Clear the sink to release resources
+        self._sink = None
+
         # Clear buffers after flushing (audio is saved to temp files)
         await self._clear_audio_buffers()
 
@@ -303,15 +318,25 @@ class DiscordSessionHandler:
         Resume a paused recording session with fresh timeline synchronization.
 
         When resumed:
-        1. Clears the sink's audio data and resets tracking variables
+        1. Resets all tracking variables for a fresh start
         2. Adjusts start_time to account for the pause duration
-        3. Restarts the recording flag and flush loop
-        4. Clears the paused flag
+        3. Restarts Discord voice recording with a fresh sink
+        4. Restarts the recording flag and flush loop
+        5. Clears the paused flag
 
-        This ensures that:
-        - No stale audio data from before the pause is processed
+        Audio Handling:
+        - Audio collected DURING pause: NONE (Discord recording was stopped)
+        - Audio collected AFTER resume: Recorded with correct timeline positioning
+
+        Timeline Continuity:
+        - start_time is adjusted forward by pause_duration
+        - This makes the final recording continuous without the paused period
+        - No silent gaps in the output audio files
+
+        This ensures:
+        - No audio data from the pause period (recording was stopped)
         - Timeline calculations are synced to the resume time
-        - New audio is recorded with proper timestamps
+        - Clean, gap-free recordings without wasted storage
         """
         if not self.is_paused:
             await self.services.logging_service.warning(
@@ -347,6 +372,15 @@ class DiscordSessionHandler:
 
         # Reset empty call detection counter to prevent premature auto-stop after resume
         self._consecutive_empty_flush_cycles = 0
+
+        # Restart Discord recording with a fresh sink
+        self._sink = discord.sinks.WaveSink()
+        self.discord_voice_client.start_recording(
+            self._sink, self._recording_finished_callback, sync_start=False
+        )
+        await self.services.logging_service.info(
+            f"Restarted Discord voice recording for meeting {self.meeting_id}"
+        )
 
         # Restart recording
         self.is_recording = True
@@ -384,38 +418,20 @@ class DiscordSessionHandler:
 
     async def _clear_sink_and_reset_tracking(self) -> None:
         """
-        Clear the sink's audio data and reset all tracking variables for a fresh resume.
+        Reset all tracking variables for a fresh resume.
 
-        This method:
-        1. Clears all BytesIO buffers in sink.audio_data
-        2. Resets _user_bytes_read to 0 for all users (preserves user entries)
-        3. Clears _user_last_wall_ms entries (will be recalculated on next audio)
+        Since Discord recording is stopped during pause and a fresh sink is created
+        on resume, this method only needs to reset tracking variables.
 
-        This ensures that when recording resumes, we start fresh without any
-        stale data from before the pause, and the timeline system resyncs properly.
+        Tracking Reset:
+        1. Resets _user_bytes_read to 0 for all users (preserves user entries)
+        2. Clears _user_last_wall_ms entries (will be recalculated on next audio)
+
+        This ensures that when recording resumes:
+        - We start fresh with the new sink
+        - Timeline system resyncs properly
+        - Users are properly tracked without being treated as "new"
         """
-        if not self._sink or not self._sink.audio_data:
-            await self.services.logging_service.warning(
-                f"No sink or audio data to clear for meeting {self.meeting_id}"
-            )
-            return
-
-        users_cleared = 0
-        bytes_cleared = 0
-
-        # Clear each user's audio data BytesIO buffer
-        for user_id, audio_data in self._sink.audio_data.items():
-            bytes_io = audio_data.file
-            bytes_io.seek(0, 2)  # Seek to end to get size
-            size_before = bytes_io.tell()
-
-            # Truncate the BytesIO buffer to 0 bytes
-            bytes_io.seek(0)
-            bytes_io.truncate(0)
-
-            bytes_cleared += size_before
-            users_cleared += 1
-
         # Reset tracking variables for all users
         # Reset bytes_read to 0 (preserve entries so _extract_user_audio_from_sink doesn't treat them as new users)
         for user_id in self._user_bytes_read:
@@ -425,10 +441,8 @@ class DiscordSessionHandler:
         self._user_last_wall_ms.clear()
 
         await self.services.logging_service.info(
-            f"Cleared sink audio data for meeting {self.meeting_id}: "
-            f"{users_cleared} user(s) cleared, "
-            f"{bytes_cleared:,} bytes freed ({bytes_cleared / 1024 / 1024:.2f} MB). "
-            f"Reset bytes_read to 0 and cleared timeline tracking for fresh resume."
+            f"Reset tracking variables for meeting {self.meeting_id}. "
+            f"Ready for fresh resume with new sink."
         )
 
     # -------------------------------------------------------------- #
