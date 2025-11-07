@@ -119,6 +119,7 @@ class DiscordSessionHandler:
         self.start_time = get_current_timestamp_est()
         self.is_recording = False
         self.is_paused = False  # Track if session is paused
+        self.pause_time: datetime | None = None  # Track when session was paused
 
         # Per-user audio buffers: {user_id: bytearray}
         self._user_audio_buffers: dict[int, bytearray] = {}
@@ -256,18 +257,27 @@ class DiscordSessionHandler:
         When paused:
         - Recording flag is set to False (stops flush cycle)
         - Flush task is cancelled
-        - Audio data is extracted from sink and flushed to temp files (saved, not discarded)
+        - All audio accumulated UP TO the pause point is extracted and saved to temp files
+        - Discord voice recording is STOPPED (no audio collected during pause)
+        - Sink is cleared to release resources
         - All audio buffers are cleared after saving
+        - Pause time is recorded for timeline adjustment on resume
         - is_paused flag is set to True
 
-        This ensures that when the user stops a paused recording, the temp files exist
-        for concatenation and DM notifications to work properly.
+        Audio Handling:
+        - Audio collected BEFORE pause: SAVED to temp files
+        - Audio collected DURING pause: NONE (Discord recording stopped)
+
+        This ensures clean data flow without silent gaps during paused periods.
         """
         if not self.is_recording:
             await self.services.logging_service.warning(
                 f"Session {self.channel_id} is not currently recording"
             )
             return
+
+        # Record the pause time BEFORE stopping recording
+        self.pause_time = get_current_timestamp_est()
 
         # Stop the recording flag and cancel flush task
         self.is_recording = False
@@ -281,6 +291,16 @@ class DiscordSessionHandler:
         await self._extract_user_audio_from_sink()
         await self._flush_all_users(force=True)
 
+        # Stop Discord recording to prevent audio collection during pause
+        if self.discord_voice_client.recording:
+            self.discord_voice_client.stop_recording()
+            await self.services.logging_service.info(
+                f"Stopped Discord voice recording for meeting {self.meeting_id}"
+            )
+
+        # Clear the sink to release resources
+        self._sink = None
+
         # Clear buffers after flushing (audio is saved to temp files)
         await self._clear_audio_buffers()
 
@@ -291,6 +311,85 @@ class DiscordSessionHandler:
         await self.services.logging_service.info(
             f"Paused recording session for meeting {self.meeting_id}, channel {self.channel_id}. "
             f"Saved {total_chunks} temp recording chunks to storage."
+        )
+
+    async def resume_recording(self) -> None:
+        """
+        Resume a paused recording session with fresh timeline synchronization.
+
+        When resumed:
+        1. Resets all tracking variables for a fresh start
+        2. Adjusts start_time to account for the pause duration
+        3. Restarts Discord voice recording with a fresh sink
+        4. Restarts the recording flag and flush loop
+        5. Clears the paused flag
+
+        Audio Handling:
+        - Audio collected DURING pause: NONE (Discord recording was stopped)
+        - Audio collected AFTER resume: Recorded with correct timeline positioning
+
+        Timeline Continuity:
+        - start_time is adjusted forward by pause_duration
+        - This makes the final recording continuous without the paused period
+        - No silent gaps in the output audio files
+
+        This ensures:
+        - No audio data from the pause period (recording was stopped)
+        - Timeline calculations are synced to the resume time
+        - Clean, gap-free recordings without wasted storage
+        """
+        if not self.is_paused:
+            await self.services.logging_service.warning(
+                f"Session {self.channel_id} is not currently paused"
+            )
+            return
+
+        if not self.pause_time:
+            await self.services.logging_service.warning(
+                f"Session {self.channel_id} has no recorded pause time"
+            )
+            return
+
+        # Calculate pause duration
+        current_time = get_current_timestamp_est()
+        pause_duration = current_time - self.pause_time
+
+        await self.services.logging_service.info(
+            f"Resuming recording for meeting {self.meeting_id}. "
+            f"Pause duration: {pause_duration.total_seconds():.2f} seconds"
+        )
+
+        # Adjust start_time forward by the pause duration
+        # This makes the timeline continuous as if the pause never happened
+        self.start_time = self.start_time + pause_duration
+
+        await self.services.logging_service.info(
+            f"Adjusted start_time forward by {pause_duration.total_seconds():.2f}s for timeline continuity"
+        )
+
+        # Clear sink audio data and reset tracking to start fresh
+        await self._clear_sink_and_reset_tracking()
+
+        # Reset empty call detection counter to prevent premature auto-stop after resume
+        self._consecutive_empty_flush_cycles = 0
+
+        # Restart Discord recording with a fresh sink
+        self._sink = discord.sinks.WaveSink()
+        self.discord_voice_client.start_recording(
+            self._sink, self._recording_finished_callback, sync_start=False
+        )
+        await self.services.logging_service.info(
+            f"Restarted Discord voice recording for meeting {self.meeting_id}"
+        )
+
+        # Restart recording
+        self.is_recording = True
+        self.is_paused = False
+        self.pause_time = None
+        self._flush_task = asyncio.create_task(self._flush_loop())
+
+        await self.services.logging_service.info(
+            f"Resumed recording session for meeting {self.meeting_id}, channel {self.channel_id}"
         )
 
     async def _clear_audio_buffers(self) -> None:
@@ -315,6 +414,35 @@ class DiscordSessionHandler:
             f"Cleared audio buffers for meeting {self.meeting_id}: "
             f"{buffer_count} user buffer(s) cleared, "
             f"{total_bytes_cleared:,} bytes freed ({total_bytes_cleared / 1024 / 1024:.2f} MB)"
+        )
+
+    async def _clear_sink_and_reset_tracking(self) -> None:
+        """
+        Reset all tracking variables for a fresh resume.
+
+        Since Discord recording is stopped during pause and a fresh sink is created
+        on resume, this method only needs to reset tracking variables.
+
+        Tracking Reset:
+        1. Resets _user_bytes_read to 0 for all users (preserves user entries)
+        2. Clears _user_last_wall_ms entries (will be recalculated on next audio)
+
+        This ensures that when recording resumes:
+        - We start fresh with the new sink
+        - Timeline system resyncs properly
+        - Users are properly tracked without being treated as "new"
+        """
+        # Reset tracking variables for all users
+        # Reset bytes_read to 0 (preserve entries so _extract_user_audio_from_sink doesn't treat them as new users)
+        for user_id in self._user_bytes_read:
+            self._user_bytes_read[user_id] = 0
+
+        # Clear last_wall_ms (will be recalculated when next audio arrives)
+        self._user_last_wall_ms.clear()
+
+        await self.services.logging_service.info(
+            f"Reset tracking variables for meeting {self.meeting_id}. "
+            f"Ready for fresh resume with new sink."
         )
 
     # -------------------------------------------------------------- #
@@ -492,13 +620,14 @@ class DiscordSessionHandler:
 
             # **NEW-USER FIRST-PACKET-ANCHORED BACKFILL**
             # Backfill from session start to the beginning of this first packet
-            if is_new_user:
+            # Also applies to users resuming after pause (not in _user_last_wall_ms)
+            if is_new_user or user_id not in self._user_last_wall_ms:
                 # Backfill WHOLE windows up to just before packet_start_ms
                 full_windows = packet_start_ms // DiscordRecorderConstants.WINDOW_MS
 
                 if full_windows > 0:
                     await self.services.logging_service.info(
-                        f"New user {user_id} joined at session t={session_ms}ms ({session_ms / 1000:.1f}s). "
+                        f"{'New' if is_new_user else 'Resuming'} user {user_id} at session t={session_ms}ms ({session_ms / 1000:.1f}s). "
                         f"First packet starts at t={packet_start_ms}ms. "
                         f"Backfilling {full_windows} silent window(s) for timeline alignment."
                     )
@@ -1532,7 +1661,6 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             return False
 
         meeting_id = session.meeting_id
-        user_id = session.user_id
 
         # Pause the session using the session handler's pause method
         await session.pause_recording()
@@ -1551,49 +1679,20 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Failed to update meeting status to PAUSED for meeting {meeting_id}: {e}"
                 )
 
-        # Send DM notification to user
-        await self._send_pause_notification(user_id=user_id, meeting_id=meeting_id)
-
         await self.services.logging_service.info(
             f"Paused recording session for channel {channel_id} and saved all accumulated data to temp files"
         )
         return True
 
-    async def _send_pause_notification(self, user_id: str, meeting_id: str) -> None:
-        """
-        Send a DM notification to the user when recording is paused.
-
-        Args:
-            user_id: Discord user ID to notify
-            meeting_id: Meeting ID that was paused
-        """
-        try:
-            message = (
-                f"⏸️ **Recording Paused**\n\n"
-                f"Your recording session (Meeting ID: `{meeting_id}`) has been paused.\n\n"
-                f"**Note:** All audio recorded up to this point has been saved to temporary storage.\n\n"
-                f"Use `/resume` to continue recording from this point, or `/stop` to end the session and process your recordings."
-            )
-
-            success = await BotUtils.send_dm(self.context.bot, user_id, message)
-
-            if success:
-                await self.services.logging_service.info(
-                    f"Sent pause notification to user {user_id} for meeting {meeting_id}"
-                )
-            else:
-                await self.services.logging_service.warning(
-                    f"Failed to send pause notification to user {user_id} for meeting {meeting_id}"
-                )
-
-        except Exception as e:
-            await self.services.logging_service.error(
-                f"Error sending pause notification for meeting {meeting_id}: {e}"
-            )
-
     async def resume_session(self, channel_id: int) -> bool:
         """
         Resume a paused recording session.
+
+        This will:
+        1. Clear the sink's audio data and reset tracking variables
+        2. Adjust start_time to account for the pause duration
+        3. Restart recording with a fresh timeline
+        4. Update database status to RECORDING
 
         Args:
             channel_id: Discord channel ID
@@ -1609,13 +1708,9 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             return False
 
         meeting_id = session.meeting_id
-        user_id = session.user_id
 
-        # Resume recording
-        if not session.is_recording:
-            session.is_recording = True
-            session.is_paused = False
-            session._flush_task = asyncio.create_task(session._flush_loop())
+        # Resume recording using the session handler's resume method
+        await session.resume_recording()
 
         # Update meeting status back to RECORDING in database
         if self.services.sql_recording_service_manager:
@@ -1631,44 +1726,10 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Failed to update meeting status to RECORDING for meeting {meeting_id}: {e}"
                 )
 
-        # Send DM notification to user
-        await self._send_resume_notification(user_id=user_id, meeting_id=meeting_id)
-
         await self.services.logging_service.info(
             f"Resumed recording session for channel {channel_id}"
         )
         return True
-
-    async def _send_resume_notification(self, user_id: str, meeting_id: str) -> None:
-        """
-        Send a DM notification to the user when recording is resumed.
-
-        Args:
-            user_id: Discord user ID to notify
-            meeting_id: Meeting ID that was resumed
-        """
-        try:
-            message = (
-                f"▶️ **Recording Resumed**\n\n"
-                f"Your recording session (Meeting ID: `{meeting_id}`) has been resumed.\n\n"
-                f"Audio is now being recorded. Use `/pause` to pause again, or `/stop` to end the session."
-            )
-
-            success = await BotUtils.send_dm(self.context.bot, user_id, message)
-
-            if success:
-                await self.services.logging_service.info(
-                    f"Sent resume notification to user {user_id} for meeting {meeting_id}"
-                )
-            else:
-                await self.services.logging_service.warning(
-                    f"Failed to send resume notification to user {user_id} for meeting {meeting_id}"
-                )
-
-        except Exception as e:
-            await self.services.logging_service.error(
-                f"Error sending resume notification for meeting {meeting_id}: {e}"
-            )
 
     # -------------------------------------------------------------- #
     # Global Cache Query Methods
