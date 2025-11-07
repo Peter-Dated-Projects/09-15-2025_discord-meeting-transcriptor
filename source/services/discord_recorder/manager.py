@@ -35,6 +35,17 @@ class DiscordRecorderConstants:
     DISCORD_CHANNELS = 2  # Stereo
     DISCORD_UNSIGNED_8BIT = False  # Signed PCM
 
+    # Timeline-driven chunker constants
+    # Discord sends ~20ms frames; maintain frame alignment to avoid clicks
+    FRAME_MS = 20  # Discord packet frame duration in milliseconds
+    BYTES_PER_SAMPLE = DISCORD_BITS_PER_SAMPLE // 8  # 2 bytes for 16-bit
+    BYTES_PER_MS = (
+        DISCORD_SAMPLE_RATE * DISCORD_CHANNELS * BYTES_PER_SAMPLE // 1000
+    )  # 192 bytes per ms
+    FRAME_BYTES = BYTES_PER_MS * FRAME_MS  # 3840 bytes per 20ms frame
+    WINDOW_MS = 30_000  # Exact 30 second windows in milliseconds
+    WINDOW_BYTES = BYTES_PER_MS * WINDOW_MS  # 5,760,000 bytes per 30s window
+
     # Flush cycle
     # Note: keep flush at 30 seconds. Flush determines our grace period for empty call times
     #       before we consider the call ended. Shorter intervals increase DB load.
@@ -120,6 +131,18 @@ class DiscordSessionHandler:
         # Track how many bytes we've read from each user's sink: {user_id: int}
         self._user_bytes_read: dict[int, int] = {}
 
+        # Timeline tracking per user (wall-clock based, in milliseconds)
+        # Tracks the wall-clock time of the last PCM write for gap detection
+        self._user_last_wall_ms: dict[int, int] = {}
+
+        # Silent PCM generator for gap padding
+        self._silent_gen = SilentPCM(
+            sample_rate=DiscordRecorderConstants.DISCORD_SAMPLE_RATE,
+            bits_per_sample=DiscordRecorderConstants.DISCORD_BITS_PER_SAMPLE,
+            channels=DiscordRecorderConstants.DISCORD_CHANNELS,
+            unsigned_8bit=DiscordRecorderConstants.DISCORD_UNSIGNED_8BIT,
+        )
+
         # Pycord recording sink
         self._sink: discord.sinks.WaveSink | None = None
 
@@ -152,6 +175,7 @@ class DiscordSessionHandler:
         self._user_chunk_counters = {}
         self._user_temp_recording_ids = {}
         self._user_bytes_read = {}
+        self._user_last_wall_ms = {}
 
         await self.services.logging_service.info(
             f"Started recording session for meeting {self.meeting_id}, "
@@ -206,6 +230,21 @@ class DiscordSessionHandler:
     # -------------------------------------------------------------- #
     # Audio Buffering Methods
     # -------------------------------------------------------------- #
+
+    def _is_frame_aligned(self, num_bytes: int) -> bool:
+        """
+        Check if a given number of bytes is frame-aligned (multiple of 20ms frame size).
+
+        Frame alignment is critical to avoid audio clicks and maintain proper timing.
+        Discord sends ~20ms frames, so all audio chunks should be multiples of 3,840 bytes.
+
+        Args:
+            num_bytes: Number of PCM bytes to check
+
+        Returns:
+            True if num_bytes is a multiple of FRAME_BYTES (3,840), False otherwise
+        """
+        return num_bytes % DiscordRecorderConstants.FRAME_BYTES == 0
 
     def _is_call_empty(self) -> bool:
         """
@@ -277,17 +316,27 @@ class DiscordSessionHandler:
 
     async def _extract_user_audio_from_sink(self) -> None:
         """
-        Extract audio data from the Pycord sink for all users.
+        Extract audio data from the Pycord sink for all users with timeline-driven gap padding.
 
         This reads from sink.audio_data and appends new PCM data to per-user buffers.
         The sink accumulates audio continuously, so we track what we've already
         processed (via _user_bytes_read) to avoid duplicates.
+
+        Timeline-driven architecture:
+        1. Track wall-clock time (asyncio.get_running_loop().time()) for each user write
+        2. On each new PCM block, detect gaps since last write
+        3. Pad gaps with silence (rounded to 20ms frame boundaries)
+        4. Maintain continuous timeline for exact 30s windowing
 
         Note: WaveSink stores data as WAV format (44-byte header + PCM data).
         We skip the header on first read and only extract raw PCM thereafter.
         """
         if not self._sink or not self._sink.audio_data:
             return
+
+        # Get monotonic wall-clock time in milliseconds
+        loop = asyncio.get_running_loop()
+        now_ms = int(loop.time() * 1000)
 
         # WAV header size (standard RIFF WAV format)
         WAV_HEADER_SIZE = 44
@@ -300,6 +349,9 @@ class DiscordSessionHandler:
                 self._user_chunk_counters[user_id] = 0
                 self._user_temp_recording_ids[user_id] = []
                 self._user_bytes_read[user_id] = 0
+                # Initialize timeline: first packet has no gap (set last_wall_ms to current - duration)
+                # We'll update this after reading the first packet
+                self._user_last_wall_ms[user_id] = now_ms
 
                 await self.services.logging_service.info(
                     f"Started recording for user {user_id} in meeting {self.meeting_id}"
@@ -330,8 +382,52 @@ class DiscordSessionHandler:
             # Read only the new PCM data
             new_pcm_data = bytes_io.read(new_bytes_available)
 
-            # Append to user's buffer
+            # Calculate duration of this new PCM block
+            pcm_duration_ms = calculate_pcm_duration_ms(
+                len(new_pcm_data),
+                sample_rate=DiscordRecorderConstants.DISCORD_SAMPLE_RATE,
+                bits_per_sample=DiscordRecorderConstants.DISCORD_BITS_PER_SAMPLE,
+                channels=DiscordRecorderConstants.DISCORD_CHANNELS,
+            )
+
+            # Timeline gap detection and silence padding
+            last_wall_ms = self._user_last_wall_ms[user_id]
+
+            # For first packet: no gap (last_wall_ms was set to now_ms on initialization)
+            # For subsequent packets: gap = now_ms - (last_wall_ms + previous_pcm_duration)
+            # But since we set last_wall_ms to the END of the last packet, gap = now_ms - last_wall_ms - pcm_duration_ms
+            # Actually, we want: gap = time_since_last_write - current_packet_duration
+            # But to be precise: gap_start = last_wall_ms, gap_end = now_ms - pcm_duration_ms
+            # Simple approach: gap_ms = (now_ms - pcm_duration_ms) - last_wall_ms
+
+            # Calculate gap: time between end of last packet and start of this packet
+            packet_start_ms = now_ms - pcm_duration_ms
+            gap_ms = max(0, packet_start_ms - last_wall_ms)
+
+            # Pad silence for the gap (rounded up to frame boundaries)
+            if gap_ms > 0:
+                # Round up to nearest 20ms frame boundary
+                frames_needed = (
+                    gap_ms + DiscordRecorderConstants.FRAME_MS - 1
+                ) // DiscordRecorderConstants.FRAME_MS
+                pad_ms = frames_needed * DiscordRecorderConstants.FRAME_MS
+
+                # Generate silence padding
+                silence_padding = self._silent_gen.generate(pad_ms)
+
+                # Append padding to buffer
+                self._user_audio_buffers[user_id].extend(silence_padding)
+
+                await self.services.logging_service.debug(
+                    f"Gap detected for user {user_id}: {gap_ms}ms (rounded to {pad_ms}ms, {frames_needed} frames). "
+                    f"Padded {len(silence_padding):,} bytes of silence."
+                )
+
+            # Append actual PCM data to user's buffer
             self._user_audio_buffers[user_id].extend(new_pcm_data)
+
+            # Update timeline: set last_wall_ms to the END of this packet
+            self._user_last_wall_ms[user_id] = now_ms
 
             # Update bytes read tracker
             self._user_bytes_read[user_id] = total_bytes
@@ -477,22 +573,29 @@ class DiscordSessionHandler:
 
     async def _flush_all_users(self, force: bool = False) -> None:
         """
-        Flush audio data for all users who have buffered audio.
+        Flush audio data for all users using exact 30s windowing.
 
-        For each user:
-        1. Write PCM to temp storage
-        2. Create temp recording in SQL
-        3. Queue FFmpeg transcode job
-        4. Clear buffer
+        For each user with buffered audio:
+        1. Process buffer in exact WINDOW_BYTES (30s) increments
+        2. Emit full windows immediately
+        3. On final flush (force=True), emit remaining partial window without padding
+        4. Write PCM to temp storage, create SQL record, queue FFmpeg job
+
+        Timeline-driven windowing ensures:
+        - Each window is exactly 30,000ms (5,760,000 bytes)
+        - Gaps are pre-filled with silence in _extract_user_audio_from_sink
+        - Chunks align at exact 30s boundaries for downstream processing
 
         Args:
-            force: If True, bypass shutdown check and flush all buffers regardless of length
+            force: If True, this is the final flush on stop_recording.
+                   Emit any remaining partial windows without padding.
         """
         if self._is_shutting_down and not force:
             return
 
         users_with_data = 0
         total_buffer_size = 0
+        total_windows_emitted = 0
 
         for user_id, buffer in list(self._user_audio_buffers.items()):
             if len(buffer) == 0:
@@ -500,92 +603,105 @@ class DiscordSessionHandler:
 
             users_with_data += 1
             total_buffer_size += len(buffer)
-            await self._flush_user(user_id, buffer, is_final_flush=force)
+
+            # Process buffer in exact 30s windows
+            windows_emitted = 0
+            while len(buffer) >= DiscordRecorderConstants.WINDOW_BYTES:
+                # Extract exact 30s window
+                window_data = bytes(buffer[: DiscordRecorderConstants.WINDOW_BYTES])
+                del buffer[: DiscordRecorderConstants.WINDOW_BYTES]
+
+                # Validate frame alignment
+                if not self._is_frame_aligned(len(window_data)):
+                    await self.services.logging_service.warning(
+                        f"Window {self._user_chunk_counters[user_id]} for user {user_id} "
+                        f"is NOT frame-aligned: {len(window_data)} bytes "
+                        f"(expected multiple of {DiscordRecorderConstants.FRAME_BYTES})"
+                    )
+
+                # Flush this exact 30s window
+                await self._flush_user_window(
+                    user_id=user_id,
+                    chunk_idx=self._user_chunk_counters[user_id],
+                    window_data=window_data,
+                )
+
+                self._user_chunk_counters[user_id] += 1
+                windows_emitted += 1
+
+            total_windows_emitted += windows_emitted
+
+            # On final flush, emit remaining partial window (if any)
+            if force and len(buffer) > 0:
+                partial_window_data = bytes(buffer)
+                buffer.clear()
+
+                partial_duration_ms = calculate_pcm_duration_ms(
+                    len(partial_window_data),
+                    sample_rate=DiscordRecorderConstants.DISCORD_SAMPLE_RATE,
+                    bits_per_sample=DiscordRecorderConstants.DISCORD_BITS_PER_SAMPLE,
+                    channels=DiscordRecorderConstants.DISCORD_CHANNELS,
+                )
+
+                await self.services.logging_service.info(
+                    f"Final flush: emitting partial window for user {user_id} - "
+                    f"{len(partial_window_data):,} bytes ({partial_duration_ms}ms)"
+                )
+
+                # Validate frame alignment for partial window
+                if not self._is_frame_aligned(len(partial_window_data)):
+                    await self.services.logging_service.warning(
+                        f"Partial window {self._user_chunk_counters[user_id]} for user {user_id} "
+                        f"is NOT frame-aligned: {len(partial_window_data)} bytes"
+                    )
+
+                await self._flush_user_window(
+                    user_id=user_id,
+                    chunk_idx=self._user_chunk_counters[user_id],
+                    window_data=partial_window_data,
+                )
+
+                self._user_chunk_counters[user_id] += 1
+                windows_emitted += 1
+                total_windows_emitted += 1
+
+            if windows_emitted > 0:
+                await self.services.logging_service.info(
+                    f"Emitted {windows_emitted} window(s) for user {user_id}"
+                )
 
         if users_with_data > 0:
             await self.services.logging_service.info(
                 f"Flushed audio for {users_with_data} user(s), "
-                f"total buffer size: {total_buffer_size:,} bytes ({total_buffer_size / 1024 / 1024:.2f} MB)"
+                f"total buffer size: {total_buffer_size:,} bytes ({total_buffer_size / 1024 / 1024:.2f} MB), "
+                f"total windows emitted: {total_windows_emitted}"
             )
         else:
             await self.services.logging_service.debug(
                 f"No audio data to flush in meeting {self.meeting_id}"
             )
 
-    async def _flush_user(
-        self, user_id: int, buffer: bytearray, is_final_flush: bool = False
-    ) -> None:
+    async def _flush_user_window(self, user_id: int, chunk_idx: int, window_data: bytes) -> None:
         """
-        Flush audio buffer for a single user.
+        Flush a single audio window for a user.
+
+        This method handles:
+        1. Writing PCM window to temp storage
+        2. Creating temp recording in SQL with exact timestamp
+        3. Queuing FFmpeg transcode job
 
         Args:
             user_id: Discord user ID
-            buffer: Audio buffer to flush
-            is_final_flush: If True, this is the final flush when stopping recording.
-                           Skip padding to avoid adding silence when user ends early.
+            chunk_idx: Window index (0-based, monotonically increasing)
+            window_data: Exact PCM bytes for this window (typically 30s = 5,760,000 bytes,
+                        or partial on final flush)
         """
         # Generate unique chunk filename
-        chunk_num = self._user_chunk_counters[user_id]
-        pcm_filename = f"{self.meeting_id}_user{user_id}_chunk{chunk_num:04d}.pcm"
-        mp3_filename = f"{self.meeting_id}_user{user_id}_chunk{chunk_num:04d}.mp3"
-
-        # Pad audio if this is the first chunk and user joined late
-        # BUT: Skip padding on final flush to avoid filling short recordings with silence
-        audio_data = bytes(buffer)
-        if chunk_num == 0 and not is_final_flush:
-            # Calculate expected audio length for the flush interval
-            expected_duration_ms = DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS * 1000
-            expected_bytes = calculate_pcm_bytes(
-                expected_duration_ms,
-                sample_rate=DiscordRecorderConstants.DISCORD_SAMPLE_RATE,
-                bits_per_sample=DiscordRecorderConstants.DISCORD_BITS_PER_SAMPLE,
-                channels=DiscordRecorderConstants.DISCORD_CHANNELS,
-            )
-            actual_bytes = len(buffer)
-
-            # If audio is shorter than expected, pad with silence at the front
-            if actual_bytes < expected_bytes:
-                missing_duration_ms = calculate_pcm_duration_ms(
-                    expected_bytes - actual_bytes,
-                    sample_rate=DiscordRecorderConstants.DISCORD_SAMPLE_RATE,
-                    bits_per_sample=DiscordRecorderConstants.DISCORD_BITS_PER_SAMPLE,
-                    channels=DiscordRecorderConstants.DISCORD_CHANNELS,
-                )
-
-                # Generate silent PCM to pad the beginning
-                # Use Discord's audio format constants
-                silent_pcm_generator = SilentPCM(
-                    sample_rate=DiscordRecorderConstants.DISCORD_SAMPLE_RATE,
-                    bits_per_sample=DiscordRecorderConstants.DISCORD_BITS_PER_SAMPLE,
-                    channels=DiscordRecorderConstants.DISCORD_CHANNELS,
-                    unsigned_8bit=DiscordRecorderConstants.DISCORD_UNSIGNED_8BIT,
-                )
-                padding = silent_pcm_generator.generate(missing_duration_ms)
-
-                # Prepend silence to the actual audio
-                audio_data = padding + audio_data
-
-                await self.services.logging_service.info(
-                    f"Padded first chunk for user {user_id} in meeting {self.meeting_id} "
-                    f"with {missing_duration_ms}ms ({len(padding):,} bytes) of silence. "
-                    f"Original: {actual_bytes:,} bytes, Final: {len(audio_data):,} bytes"
-                )
-        elif chunk_num == 0 and is_final_flush:
-            # Log that we're skipping padding on final flush
-            actual_bytes = len(buffer)
-            duration_ms = calculate_pcm_duration_ms(
-                actual_bytes,
-                sample_rate=DiscordRecorderConstants.DISCORD_SAMPLE_RATE,
-                bits_per_sample=DiscordRecorderConstants.DISCORD_BITS_PER_SAMPLE,
-                channels=DiscordRecorderConstants.DISCORD_CHANNELS,
-            )
-            await self.services.logging_service.info(
-                f"Skipping padding for final flush - user {user_id} in meeting {self.meeting_id} "
-                f"has {actual_bytes:,} bytes ({duration_ms}ms) of actual audio"
-            )
+        pcm_filename = f"{self.meeting_id}_user{user_id}_chunk{chunk_idx:04d}.pcm"
+        mp3_filename = f"{self.meeting_id}_user{user_id}_chunk{chunk_idx:04d}.mp3"
 
         # Write PCM to temp storage
-        pcm_path = await self._write_pcm_to_temp(pcm_filename, audio_data)
+        pcm_path = await self._write_pcm_to_temp(pcm_filename, window_data)
 
         # Build MP3 output path in temp storage
         temp_storage_path = (
@@ -593,14 +709,12 @@ class DiscordSessionHandler:
         )
         mp3_path = os.path.join(temp_storage_path, mp3_filename)
 
-        # Create temp recording in SQL with timestamp
+        # Create temp recording in SQL with exact timestamp
+        # Timestamp = chunk_idx * WINDOW_MS (exact 30s boundaries)
         temp_recording_id = None
         if self.services.sql_recording_service_manager:
             try:
-                # Calculate start timestamp for this chunk (in milliseconds)
-                # Each chunk represents one flush interval worth of audio
-                flush_interval_ms = DiscordRecorderConstants.FLUSH_INTERVAL_SECONDS * 1000
-                start_timestamp_ms = chunk_num * flush_interval_ms
+                start_timestamp_ms = chunk_idx * DiscordRecorderConstants.WINDOW_MS
 
                 temp_recording_id = (
                     await self.services.sql_recording_service_manager.insert_temp_recording(
@@ -616,7 +730,7 @@ class DiscordSessionHandler:
             except Exception as e:
                 await self.services.logging_service.error(
                     f"CRITICAL DISCORD RECORDER SQL ERROR: Failed to insert temp recording - "
-                    f"Meeting: {self.meeting_id}, User: {user_id}, Chunk: {chunk_num}, "
+                    f"Meeting: {self.meeting_id}, User: {user_id}, Chunk: {chunk_idx}, "
                     f"Filename: {pcm_filename}, Error Type: {type(e).__name__}, Details: {str(e)}. "
                     f"This likely indicates a missing meeting entry in the meetings table (foreign key constraint)."
                 )
@@ -626,16 +740,18 @@ class DiscordSessionHandler:
         # Queue FFmpeg transcode job
         await self._queue_pcm_to_mp3_transcode(pcm_path, mp3_path, temp_recording_id)
 
-        # Get buffer size before clearing for logging
-        buffer_size = len(buffer)
-
-        # Clear buffer and increment counter
-        buffer.clear()
-        self._user_chunk_counters[user_id] += 1
+        # Calculate duration for logging
+        window_duration_ms = calculate_pcm_duration_ms(
+            len(window_data),
+            sample_rate=DiscordRecorderConstants.DISCORD_SAMPLE_RATE,
+            bits_per_sample=DiscordRecorderConstants.DISCORD_BITS_PER_SAMPLE,
+            channels=DiscordRecorderConstants.DISCORD_CHANNELS,
+        )
 
         await self.services.logging_service.info(
-            f"Flushed chunk {chunk_num} for user {user_id} in meeting {self.meeting_id} "
-            f"(PCM: {pcm_filename}, size: {buffer_size:,} bytes)"
+            f"Flushed window {chunk_idx} for user {user_id} in meeting {self.meeting_id} "
+            f"(PCM: {pcm_filename}, size: {len(window_data):,} bytes, duration: {window_duration_ms}ms, "
+            f"timestamp: {chunk_idx * DiscordRecorderConstants.WINDOW_MS}ms)"
         )
 
     # -------------------------------------------------------------- #
