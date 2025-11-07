@@ -233,9 +233,9 @@ class DiscordSessionHandler:
             # Final flush of any remaining data for ALL users (regardless of buffer length)
             await self._flush_all_users(force=True)
 
-        # Final timeline catch-up: ensure all users have the same number of chunks
-        # by padding stragglers to match the user with the most chunks
-        await self._backfill_to_max_chunks()
+            # Final timeline catch-up: ensure all users have the same number of chunks
+            # by padding stragglers to match the user with the most chunks
+            await self._backfill_to_max_chunks()
         else:
             await self.services.logging_service.info(
                 f"Session was paused - skipping audio extraction/flush (audio already scrapped)"
@@ -309,7 +309,7 @@ class DiscordSessionHandler:
                 bytes_io = audio_data.file
                 bytes_io.seek(0, 2)  # Seek to end
                 current_position = bytes_io.tell()
-                
+
                 # Update the bytes read tracker to current position
                 # This ensures when recording resumes, we skip over this audio
                 self._user_bytes_read[user_id] = current_position
@@ -856,7 +856,9 @@ class DiscordSessionHandler:
 
         current_time = get_current_timestamp_est()
         elapsed_ms = int((current_time - self.start_time).total_seconds() * 1000)
-        target_windows = elapsed_ms // DiscordRecorderConstants.WINDOW_MS  # Global timeline window count
+        target_windows = (
+            elapsed_ms // DiscordRecorderConstants.WINDOW_MS
+        )  # Global timeline window count
         # Note: This is the number of COMPLETE windows, not partial windows
 
         # Iterate all users we've ever seen (chunk counters map is our source of truth)
