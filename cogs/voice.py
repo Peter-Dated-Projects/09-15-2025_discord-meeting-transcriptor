@@ -306,8 +306,7 @@ class Voice(commands.Cog):
         if success:
             await ctx.edit(
                 content="⏸️ **Recording Paused**\n\n"
-                "All audio recorded during this session has been saved to temporary storage.\n"
-                "You will receive a DM with details.\n\n"
+                "All audio recorded during this session has been saved to temporary storage.\n\n"
                 "Use `/resume` to continue recording from this point."
             )
             logger.info(f"Recording session paused for meeting {meeting_id}")
@@ -374,8 +373,7 @@ class Voice(commands.Cog):
         if success:
             await ctx.edit(
                 content="▶️ **Recording Resumed**\n\n"
-                "Recording has resumed and is now actively capturing audio.\n"
-                "You will receive a DM with confirmation details."
+                "Recording has resumed and is now actively capturing audio."
             )
             logger.info(f"Recording session resumed for meeting {meeting_id}")
         else:
