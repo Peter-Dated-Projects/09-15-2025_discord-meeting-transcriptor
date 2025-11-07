@@ -11,7 +11,7 @@ from sqlalchemy import select
 if TYPE_CHECKING:
     from source.context import Context
 
-from source.server.sql_models import TempRecordingModel, TranscodeStatus
+from source.server.sql_models import MeetingStatus, TempRecordingModel, TranscodeStatus
 from source.services.manager import BaseDiscordRecorderServiceManager, ServicesManager
 from source.utils import BotUtils, generate_16_char_uuid, get_current_timestamp_est
 
@@ -95,6 +95,7 @@ class DiscordSessionHandler:
         self.services = context.services_manager
         self.start_time = get_current_timestamp_est()
         self.is_recording = False
+        self.is_paused = False  # Track if session is paused
 
         # Per-user audio buffers: {user_id: bytearray}
         self._user_audio_buffers: dict[int, bytearray] = {}
@@ -189,6 +190,76 @@ class DiscordSessionHandler:
         await self.services.logging_service.info(
             f"Stopped recording session for meeting {self.meeting_id}. "
             f"Created {total_chunks} temp recording chunks across {len(self._user_audio_buffers)} users."
+        )
+
+    async def pause_recording(self) -> None:
+        """
+        Pause the recording session and discard all accumulated audio data.
+
+        When paused:
+        - Recording flag is set to False (stops flush cycle)
+        - Flush task is cancelled
+        - All audio buffers are cleared (data is scrapped)
+        - Sink read positions are updated to discard accumulated audio
+        - is_paused flag is set to True
+        """
+        if not self.is_recording:
+            await self.services.logging_service.warning(
+                f"Session {self.channel_id} is not currently recording"
+            )
+            return
+
+        # Stop the recording flag and cancel flush task
+        self.is_recording = False
+        if self._flush_task:
+            self._flush_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._flush_task
+
+        # Scrap all accumulated audio data
+        await self._scrap_audio_data()
+
+        # Set paused flag
+        self.is_paused = True
+
+        await self.services.logging_service.info(
+            f"Paused recording session for meeting {self.meeting_id}, channel {self.channel_id}"
+        )
+
+    async def _scrap_audio_data(self) -> None:
+        """
+        Scrap (discard) all accumulated audio data in buffers and sink.
+
+        This method:
+        1. Clears all per-user audio buffers (discards buffered PCM data)
+        2. Updates sink read positions to current position (marks sink audio as read/discarded)
+        """
+        # Clear all audio buffers
+        buffer_count = 0
+        total_bytes_scrapped = 0
+        for user_id, buffer in self._user_audio_buffers.items():
+            buffer_size = len(buffer)
+            if buffer_size > 0:
+                buffer_count += 1
+                total_bytes_scrapped += buffer_size
+                buffer.clear()
+
+        # Update sink read positions to discard accumulated audio
+        if self._sink and self._sink.audio_data:
+            for user_id, audio_data in self._sink.audio_data.items():
+                # Seek to end of current audio data to mark it as "read"
+                bytes_io = audio_data.file
+                bytes_io.seek(0, 2)  # Seek to end
+                current_position = bytes_io.tell()
+                
+                # Update the bytes read tracker to current position
+                # This ensures when recording resumes, we skip over this audio
+                self._user_bytes_read[user_id] = current_position
+
+        await self.services.logging_service.info(
+            f"Scrapped audio data for meeting {self.meeting_id}: "
+            f"{buffer_count} user buffer(s) cleared, "
+            f"{total_bytes_scrapped:,} bytes discarded ({total_bytes_scrapped / 1024 / 1024:.2f} MB)"
         )
 
     # -------------------------------------------------------------- #
@@ -1006,7 +1077,13 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
     async def pause_session(self, channel_id: int) -> bool:
         """
-        Pause an ongoing recording session.
+        Pause an ongoing recording session and discard all recorded data accumulated so far.
+
+        When paused:
+        - Recording stops (flush cycle is cancelled)
+        - All audio buffers are cleared (data is scrapped)
+        - Sink read positions are updated to current position (discard accumulated audio)
+        - Session remains alive and can be resumed with /resume
 
         Args:
             channel_id: Discord channel ID
@@ -1021,17 +1098,65 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             )
             return False
 
-        # Pause recording (stop flush cycle but keep session alive)
-        session.is_recording = False
-        if session._flush_task:
-            session._flush_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await session._flush_task
+        meeting_id = session.meeting_id
+        user_id = session.user_id
+
+        # Pause the session using the session handler's pause method
+        await session.pause_recording()
+
+        # Update meeting status to PAUSED in database
+        if self.services.sql_recording_service_manager:
+            try:
+                await self.services.sql_recording_service_manager.update_meeting_status(
+                    meeting_id=meeting_id, status=MeetingStatus.PAUSED
+                )
+                await self.services.logging_service.info(
+                    f"Updated meeting {meeting_id} status to PAUSED"
+                )
+            except Exception as e:
+                await self.services.logging_service.error(
+                    f"Failed to update meeting status to PAUSED for meeting {meeting_id}: {e}"
+                )
+
+        # Send DM notification to user
+        await self._send_pause_notification(user_id=user_id, meeting_id=meeting_id)
 
         await self.services.logging_service.info(
-            f"Paused recording session for channel {channel_id}"
+            f"Paused recording session for channel {channel_id} and scrapped all accumulated data"
         )
         return True
+
+    async def _send_pause_notification(self, user_id: str, meeting_id: str) -> None:
+        """
+        Send a DM notification to the user when recording is paused.
+
+        Args:
+            user_id: Discord user ID to notify
+            meeting_id: Meeting ID that was paused
+        """
+        try:
+            message = (
+                f"⏸️ **Recording Paused**\n\n"
+                f"Your recording session (Meeting ID: `{meeting_id}`) has been paused.\n\n"
+                f"**Important:** All audio recorded up to this point has been discarded.\n\n"
+                f"Use `/resume` to continue recording from this point, or `/stop` to end the session."
+            )
+
+            success = await BotUtils.send_dm(self.context.bot, user_id, message)
+
+            if success:
+                await self.services.logging_service.info(
+                    f"Sent pause notification to user {user_id} for meeting {meeting_id}"
+                )
+            else:
+                await self.services.logging_service.warning(
+                    f"Failed to send pause notification to user {user_id} for meeting {meeting_id}"
+                )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Error sending pause notification for meeting {meeting_id}: {e}"
+            )
 
     async def resume_session(self, channel_id: int) -> bool:
         """
@@ -1050,15 +1175,67 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             )
             return False
 
+        meeting_id = session.meeting_id
+        user_id = session.user_id
+
         # Resume recording
         if not session.is_recording:
             session.is_recording = True
+            session.is_paused = False
             session._flush_task = asyncio.create_task(session._flush_loop())
+
+        # Update meeting status back to RECORDING in database
+        if self.services.sql_recording_service_manager:
+            try:
+                await self.services.sql_recording_service_manager.update_meeting_status(
+                    meeting_id=meeting_id, status=MeetingStatus.RECORDING
+                )
+                await self.services.logging_service.info(
+                    f"Updated meeting {meeting_id} status to RECORDING"
+                )
+            except Exception as e:
+                await self.services.logging_service.error(
+                    f"Failed to update meeting status to RECORDING for meeting {meeting_id}: {e}"
+                )
+
+        # Send DM notification to user
+        await self._send_resume_notification(user_id=user_id, meeting_id=meeting_id)
 
         await self.services.logging_service.info(
             f"Resumed recording session for channel {channel_id}"
         )
         return True
+
+    async def _send_resume_notification(self, user_id: str, meeting_id: str) -> None:
+        """
+        Send a DM notification to the user when recording is resumed.
+
+        Args:
+            user_id: Discord user ID to notify
+            meeting_id: Meeting ID that was resumed
+        """
+        try:
+            message = (
+                f"▶️ **Recording Resumed**\n\n"
+                f"Your recording session (Meeting ID: `{meeting_id}`) has been resumed.\n\n"
+                f"Audio is now being recorded. Use `/pause` to pause again, or `/stop` to end the session."
+            )
+
+            success = await BotUtils.send_dm(self.context.bot, user_id, message)
+
+            if success:
+                await self.services.logging_service.info(
+                    f"Sent resume notification to user {user_id} for meeting {meeting_id}"
+                )
+            else:
+                await self.services.logging_service.warning(
+                    f"Failed to send resume notification to user {user_id} for meeting {meeting_id}"
+                )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Error sending resume notification for meeting {meeting_id}: {e}"
+            )
 
     # -------------------------------------------------------------- #
     # Global Cache Query Methods
