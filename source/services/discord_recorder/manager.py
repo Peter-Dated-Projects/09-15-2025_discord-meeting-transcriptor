@@ -161,14 +161,24 @@ class DiscordSessionHandler:
 
     async def stop_recording(self) -> None:
         """Stop the recording session and flush any remaining data for all users."""
-        if not self.is_recording:
+        # If already shutdown, do nothing
+        if self._is_shutting_down:
             return
+
+        # If paused, we still need to do cleanup, so don't return early
+        # Only return if not recording AND not paused (meaning already stopped)
+        if not self.is_recording and not self.is_paused:
+            return
+
+        # Determine if we were paused (audio already scrapped)
+        was_paused = self.is_paused
 
         # Stop recording flag first
         self.is_recording = False
+        self.is_paused = False  # Clear paused flag on stop
 
-        # Cancel flush task
-        if self._flush_task:
+        # Cancel flush task (might already be cancelled if paused)
+        if self._flush_task and not self._flush_task.done():
             self._flush_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._flush_task
@@ -177,11 +187,18 @@ class DiscordSessionHandler:
         if self.discord_voice_client.recording:
             self.discord_voice_client.stop_recording()
 
-        # Extract any final audio data from sink before flushing
-        await self._extract_user_audio_from_sink()
+        # Only extract and flush if we weren't paused
+        # (when paused, audio buffers are already cleared)
+        if not was_paused:
+            # Extract any final audio data from sink before flushing
+            await self._extract_user_audio_from_sink()
 
-        # Final flush of any remaining data for ALL users (regardless of buffer length)
-        await self._flush_all_users(force=True)
+            # Final flush of any remaining data for ALL users (regardless of buffer length)
+            await self._flush_all_users(force=True)
+        else:
+            await self.services.logging_service.info(
+                f"Session was paused - skipping audio extraction/flush (audio already scrapped)"
+            )
 
         # Now set shutdown flag to prevent any new operations
         self._is_shutting_down = True
