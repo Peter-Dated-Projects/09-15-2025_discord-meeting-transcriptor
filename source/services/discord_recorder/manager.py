@@ -328,10 +328,21 @@ class DiscordSessionHandler:
         processed (via _user_bytes_read) to avoid duplicates.
 
         Timeline-driven architecture:
-        1. Track wall-clock time (asyncio.get_running_loop().time()) for each user write
+        1. Use session clock (elapsed time since start_time) for all timeline calculations
         2. On each new PCM block, detect gaps since last write
-        3. Pad gaps with silence (rounded to 20ms frame boundaries)
+        3. Pad gaps with silence (rounded UP to 20ms frame boundaries)
         4. Maintain continuous timeline for exact 30s windowing
+
+        First-packet-anchored backfill for new users:
+        - Backfill whole 30s windows from session start to first packet start
+        - Pad intra-window remainder (20ms aligned) before first audio
+        - Set last_wall_ms to END of first packet for subsequent gap detection
+
+        Session-clock gap padding for existing users:
+        - Calculate packet_start_ms = session_ms - pcm_ms
+        - Detect gaps: gap_ms = packet_start_ms - last_wall_ms
+        - Pad silence rounded up to nearest 20ms frame
+        - Update last_wall_ms to END of current packet
 
         Note: WaveSink stores data as WAV format (44-byte header + PCM data).
         We skip the header on first read and only extract raw PCM thereafter.
@@ -389,15 +400,17 @@ class DiscordSessionHandler:
                 channels=DiscordRecorderConstants.DISCORD_CHANNELS,
             )
 
-            # Use session clock (not monotonic loop time) for timeline calculations
+            # **SESSION CLOCK**: Use elapsed time since recording start for all timeline math
+            # This ensures consistent timeline regardless of system time changes
             session_ms = int((get_current_timestamp_est() - self.start_time).total_seconds() * 1000)
             packet_start_ms = max(0, session_ms - pcm_ms)
 
-            # **NEW-USER BACKFILL**: For first packet, backfill to the start of this packet
+            # **NEW-USER FIRST-PACKET-ANCHORED BACKFILL**
+            # Backfill from session start to the beginning of this first packet
             if is_new_user:
                 # Backfill WHOLE windows up to just before packet_start_ms
                 full_windows = packet_start_ms // DiscordRecorderConstants.WINDOW_MS
-                
+
                 if full_windows > 0:
                     await self.services.logging_service.info(
                         f"New user {user_id} joined at session t={session_ms}ms ({session_ms / 1000:.1f}s). "
@@ -418,7 +431,8 @@ class DiscordSessionHandler:
                         f"next chunk will be {self._user_chunk_counters[user_id]}"
                     )
 
-                # Pad the intra-window remainder before first audio so samples land at correct offset
+                # Pad intra-window remainder (time from last window boundary to packet start)
+                # This ensures first audio lands at the correct timeline position within the window
                 pre_gap_ms = packet_start_ms - (full_windows * DiscordRecorderConstants.WINDOW_MS)
                 if pre_gap_ms > 0:
                     # Round up to 20ms frame boundaries
@@ -426,7 +440,7 @@ class DiscordSessionHandler:
                         pre_gap_ms + DiscordRecorderConstants.FRAME_MS - 1
                     ) // DiscordRecorderConstants.FRAME_MS
                     pad_ms = frames_needed * DiscordRecorderConstants.FRAME_MS
-                    
+
                     # Generate silence padding
                     silence_padding = self._silent_gen.generate(pad_ms)
                     self._user_audio_buffers[user_id].extend(silence_padding)
@@ -438,14 +452,15 @@ class DiscordSessionHandler:
 
                 # Append the first PCM block at the correct timeline position
                 self._user_audio_buffers[user_id].extend(new_pcm_data)
-                
+
                 # Set last_wall_ms to the END of this first packet
                 self._user_last_wall_ms[user_id] = packet_start_ms + pcm_ms
 
             else:
-                # **EXISTING USER**: Use session clock for gap detection
+                # **EXISTING USER SESSION-CLOCK GAP PADDING**
+                # Detect and fill gaps since last packet using session clock
                 last_wall_ms = self._user_last_wall_ms[user_id]
-                
+
                 # Calculate gap: time between end of last packet and start of this packet
                 gap_ms = max(0, packet_start_ms - last_wall_ms)
 
@@ -627,8 +642,10 @@ class DiscordSessionHandler:
         For each user with buffered audio:
         1. Process buffer in exact WINDOW_BYTES (30s) increments
         2. Emit full windows immediately
-        3. On final flush (force=True), emit remaining partial window without padding
-        4. Write PCM to temp storage, create SQL record, queue FFmpeg job
+        3. On final flush (force=True), emit remaining partial window WITHOUT padding
+           (partial windows only occur at the very end of recording)
+
+        Order in flush cycle: extract → flush → absent-user backfill
 
         Timeline-driven windowing ensures:
         - Each window is exactly 30,000ms (5,760,000 bytes)
@@ -638,6 +655,9 @@ class DiscordSessionHandler:
         Args:
             force: If True, this is the final flush on stop_recording.
                    Emit any remaining partial windows without padding.
+
+        Note: This method processes ONLY users with data in buffers.
+              Absent users are handled separately by _backfill_absent_users().
         """
         if self._is_shutting_down and not force:
             return
@@ -732,18 +752,24 @@ class DiscordSessionHandler:
 
     async def _backfill_absent_users(self) -> None:
         """
-        Ensure every known user has chunks up to the current elapsed 30s window,
-        emitting silent WINDOW_MS chunks for any missing windows.
+        Ensure every known user has chunks up to the current global timeline window.
+        Emits silent 30s chunks for users whose chunk_idx lags behind the global window count.
 
         This handles users who have left or are temporarily absent by padding their
         timeline with silence to keep all users aligned to the same global window count.
+
+        Called AFTER each flush cycle to maintain timeline alignment.
+
+        Global timeline: The number of complete 30s windows that have elapsed since
+        recording start, calculated as: elapsed_ms // WINDOW_MS
         """
         if not self.start_time:
             return
 
         current_time = get_current_timestamp_est()
         elapsed_ms = int((current_time - self.start_time).total_seconds() * 1000)
-        target_windows = elapsed_ms // DiscordRecorderConstants.WINDOW_MS  # global timeline cap
+        target_windows = elapsed_ms // DiscordRecorderConstants.WINDOW_MS  # Global timeline window count
+        # Note: This is the number of COMPLETE windows, not partial windows
 
         # Iterate all users we've ever seen (chunk counters map is our source of truth)
         for user_id in list(self._user_chunk_counters.keys()):
@@ -764,11 +790,19 @@ class DiscordSessionHandler:
 
     async def _backfill_to_max_chunks(self) -> None:
         """
-        Ensure all users have the same final chunk count by padding to the maximum.
+        Final equalization: Ensure all users end with the same total chunk count.
 
-        This is called at the end of recording to ensure all users end up with
-        the same number of chunks, regardless of when they joined or left.
-        Uses the user with the most chunks as the target.
+        This is the STOP PATH final step that pads stragglers to match the user
+        with the most chunks, ensuring perfect alignment for downstream processing.
+
+        Called ONLY during stop_recording after final extract and final flush.
+
+        Timeline guarantee: After this method completes, every user will have
+        exactly the same number of chunks, with late joiners and early leavers
+        padded with silent 30s windows.
+
+        Stop sequence: extract → flush (force=True) → backfill_to_max_chunks
+        This ensures partial windows are emitted before equalization.
         """
         if not self._user_chunk_counters:
             return
@@ -798,10 +832,15 @@ class DiscordSessionHandler:
 
     async def _flush_user_backfill(self, user_id: int, chunk_idx: int) -> None:
         """
-        Flush a single silent backfill window for a new user.
+        Flush a single silent 30s window for timeline backfill.
 
-        This method is similar to _flush_user_window but specifically handles backfill
-        by generating exactly 30s of silent PCM data.
+        Used for:
+        1. First-packet-anchored backfill (new users joining mid-session)
+        2. Absent-user backfill (users who left or are temporarily absent)
+        3. Final equalization backfill (stop path padding to max chunks)
+
+        Generates exactly WINDOW_MS (30,000ms) of silence, which equals
+        WINDOW_BYTES (5,760,000 bytes) of frame-aligned PCM.
 
         Args:
             user_id: Discord user ID
@@ -868,12 +907,18 @@ class DiscordSessionHandler:
 
     async def _flush_user_window(self, user_id: int, chunk_idx: int, window_data: bytes) -> None:
         """
-        Flush a single audio window for a user.
+        Flush a single audio window (real data) for a user.
+
+        Handles exact 30s windows (5,760,000 bytes) during normal flush cycles,
+        and partial windows (< 30s) on final flush (force=True).
 
         This method handles:
         1. Writing PCM window to temp storage
         2. Creating temp recording in SQL with exact timestamp
         3. Queuing FFmpeg transcode job
+
+        Timestamp calculation: chunk_idx * WINDOW_MS
+        This ensures exact 30s boundaries in the timeline.
 
         Args:
             user_id: Discord user ID

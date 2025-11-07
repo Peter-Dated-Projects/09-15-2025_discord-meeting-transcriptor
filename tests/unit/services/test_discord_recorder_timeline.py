@@ -446,5 +446,101 @@ def test_buffer_growth_with_gaps():
 # -------------------------------------------------------------- #
 
 
+@pytest.mark.asyncio
+async def test_equal_chunk_counts_after_stop():
+    """
+    Integration test: Verify all users end with equal chunk counts after stop_recording.
+
+    Scenario:
+    - User A joins at t=0s, speaks for 60s
+    - User B joins at t=30s (backfilled 1 window), speaks for 30s
+    - User C joins at t=45s (backfilled 1 window), speaks for 15s
+    - Stop at t=60s
+
+    Expected:
+    - All users should have 2 chunks (0-30s, 30-60s)
+    - Equal chunk counts guarantee timeline alignment
+    """
+    # Create minimal mock context
+    mock_context = MagicMock()
+    mock_context.services_manager = MagicMock()
+    mock_context.services_manager.logging_service = AsyncMock()
+    mock_context.services_manager.recording_file_service_manager = MagicMock()
+    mock_context.services_manager.recording_file_service_manager.get_temporary_storage_path.return_value = (
+        "/tmp/recordings"
+    )
+    mock_context.services_manager.recording_file_service_manager.save_to_temp_file = AsyncMock(
+        return_value="/tmp/recordings/test.pcm"
+    )
+    mock_context.services_manager.sql_recording_service_manager = AsyncMock()
+    mock_context.services_manager.sql_recording_service_manager.insert_temp_recording = AsyncMock(
+        return_value="temp_id_123"
+    )
+    mock_context.services_manager.ffmpeg_service_manager = AsyncMock()
+    mock_context.services_manager.ffmpeg_service_manager.queue_pcm_to_mp3 = AsyncMock()
+    mock_context.bot = None
+
+    mock_voice_client = MagicMock()
+
+    session = DiscordSessionHandler(
+        discord_voice_client=mock_voice_client,
+        channel_id=12345,
+        meeting_id="test_meeting",
+        user_id="user_123",
+        guild_id="guild_456",
+        context=mock_context,
+    )
+
+    # Simulate session state at 60s mark
+    from datetime import datetime, timedelta
+
+    session.start_time = datetime.utcnow() - timedelta(seconds=60)
+    session.is_recording = True
+
+    # User A: joined at t=0s, has 60s of audio (2 full windows)
+    user_a_id = 1001
+    session._user_audio_buffers[user_a_id] = bytearray(DiscordRecorderConstants.WINDOW_BYTES * 2)
+    session._user_chunk_counters[user_a_id] = 0
+    session._user_temp_recording_ids[user_a_id] = []
+
+    # User B: joined at t=30s (backfilled 1 window), has 30s of audio (1 full window)
+    user_b_id = 1002
+    session._user_audio_buffers[user_b_id] = bytearray(DiscordRecorderConstants.WINDOW_BYTES)
+    session._user_chunk_counters[user_b_id] = 1  # Already backfilled chunk 0
+    session._user_temp_recording_ids[user_b_id] = []
+
+    # User C: joined at t=45s (backfilled 1 window), has 15s of audio (partial window)
+    user_c_id = 1003
+    session._user_audio_buffers[user_c_id] = bytearray(
+        DiscordRecorderConstants.WINDOW_BYTES // 2  # 15s
+    )
+    session._user_chunk_counters[user_c_id] = 1  # Already backfilled chunk 0
+    session._user_temp_recording_ids[user_c_id] = []
+
+    # Mock the flush methods to avoid actual I/O
+    with (
+        patch.object(session, "_flush_user_window", new_callable=AsyncMock) as mock_flush_window,
+        patch.object(
+            session, "_flush_user_backfill", new_callable=AsyncMock
+        ) as mock_flush_backfill,
+    ):
+
+        # Execute stop sequence: flush (force=True) → backfill to max
+        await session._flush_all_users(force=True)
+        await session._backfill_to_max_chunks()
+
+        # Verify all users have equal chunk counts
+        assert session._user_chunk_counters[user_a_id] == session._user_chunk_counters[user_b_id]
+        assert session._user_chunk_counters[user_b_id] == session._user_chunk_counters[user_c_id]
+
+        # Verify chunk count is 2 (two 30s windows)
+        expected_chunks = 2
+        assert session._user_chunk_counters[user_a_id] == expected_chunks
+        assert session._user_chunk_counters[user_b_id] == expected_chunks
+        assert session._user_chunk_counters[user_c_id] == expected_chunks
+
+        print(f"✅ All users have equal chunk counts: {expected_chunks} chunks (60s total)")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
