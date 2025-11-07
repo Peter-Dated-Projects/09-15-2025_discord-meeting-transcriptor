@@ -207,7 +207,7 @@ class DiscordSessionHandler:
         if not self.is_recording and not self.is_paused:
             return
 
-        # Determine if we were paused (audio already scrapped)
+        # Determine if we were paused (audio already flushed to temp files during pause)
         was_paused = self.is_paused
 
         # Stop recording flag first
@@ -225,7 +225,7 @@ class DiscordSessionHandler:
             self.discord_voice_client.stop_recording()
 
         # Only extract and flush if we weren't paused
-        # (when paused, audio buffers are already cleared)
+        # (when paused, audio has already been flushed to temp files)
         if not was_paused:
             # Extract any final audio data from sink before flushing
             await self._extract_user_audio_from_sink()
@@ -238,7 +238,7 @@ class DiscordSessionHandler:
             await self._backfill_to_max_chunks()
         else:
             await self.services.logging_service.info(
-                f"Session was paused - skipping audio extraction/flush (audio already scrapped)"
+                f"Session was paused - skipping audio extraction/flush (audio already saved to temp files during pause)"
             )
 
         # Now set shutdown flag to prevent any new operations
@@ -252,14 +252,17 @@ class DiscordSessionHandler:
 
     async def pause_recording(self) -> None:
         """
-        Pause the recording session and discard all accumulated audio data.
+        Pause the recording session and save all accumulated audio data to temp files.
 
         When paused:
         - Recording flag is set to False (stops flush cycle)
         - Flush task is cancelled
-        - All audio buffers are cleared (data is scrapped)
-        - Sink read positions are updated to discard accumulated audio
+        - Audio data is extracted from sink and flushed to temp files (saved, not discarded)
+        - All audio buffers are cleared after saving
         - is_paused flag is set to True
+
+        This ensures that when the user stops a paused recording, the temp files exist
+        for concatenation and DM notifications to work properly.
         """
         if not self.is_recording:
             await self.services.logging_service.warning(
@@ -274,50 +277,45 @@ class DiscordSessionHandler:
             with suppress(asyncio.CancelledError):
                 await self._flush_task
 
-        # Scrap all accumulated audio data
-        await self._scrap_audio_data()
+        # Extract and flush audio data to temp files before pausing
+        # This ensures temp recordings exist in database for later processing
+        await self._extract_user_audio_from_sink()
+        await self._flush_all_users(force=True)
+
+        # Clear buffers after flushing (audio is saved to temp files)
+        await self._clear_audio_buffers()
 
         # Set paused flag
         self.is_paused = True
 
+        total_chunks = sum(len(ids) for ids in self._user_temp_recording_ids.values())
         await self.services.logging_service.info(
-            f"Paused recording session for meeting {self.meeting_id}, channel {self.channel_id}"
+            f"Paused recording session for meeting {self.meeting_id}, channel {self.channel_id}. "
+            f"Saved {total_chunks} temp recording chunks to storage."
         )
 
-    async def _scrap_audio_data(self) -> None:
+    async def _clear_audio_buffers(self) -> None:
         """
-        Scrap (discard) all accumulated audio data in buffers and sink.
+        Clear all audio buffers after data has been flushed to temp files.
 
-        This method:
-        1. Clears all per-user audio buffers (discards buffered PCM data)
-        2. Updates sink read positions to current position (marks sink audio as read/discarded)
+        This method only clears in-memory buffers. It does NOT discard sink data
+        because the audio has already been extracted and saved to temp files.
+
+        Called after pause to free memory while preserving saved recordings.
         """
-        # Clear all audio buffers
         buffer_count = 0
-        total_bytes_scrapped = 0
+        total_bytes_cleared = 0
         for user_id, buffer in self._user_audio_buffers.items():
             buffer_size = len(buffer)
             if buffer_size > 0:
                 buffer_count += 1
-                total_bytes_scrapped += buffer_size
+                total_bytes_cleared += buffer_size
                 buffer.clear()
 
-        # Update sink read positions to discard accumulated audio
-        if self._sink and self._sink.audio_data:
-            for user_id, audio_data in self._sink.audio_data.items():
-                # Seek to end of current audio data to mark it as "read"
-                bytes_io = audio_data.file
-                bytes_io.seek(0, 2)  # Seek to end
-                current_position = bytes_io.tell()
-
-                # Update the bytes read tracker to current position
-                # This ensures when recording resumes, we skip over this audio
-                self._user_bytes_read[user_id] = current_position
-
         await self.services.logging_service.info(
-            f"Scrapped audio data for meeting {self.meeting_id}: "
+            f"Cleared audio buffers for meeting {self.meeting_id}: "
             f"{buffer_count} user buffer(s) cleared, "
-            f"{total_bytes_scrapped:,} bytes discarded ({total_bytes_scrapped / 1024 / 1024:.2f} MB)"
+            f"{total_bytes_cleared:,} bytes freed ({total_bytes_cleared / 1024 / 1024:.2f} MB)"
         )
 
     # -------------------------------------------------------------- #
@@ -1513,12 +1511,12 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
     async def pause_session(self, channel_id: int) -> bool:
         """
-        Pause an ongoing recording session and discard all recorded data accumulated so far.
+        Pause an ongoing recording session and save all recorded data to temp files.
 
         When paused:
         - Recording stops (flush cycle is cancelled)
-        - All audio buffers are cleared (data is scrapped)
-        - Sink read positions are updated to current position (discard accumulated audio)
+        - All accumulated audio is flushed to temp files (saved for later processing)
+        - Audio buffers are cleared to free memory
         - Session remains alive and can be resumed with /resume
 
         Args:
@@ -1558,7 +1556,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         await self._send_pause_notification(user_id=user_id, meeting_id=meeting_id)
 
         await self.services.logging_service.info(
-            f"Paused recording session for channel {channel_id} and scrapped all accumulated data"
+            f"Paused recording session for channel {channel_id} and saved all accumulated data to temp files"
         )
         return True
 
@@ -1574,8 +1572,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             message = (
                 f"⏸️ **Recording Paused**\n\n"
                 f"Your recording session (Meeting ID: `{meeting_id}`) has been paused.\n\n"
-                f"**Important:** All audio recorded up to this point has been discarded.\n\n"
-                f"Use `/resume` to continue recording from this point, or `/stop` to end the session."
+                f"**Note:** All audio recorded up to this point has been saved to temporary storage.\n\n"
+                f"Use `/resume` to continue recording from this point, or `/stop` to end the session and process your recordings."
             )
 
             success = await BotUtils.send_dm(self.context.bot, user_id, message)

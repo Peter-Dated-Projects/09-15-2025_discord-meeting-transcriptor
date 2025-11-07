@@ -246,14 +246,14 @@ class Voice(commands.Cog):
         return
 
     @commands.slash_command(
-        name="pause", description="Pause the current recording and discard accumulated audio"
+        name="pause", description="Pause the current recording and save accumulated audio"
     )
     async def pause(self, ctx: discord.ApplicationContext) -> None:
-        """Pause the recording session and discard all audio accumulated so far.
+        """Pause the recording session and save all audio accumulated so far.
 
         When paused:
         - Recording stops temporarily
-        - All audio data recorded up to this point is discarded
+        - All audio data recorded up to this point is saved to temporary storage
         - Session remains active and can be resumed with /resume
 
         Args:
@@ -293,7 +293,7 @@ class Voice(commands.Cog):
             await ctx.edit(content="❌ Recording service is not available.")
             return
 
-        # 6. Pause recording session (stops recording and scraps accumulated audio)
+        # 6. Pause recording session (stops recording and saves accumulated audio)
         meeting_id = session.meeting_id
         logger.info(
             f"Pausing recording session: meeting_id={meeting_id}, channel={voice_channel.id}"
@@ -306,7 +306,7 @@ class Voice(commands.Cog):
         if success:
             await ctx.edit(
                 content="⏸️ **Recording Paused**\n\n"
-                "All audio recorded during this session has been discarded.\n"
+                "All audio recorded during this session has been saved to temporary storage.\n"
                 "You will receive a DM with details.\n\n"
                 "Use `/resume` to continue recording from this point."
             )
