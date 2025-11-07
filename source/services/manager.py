@@ -24,6 +24,7 @@ class ServicesManager:
         transcription_file_service_manager: BaseTranscriptionFileServiceManager,
         ffmpeg_service_manager: BaseFFmpegServiceManager,
         sql_recording_service_manager: BaseSQLRecordingServiceManager,
+        sql_logging_service_manager: BaseSQLLoggingServiceManager,
         discord_recorder_service_manager: BaseDiscordRecorderServiceManager | None = None,
     ):
         self.context = context
@@ -40,6 +41,7 @@ class ServicesManager:
 
         # DB interfaces
         self.sql_recording_service_manager = sql_recording_service_manager
+        self.sql_logging_service_manager = sql_logging_service_manager
 
         # Discord recorder
         self.discord_recorder_service_manager = discord_recorder_service_manager
@@ -57,6 +59,7 @@ class ServicesManager:
 
         # DB interfaces
         await self.sql_recording_service_manager.on_start(self)
+        await self.sql_logging_service_manager.on_start(self)
 
         # Discord recorder
         await self.discord_recorder_service_manager.on_start(self)

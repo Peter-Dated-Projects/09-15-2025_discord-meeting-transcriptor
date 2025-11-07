@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,51 @@ if TYPE_CHECKING:
     from source.context import Context
 
 from source.services.manager import Manager
+
+# -------------------------------------------------------------- #
+# Logging Handler to Bridge Built-in Logging to AsyncLoggingService
+# -------------------------------------------------------------- #
+
+
+class AsyncLoggingHandler(logging.Handler):
+    """Custom logging handler that forwards logs to AsyncLoggingService."""
+
+    def __init__(self, async_logger: "AsyncLoggingService"):
+        super().__init__()
+        self.async_logger = async_logger
+        self._loop = None
+
+    def emit(self, record: logging.LogRecord):
+        """Emit a log record to the async logger."""
+        try:
+            # Format the message
+            msg = self.format(record)
+
+            # Get the event loop
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No running loop, print to console as fallback
+                print(msg, file=sys.stdout, flush=True)
+                return
+
+            # Schedule the async log call
+            asyncio.create_task(self._async_emit(msg, record.levelname))
+        except Exception:
+            self.handleError(record)
+
+    async def _async_emit(self, msg: str, level: str):
+        """Actually emit the log message asynchronously."""
+        # Write directly using the async logger's internal method
+        # to avoid double-formatting
+        try:
+            if self.async_logger._started and self.async_logger._writer_ready.is_set():
+                await self.async_logger._log_queue.put(msg)
+            else:
+                await self.async_logger._write_to_file_eager(msg)
+        except Exception:
+            pass  # Silently fail to avoid recursion
+
 
 # -------------------------------------------------------------- #
 # Async Logging Service
@@ -63,6 +109,12 @@ class AsyncLoggingService(Manager):
         self._log_queue: asyncio.Queue = asyncio.Queue()
         self._writer_task: asyncio.Task | None = None
 
+        # Event to signal when the writer task is ready
+        self._writer_ready = asyncio.Event()
+
+        # Track if we're started
+        self._started = False
+
     # -------------------------------------------------------------- #
     # Manager Methods
     # -------------------------------------------------------------- #
@@ -77,8 +129,37 @@ class AsyncLoggingService(Manager):
         # Start background writer task
         self._writer_task = asyncio.create_task(self._process_log_queue())
 
+        # Wait for the writer task to be ready before proceeding
+        await self._writer_ready.wait()
+
+        # Mark as started
+        self._started = True
+
         # Log the initialization with the log file name
         await self.info(f"AsyncLoggingService initialized. Logging to: {self.log_path}")
+
+        # Install handler to redirect Python's built-in logging to this service
+        self.install_logging_bridge()
+
+    def install_logging_bridge(self) -> None:
+        """Install a bridge to redirect Python's built-in logging to AsyncLoggingService."""
+        # Get the root logger
+        root_logger = logging.getLogger()
+
+        # Remove existing file handlers to avoid duplicate writes
+        handlers_to_remove = [h for h in root_logger.handlers if isinstance(h, logging.FileHandler)]
+        for handler in handlers_to_remove:
+            root_logger.removeHandler(handler)
+            handler.close()
+
+        # Add our custom async handler
+        async_handler = AsyncLoggingHandler(self)
+        # Use the same format as the original logging
+        formatter = logging.Formatter(
+            "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        async_handler.setFormatter(formatter)
+        root_logger.addHandler(async_handler)
 
     async def on_close(self) -> None:
         """Clean up on close."""
@@ -107,7 +188,11 @@ class AsyncLoggingService(Manager):
         timestamp = datetime.now().isoformat()
         formatted_message = f"[{timestamp}] [{level}] {message}"
 
-        await self._log_queue.put(formatted_message)
+        # If writer task isn't ready yet, write eagerly to ensure no logs are lost
+        if not self._started or not self._writer_ready.is_set():
+            await self._write_to_file_eager(formatted_message)
+        else:
+            await self._log_queue.put(formatted_message)
 
     async def debug(self, message: str) -> None:
         """Log a debug message."""
@@ -136,6 +221,9 @@ class AsyncLoggingService(Manager):
     async def _process_log_queue(self) -> None:
         """Process log messages from the queue continuously."""
         try:
+            # Signal that the writer task is ready
+            self._writer_ready.set()
+
             while True:
                 message = await self._log_queue.get()
                 await self._write_to_file(message)
@@ -155,12 +243,38 @@ class AsyncLoggingService(Manager):
 
         async with self._write_lock:
             try:
-                async with aiofiles.open(self.log_path, mode="a") as f:
+                async with aiofiles.open(self.log_path, mode="a", encoding="utf-8") as f:
                     await f.write(message + "\n")
             except Exception as e:
                 # Print to stderr if file write fails
                 error_msg = f"[ERROR] Failed to write to log file: {e}"
                 print(error_msg, file=sys.stderr, flush=True)
+
+    async def _write_to_file_eager(self, message: str) -> None:
+        """Write a message eagerly (synchronously) when the writer task isn't ready.
+
+        This is used during initialization before the background writer task is running
+        to ensure no log messages are lost.
+
+        Args:
+            message: The formatted log message to write
+        """
+        # Always print to console (stdout) with immediate flush for all log messages
+        if self.console_output:
+            print(message, file=sys.stdout, flush=True)
+
+        # Write to file eagerly without waiting for queue processing
+        try:
+            # Ensure log directory exists
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+
+            # Use synchronous file write for eager mode
+            with open(self.log_path, mode="a", encoding="utf-8") as f:
+                f.write(message + "\n")
+        except Exception as e:
+            # Print to stderr if file write fails
+            error_msg = f"[ERROR] Failed to write to log file (eager): {e}"
+            print(error_msg, file=sys.stderr, flush=True)
 
     async def _flush_queue(self) -> None:
         """Flush all remaining messages from the queue."""

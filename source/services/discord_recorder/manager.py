@@ -1253,6 +1253,9 @@ class DiscordSessionHandler:
             )
             return
 
+        # Generate a unique job ID for this FFmpeg job
+        job_id = generate_16_char_uuid()
+
         # Define callback to update SQL status
         async def on_transcode_complete(success: bool) -> None:
             if not self.services.sql_recording_service_manager or not temp_recording_id:
@@ -1278,12 +1281,14 @@ class DiscordSessionHandler:
                         f"Failed to delete PCM file {pcm_path}: {e}"
                     )
 
-        # Queue FFmpeg job
+        # Queue FFmpeg job with job tracking
         await self.services.ffmpeg_service_manager.queue_pcm_to_mp3(
             input_path=pcm_path,
             output_path=mp3_path,
             bitrate=DiscordRecorderConstants.MP3_BITRATE,
             callback=on_transcode_complete,
+            job_id=job_id,
+            meeting_id=self.meeting_id,
         )
 
     # -------------------------------------------------------------- #
@@ -1923,7 +1928,9 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
             # Concatenate MP3 files into one big file
             output_filename = f"{meeting_id}_user{user_id}_final.mp3"
-            output_path = await self._concatenate_mp3_files(mp3_files, output_filename)
+            output_path = await self._concatenate_mp3_files(
+                mp3_files, output_filename, meeting_id, user_id
+            )
 
             if not output_path:
                 await self.services.logging_service.error(
@@ -1943,6 +1950,31 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             await self.services.logging_service.info(
                 f"Successfully created persistent recording {recording_id} for user {user_id} in meeting {meeting_id}"
             )
+
+            # Log the transcoding completion to jobs_status table
+            if self.services.sql_logging_service_manager:
+                from source.server.sql_models import JobsStatus, JobsType
+                from source.utils import generate_16_char_uuid, get_current_timestamp_est
+
+                try:
+                    job_id = generate_16_char_uuid()
+                    current_time = get_current_timestamp_est()
+                    await self.services.sql_logging_service_manager.log_job_status_event(
+                        job_type=JobsType.TRANSCODING,
+                        job_id=job_id,
+                        meeting_id=meeting_id,
+                        created_at=current_time,
+                        status=JobsStatus.COMPLETED,
+                        started_at=current_time,
+                        finished_at=current_time,
+                    )
+                    await self.services.logging_service.info(
+                        f"Logged persistent transcoding completion for user {user_id} in meeting {meeting_id} (job_id: {job_id})"
+                    )
+                except Exception as e:
+                    await self.services.logging_service.error(
+                        f"Failed to log persistent transcoding completion to SQL: {str(e)}"
+                    )
 
             # Send DM notification to user if bot instance is available
             await self._send_recording_notification(
@@ -2022,7 +2054,11 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             )
 
     async def _concatenate_mp3_files(
-        self, mp3_files: list[str], output_filename: str
+        self,
+        mp3_files: list[str],
+        output_filename: str,
+        meeting_id: str,
+        user_id: int | str,
     ) -> str | None:
         """
         Concatenate multiple MP3 files into one using FFmpeg.
@@ -2030,6 +2066,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         Args:
             mp3_files: List of MP3 file paths to concatenate
             output_filename: Name for the output file
+            meeting_id: Meeting ID for context
+            user_id: User ID for context
 
         Returns:
             Path to the concatenated file, or None if failed
