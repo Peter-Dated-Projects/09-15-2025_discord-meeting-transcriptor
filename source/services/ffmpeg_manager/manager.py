@@ -400,7 +400,7 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
 
                 # Log job start in jobs_status table if job tracking is enabled
                 if job.job_id and job.meeting_id and self.services.sql_logging_service_manager:
-                    from datetime import datetime
+
                     from source.server.sql_models import JobsStatus, JobsType
                     from source.utils import get_current_timestamp_est
 
@@ -452,7 +452,7 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
 
                     # Log job completion in jobs_status table if job tracking is enabled
                     if job.job_id and job.meeting_id and self.services.sql_logging_service_manager:
-                        from datetime import datetime
+
                         from source.server.sql_models import JobsStatus, JobsType
                         from source.utils import get_current_timestamp_est
 
@@ -478,7 +478,6 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
 
                     # Log job failure in jobs_status table if job tracking is enabled
                     if job.job_id and job.meeting_id and self.services.sql_logging_service_manager:
-                        from datetime import datetime
                         from source.server.sql_models import JobsStatus, JobsType
                         from source.utils import get_current_timestamp_est
 
