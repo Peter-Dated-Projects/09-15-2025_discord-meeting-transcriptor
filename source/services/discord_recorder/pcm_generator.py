@@ -4,7 +4,6 @@
 
 from abc import ABC, abstractmethod
 
-
 # -------------------------------------------------------------- #
 # PCM Utility Functions
 # -------------------------------------------------------------- #
@@ -116,13 +115,13 @@ class SilentPCM(PCMGenerator):
         self.channels = channels
         self.unsigned_8bit = unsigned_8bit
 
-    def generate(self, ms: int, offset: int = 0) -> bytes:
+    def generate(self, ms: int, _offset: int = 0) -> bytes:
         """
         Generate silent PCM audio data.
 
         Args:
             ms: Duration in milliseconds
-            offset: Optional offset in milliseconds (default: 0, currently unused)
+            _offset: Optional offset in milliseconds (default: 0, currently unused)
 
         Returns:
             Silent PCM audio data as bytes

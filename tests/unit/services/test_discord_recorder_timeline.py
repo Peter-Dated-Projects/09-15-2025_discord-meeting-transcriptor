@@ -10,8 +10,7 @@ Tests the following critical functionality:
 Note: These tests validate the timeline logic without requiring actual Discord connections.
 """
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -23,7 +22,6 @@ from source.services.discord_recorder.pcm_generator import (
     calculate_pcm_bytes,
     calculate_pcm_duration_ms,
 )
-
 
 # -------------------------------------------------------------- #
 # Test Constants
@@ -51,7 +49,7 @@ def test_frame_bytes_constant():
     """Verify FRAME_BYTES is exactly 3840 bytes (20ms at 48kHz stereo 16-bit)."""
     # 20ms * 48000 Hz * 2 channels * 2 bytes = 3840 bytes
     expected_frame_bytes = 20 * 48000 * 2 * 2 // 1000
-    assert DiscordRecorderConstants.FRAME_BYTES == expected_frame_bytes
+    assert expected_frame_bytes == DiscordRecorderConstants.FRAME_BYTES
     assert DiscordRecorderConstants.FRAME_BYTES == 3840
 
 
@@ -59,7 +57,7 @@ def test_window_bytes_constant():
     """Verify WINDOW_BYTES is exactly 5,760,000 bytes (30s at 48kHz stereo 16-bit)."""
     # 30,000ms * 192 bytes/ms = 5,760,000 bytes
     expected_window_bytes = 30_000 * DiscordRecorderConstants.BYTES_PER_MS
-    assert DiscordRecorderConstants.WINDOW_BYTES == expected_window_bytes
+    assert expected_window_bytes == DiscordRecorderConstants.WINDOW_BYTES
     assert DiscordRecorderConstants.WINDOW_BYTES == 5_760_000
 
 
@@ -67,7 +65,7 @@ def test_bytes_per_ms_constant():
     """Verify BYTES_PER_MS is exactly 192 bytes (1ms at 48kHz stereo 16-bit)."""
     # 48000 Hz * 2 channels * 2 bytes / 1000ms = 192 bytes/ms
     expected_bytes_per_ms = 48000 * 2 * 2 // 1000
-    assert DiscordRecorderConstants.BYTES_PER_MS == expected_bytes_per_ms
+    assert expected_bytes_per_ms == DiscordRecorderConstants.BYTES_PER_MS
     assert DiscordRecorderConstants.BYTES_PER_MS == 192
 
 
@@ -292,7 +290,6 @@ def test_gap_calculation_consecutive_packets():
 def test_gap_calculation_with_silence():
     """Test gap calculation when there's actual silence between packets."""
     # Packet 1 at t=0, duration 20ms, ends at t=20
-    now_ms_packet1 = 20
     last_wall_ms_after_packet1 = 20
 
     # Packet 2 arrives at t=3020 (3 seconds of silence)
@@ -389,7 +386,6 @@ def test_long_silence_scenario():
     - Gap should be padded with silence
     """
     # Packet 1
-    now_ms_packet1 = 20
     last_wall_ms_after_packet1 = 20
 
     # Packet 2 arrives 2 minutes later
@@ -519,10 +515,8 @@ async def test_equal_chunk_counts_after_stop():
 
     # Mock the flush methods to avoid actual I/O
     with (
-        patch.object(session, "_flush_user_window", new_callable=AsyncMock) as mock_flush_window,
-        patch.object(
-            session, "_flush_user_backfill", new_callable=AsyncMock
-        ) as mock_flush_backfill,
+        patch.object(session, "_flush_user_window", new_callable=AsyncMock),
+        patch.object(session, "_flush_user_backfill", new_callable=AsyncMock),
     ):
 
         # Execute stop sequence: flush (force=True) → backfill to max

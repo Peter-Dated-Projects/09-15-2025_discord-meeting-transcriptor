@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 from source.server.sql_models import MeetingStatus, TempRecordingModel, TranscodeStatus
 from source.services.discord_recorder.pcm_generator import (
     SilentPCM,
-    calculate_pcm_bytes,
     calculate_pcm_duration_ms,
 )
 from source.services.manager import BaseDiscordRecorderServiceManager, ServicesManager
@@ -238,7 +237,7 @@ class DiscordSessionHandler:
             await self._backfill_to_max_chunks()
         else:
             await self.services.logging_service.info(
-                f"Session was paused - skipping audio extraction/flush (audio already saved to temp files during pause)"
+                "Session was paused - skipping audio extraction/flush (audio already saved to temp files during pause)"
             )
 
         # Now set shutdown flag to prevent any new operations
