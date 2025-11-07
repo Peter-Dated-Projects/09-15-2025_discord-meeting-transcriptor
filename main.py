@@ -1,8 +1,35 @@
 # Main File
 
 import logging
+from datetime import datetime
+from pathlib import Path
+
 import os
 import sys
+
+# Create logs directory if it doesn't exist
+logs_dir = Path("logs")
+logs_dir.mkdir(parents=True, exist_ok=True)
+
+# Generate timestamped log file name
+timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+log_file = logs_dir / f"app_{timestamp}.log"
+
+# Configure logging to output to both console (stdout) and file with proper formatting
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(log_file, mode='a', encoding='utf-8'),
+    ],
+    force=True,  # Override any existing configuration
+)
+
+# -------------------------------------------------------------- #
+# Imports
+# -------------------------------------------------------------- #
 
 import discord
 import dotenv
@@ -13,15 +40,6 @@ from source.server.constructor import construct_server_manager
 from source.services.constructor import construct_services_manager
 
 dotenv.load_dotenv(dotenv_path=".env.local")
-
-# Configure logging to output to console (stdout) with proper formatting
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)],
-    force=True,  # Override any existing configuration
-)
 
 # -------------------------------------------------------------- #
 # Discord Bot Setup
@@ -39,6 +57,9 @@ intents.voice_states = True
 # If DEBUG_GUILD_IDS is not empty, commands will register instantly in those guilds
 bot = discord.Bot(intents=intents, debug_guilds=DEBUG_GUILD_IDS)
 
+# Get logger for main module
+logger = logging.getLogger(__name__)
+
 
 def load_cogs(context: Context):
     """Load all cog extensions with context.
@@ -50,10 +71,10 @@ def load_cogs(context: Context):
     from cogs.voice import setup as setup_voice
 
     setup_general(context)
-    print("✓ Loaded cogs.general")
+    logger.info("✓ Loaded cogs.general")
 
     setup_voice(context)
-    print("✓ Loaded cogs.voice")
+    logger.info("✓ Loaded cogs.voice")
 
 
 # -------------------------------------------------------------- #
@@ -76,35 +97,35 @@ async def murder(ctx: discord.ApplicationContext):
 @bot.event
 async def on_ready():
     """Called when the bot is ready and connected to Discord."""
-    print(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
-    print("------")
+    logger.info(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
+    logger.info("------")
 
     # In py-cord, slash commands are automatically synced
     # No manual syncing needed like discord.py's tree.sync()
-    print("Bot is ready! Slash commands are automatically available.")
-    print(f"Connected to {len(bot.guilds)} guild(s):")
+    logger.info("Bot is ready! Slash commands are automatically available.")
+    logger.info(f"Connected to {len(bot.guilds)} guild(s):")
     for guild in bot.guilds:
-        print(f"  ✓ {guild.name} (ID: {guild.id})")
+        logger.info(f"  ✓ {guild.name} (ID: {guild.id})")
 
     # Display all registered slash commands
-    print("\nRegistered slash commands:")
+    logger.info("\nRegistered slash commands:")
     slash_commands = [
         cmd for cmd in bot.pending_application_commands if isinstance(cmd, discord.SlashCommand)
     ]
     if slash_commands:
         for cmd in slash_commands:
-            print(f"  ✓ /{cmd.name} - {cmd.description}")
+            logger.info(f"  ✓ /{cmd.name} - {cmd.description}")
     else:
-        print("  (No slash commands registered)")
+        logger.info("  (No slash commands registered)")
 
     # Important information about command visibility
     if DEBUG_GUILD_IDS:
-        print(f"\n⚠️  Commands registered for guilds: {DEBUG_GUILD_IDS}")
-        print("   Commands should appear INSTANTLY in these servers.")
+        logger.info(f"\n⚠️  Commands registered for guilds: {DEBUG_GUILD_IDS}")
+        logger.info("   Commands should appear INSTANTLY in these servers.")
     else:
-        print("\n⚠️  Commands registered GLOBALLY")
-        print("   ⏱️  This can take up to 1 HOUR to appear in Discord!")
-        print("   💡 TIP: Set DEBUG_GUILD_IDS for instant registration during development")
+        logger.info("\n⚠️  Commands registered GLOBALLY")
+        logger.info("   ⏱️  This can take up to 1 HOUR to appear in Discord!")
+        logger.info("   💡 TIP: Set DEBUG_GUILD_IDS for instant registration during development")
 
 
 @bot.event
@@ -131,8 +152,8 @@ async def main():
     # Startup services
     # -------------------------------------------------------------- #
 
-    print("=" * 40)
-    print("Syncing services...")
+    logger.info("=" * 40)
+    logger.info("Syncing services...")
 
     # Create context object
     context = Context()
@@ -141,7 +162,7 @@ async def main():
     servers_manager = construct_server_manager(ServerManagerType.DEVELOPMENT, context)
     context.set_server_manager(servers_manager)
     await servers_manager.connect_all()
-    print("[OK] Connected all servers.")
+    logger.info("[OK] Connected all servers.")
 
     storage_path = os.path.join("assets", "data")
     recording_storage_path = os.path.join(storage_path, "recordings")
@@ -154,7 +175,7 @@ async def main():
     )
     context.set_services_manager(services_manager)
     await services_manager.initialize_all()
-    print("[OK] Initialized all services.")
+    logger.info("[OK] Initialized all services.")
 
     # Set bot instance on context
     context.set_bot(bot)
@@ -170,7 +191,7 @@ async def main():
         load_cogs(context)
         token = os.getenv("DISCORD_API_TOKEN")
         if not token:
-            print("Error: DISCORD_API_TOKEN not found in environment variables")
+            logger.error("Error: DISCORD_API_TOKEN not found in environment variables")
             return
         await bot.start(token)
 

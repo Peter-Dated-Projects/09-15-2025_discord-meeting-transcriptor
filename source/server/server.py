@@ -5,11 +5,14 @@ This module provides base classes and managers for handling connections
 and operations with external services.
 """
 
+import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from source.context import Context
+
+logger = logging.getLogger(__name__)
 
 # -------------------------------------------------------------- #
 # Base Server Handlers
@@ -115,28 +118,34 @@ class ServerManager:
     # ------------------------------------------------------ #
 
     async def connect_all(self) -> None:
-        """Connect all registered servers."""
-        print(f"[ServerManager] Connecting {len(self._servers)} server(s)...")
-        for name, server in self._servers.items():
-            try:
-                await server.connect()
-                await server.on_startup()
-                print(f"[ServerManager] Connected {name}")
-            except Exception as e:
-                print(f"[ServerManager] Failed to connect {name}: {e}")
-                raise
-        self._initialized = True
+        """Connect to all servers."""
+        logger.info("=" * 60)
+        logger.info("[ServerManager] Connecting all servers...")
+
+        for server in self.servers:
+            logger.info(f"[ServerManager] Connecting to '{server.name}' server...")
+            await server.connect()
+            logger.info(f"[ServerManager] Executing startup actions for '{server.name}' server...")
+            await server.on_startup()
+            logger.info(f"[ServerManager] '{server.name}' server is ready.")
+
+        logger.info("[ServerManager] All servers connected successfully.")
+        logger.info("=" * 60)
 
     async def disconnect_all(self) -> None:
-        """Disconnect all registered servers."""
-        print(f"[ServerManager] Disconnecting {len(self._servers)} server(s)...")
-        for name, server in self._servers.items():
-            try:
-                await server.on_close()
-                await server.disconnect()
-                print(f"[ServerManager] Disconnected {name}")
-            except Exception as e:
-                print(f"[ServerManager] Failed to disconnect {name}: {e}")
+        """Disconnect from all servers."""
+        logger.info("=" * 60)
+        logger.info("[ServerManager] Disconnecting all servers...")
+
+        for server in self.servers:
+            logger.info(f"[ServerManager] Executing close actions for '{server.name}' server...")
+            await server.on_close()
+            logger.info(f"[ServerManager] Disconnecting from '{server.name}' server...")
+            await server.disconnect()
+            logger.info(f"[ServerManager] '{server.name}' server disconnected.")
+
+        logger.info("[ServerManager] All servers disconnected successfully.")
+        logger.info("=" * 60)
 
     async def health_check_all(self) -> dict[str, bool]:
         """
