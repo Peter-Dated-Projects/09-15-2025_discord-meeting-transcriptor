@@ -1907,8 +1907,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             value=f"<t:{created_at_timestamp}:F>",
             inline=False,
         )
-        embed.add_field(name="Meeting ID", value=f"`{meeting_id}`", inline=False)
-        embed.add_field(name="Recording ID", value=f"`{recording_id}`", inline=True)
+        # embed.add_field(name="Meeting ID", value=f"`{meeting_id}`", inline=False)
+        # embed.add_field(name="Recording ID", value=f"`{recording_id}`", inline=True)
         embed.add_field(name="File", value=f"`{output_filename}`", inline=False)
 
         # Set footer with requested_by user info and avatar
@@ -1917,6 +1917,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             if hasattr(meeting_data, "requested_by")
             else meeting_data.get("requested_by", "Unknown")
         )
+        requested_by_user_name = None
         footer_icon_url = None
 
         # Try to fetch the user to get their avatar
@@ -1924,12 +1925,13 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             requested_user = await self.context.bot.fetch_user(int(requested_by_id))
             if requested_user and requested_user.avatar:
                 footer_icon_url = requested_user.avatar.url
+                requested_by_user_name = requested_user.name
         except (ValueError, discord.NotFound, discord.HTTPException):
             # If fetch fails, just use the ID without avatar
             pass
 
         embed.set_footer(
-            text=f"Requested by {requested_by_id}",
+            text=f"Requested by {requested_by_user_name or requested_by_id}",
             icon_url=footer_icon_url,
         )
 
