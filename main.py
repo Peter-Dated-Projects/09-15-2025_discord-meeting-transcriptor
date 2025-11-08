@@ -6,6 +6,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import discord
+import dotenv
+
+from source.constructor import ServerManagerType
+from source.context import Context
+from source.server.constructor import construct_server_manager
+from source.services.constructor import construct_services_manager
+
 # Configure Python's built-in logging for server initialization
 # (before AsyncLoggingService is available)
 logs_dir = Path("logs")
@@ -24,18 +32,6 @@ logging.basicConfig(
     ],
     force=True,
 )
-
-# -------------------------------------------------------------- #
-# Imports
-# -------------------------------------------------------------- #
-
-import discord
-import dotenv
-
-from source.constructor import ServerManagerType
-from source.context import Context
-from source.server.constructor import construct_server_manager
-from source.services.constructor import construct_services_manager
 
 dotenv.load_dotenv(dotenv_path=".env.local")
 
@@ -83,10 +79,11 @@ async def murder(ctx: discord.ApplicationContext):
 
     # Only work if user is developer
     info = await bot.application_info()
-    if info.team and ctx.author.id not in [member.id for member in info.team.members]:
-        await ctx.respond("❌ You do not have permission to use this command.")
-        return
-    elif ctx.author.id != info.owner.id:
+    if (
+        info.team
+        and ctx.author.id not in [member.id for member in info.team.members]
+        or ctx.author.id != info.owner.id
+    ):
         await ctx.respond("❌ You do not have permission to use this command.")
         return
 

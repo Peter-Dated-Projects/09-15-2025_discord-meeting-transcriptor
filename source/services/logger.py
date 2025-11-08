@@ -2,7 +2,6 @@ import asyncio
 import contextlib
 import logging
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -35,7 +34,7 @@ class AsyncLoggingHandler(logging.Handler):
 
             # Get the event loop
             try:
-                loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
             except RuntimeError:
                 # No running loop, print to console as fallback
                 print(msg, file=sys.stdout, flush=True)
@@ -46,7 +45,7 @@ class AsyncLoggingHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
-    async def _async_emit(self, msg: str, level: str):
+    async def _async_emit(self, msg: str, level: str):  # noqa: ARG002
         """Actually emit the log message asynchronously."""
         # Write directly using the async logger's internal method
         # to avoid double-formatting

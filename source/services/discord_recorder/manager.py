@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from source.context import Context
 
 from source.server.sql_models import (
-    MeetingModel,
     MeetingStatus,
     TempRecordingModel,
     TranscodeStatus,
@@ -179,7 +178,7 @@ class DiscordSessionHandler:
         """
         if not self.discord_voice_client or not self.discord_voice_client.channel:
             await self.services.logging_service.warning(
-                f"Cannot initialize channel members - voice client or channel not available"
+                "Cannot initialize channel members - voice client or channel not available"
             )
             return
 
@@ -1963,7 +1962,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         # Create embed
         embed = discord.Embed(
             title=f"**Meeting Finished**: Meeting in `{guild_name}`",
-            description=(f"**✅ Your recording has been processed and saved!**\n\n"),
+            description=("**✅ Your recording has been processed and saved!**\n\n"),
             color=discord.Color.green(),
         )
 
@@ -2218,8 +2217,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         self,
         mp3_files: list[str],
         output_filename: str,
-        meeting_id: str,
-        user_id: int | str,
+        meeting_id: str,  # noqa: ARG002
+        user_id: int | str,  # noqa: ARG002
     ) -> str | None:
         """
         Concatenate multiple MP3 files into one using FFmpeg.
