@@ -293,6 +293,30 @@ class SQLRecordingManagerService(Manager):
     # Meeting Methods
     # -------------------------------------------------------------- #
 
+    async def get_meeting(self, meeting_id: str) -> dict:
+        """
+        Get meeting details by meeting ID.
+
+        Args:
+            meeting_id: Meeting ID (16 chars)
+
+        Returns:
+            Meeting details as a dictionary
+        """
+
+        # Validate input
+        if len(meeting_id) != MEETING_UUID_LENGTH:
+            raise ValueError(f"meeting_id must be {MEETING_UUID_LENGTH} characters long")
+
+        # Build and execute query
+        query = select(MeetingModel).where(MeetingModel.id == meeting_id)
+        results = await self.server.sql_client.execute(query)
+
+        if results:
+            return results[0]
+        else:
+            raise ValueError(f"Meeting with ID {meeting_id} not found")
+
     async def insert_meeting(
         self,
         meeting_id: str,

@@ -112,7 +112,7 @@ class BotUtils:
     async def send_dm(
         bot_instance: discord.Bot,
         user_id: int | str,
-        message: str,
+        message: str | None = None,
         embed: discord.Embed | None = None,
     ) -> bool:
         """
@@ -127,8 +127,13 @@ class BotUtils:
         Returns:
             True if message was sent successfully, False otherwise
         """
+        if not message and not embed:
+            raise ValueError("Either message or embed must be provided")
+
         try:
-            user = await bot_instance.fetch_user(int(user_id))
+            # Convert user_id to int if it's a string
+            user_id_int = int(user_id) if isinstance(user_id, str) else user_id
+            user = await bot_instance.fetch_user(user_id_int)
             if not user:
                 logger.warning(f"Could not fetch user {user_id}")
                 return False

@@ -11,7 +11,12 @@ from sqlalchemy import select
 if TYPE_CHECKING:
     from source.context import Context
 
-from source.server.sql_models import MeetingStatus, TempRecordingModel, TranscodeStatus
+from source.server.sql_models import (
+    MeetingModel,
+    MeetingStatus,
+    TempRecordingModel,
+    TranscodeStatus,
+)
 from source.services.discord_recorder.pcm_generator import (
     SilentPCM,
     calculate_pcm_duration_ms,
@@ -1836,7 +1841,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
     async def _send_recording_notification(
         self,
         user_id: int | str,
-        meeting_id: str,
+        guild_data: dict,
+        meeting_data: dict,
         recording_id: str,
         output_filename: str,
     ) -> bool:
@@ -1858,13 +1864,78 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             )
             return False
 
-        message = (
-            f"✅ Your recording from meeting `{meeting_id}` has been processed and saved!\n"
-            f"Recording ID: `{recording_id}`\n"
-            f"File: `{output_filename}`"
+        # Get variables
+        meeting_id = (
+            meeting_data.id if hasattr(meeting_data, "id") else meeting_data.get("id", "Unknown")
+        )
+        guild_name = (
+            guild_data.name
+            if hasattr(guild_data, "name")
+            else guild_data.get("name", "Unknown Guild")
         )
 
-        return await BotUtils.send_dm(self.context.bot, user_id, message)
+        # Create embed
+        embed = discord.Embed(
+            title=f"Recording Processed: Meeting in `{guild_name}`",
+            description=(f"✅ Your recording has been processed and saved!\n\n"),
+            color=discord.Color.green(),
+        )
+
+        # Use guild image as the embed thumbnail if available
+        guild_icon_url = None
+        if hasattr(guild_data, "icon") and guild_data.icon:
+            guild_icon_url = guild_data.icon.url
+        elif isinstance(guild_data, dict) and guild_data.get("icon"):
+            guild_icon_url = guild_data["icon"]
+
+        if guild_icon_url:
+            embed.set_thumbnail(url=guild_icon_url)
+
+        # Add additional information
+        created_at = (
+            meeting_data.started_at
+            if hasattr(meeting_data, "started_at")
+            else meeting_data.get("created_at", 0)
+        )
+        if hasattr(created_at, "timestamp"):
+            created_at_timestamp = int(created_at.timestamp())
+        else:
+            created_at_timestamp = int(created_at)
+
+        embed.add_field(
+            name="Recording Date",
+            value=f"<t:{created_at_timestamp}:F>",
+            inline=False,
+        )
+        # embed.add_field(name="Meeting ID", value=f"`{meeting_id}`", inline=False)
+        # embed.add_field(name="Recording ID", value=f"`{recording_id}`", inline=True)
+        embed.add_field(name="File", value=f"`{output_filename}`", inline=False)
+
+        # Set footer with requested_by user info and avatar
+        requested_by_id = (
+            meeting_data.requested_by
+            if hasattr(meeting_data, "requested_by")
+            else meeting_data.get("requested_by", "Unknown")
+        )
+        requested_by_user_name = None
+        footer_icon_url = None
+
+        # Try to fetch the user to get their avatar
+        try:
+            requested_user = await self.context.bot.fetch_user(int(requested_by_id))
+            if requested_user and requested_user.avatar:
+                footer_icon_url = requested_user.avatar.url
+                requested_by_user_name = requested_user.name
+        except (ValueError, discord.NotFound, discord.HTTPException):
+            # If fetch fails, just use the ID without avatar
+            pass
+
+        embed.set_footer(
+            text=f"Requested by {requested_by_user_name or requested_by_id}",
+            icon_url=footer_icon_url,
+        )
+
+        return await BotUtils.send_dm(self.context.bot, user_id, embed=embed)
 
     async def _process_user_recordings(
         self,
@@ -1947,6 +2018,12 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                 )
             )
 
+            # Request guild_name from discord api
+            meeting_data = await self.services.sql_recording_service_manager.get_meeting(
+                meeting_id=meeting_id
+            )
+            guild_data = await self.context.bot.fetch_guild(int(meeting_data["guild_id"]))
+
             await self.services.logging_service.info(
                 f"Successfully created persistent recording {recording_id} for user {user_id} in meeting {meeting_id}"
             )
@@ -1979,7 +2056,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             # Send DM notification to user if bot instance is available
             await self._send_recording_notification(
                 user_id=user_id,
-                meeting_id=meeting_id,
+                guild_data=guild_data,
+                meeting_data=meeting_data,
                 recording_id=recording_id,
                 output_filename=output_filename,
             )
