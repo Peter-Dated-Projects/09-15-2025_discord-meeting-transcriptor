@@ -108,15 +108,54 @@ class Voice(commands.Cog):
             after: The new voice state
         """
 
-        # TODO - if there's no use for this, then remove it
-        # # Log voice state changes
-        # logger.info(
-        #     f"Voice state update for member {member.id}: "
-        #     f"before={before.channel.id if before.channel else 'None'}, "
-        #     f"after={after.channel.id if after.channel else 'None'}"
-        # )
+        # Only handle events for the bot itself
+        if member.id != self.bot.user.id:
+            return
 
-        pass
+        # Detect when bot is kicked/disconnected from a voice channel
+        if before.channel and after.channel is None:
+            channel_id = before.channel.id
+            logger.info(
+                f"Bot was disconnected from voice channel {channel_id}. "
+                "Checking for active recording session..."
+            )
+
+            # Check if there's an active recording session in that channel
+            if not self.services.discord_recorder_service_manager:
+                logger.warning("Discord recorder service manager is not available.")
+                return
+
+            session = self.services.discord_recorder_service_manager.get_active_session(channel_id)
+
+            if not session:
+                logger.info(f"No active recording session found for channel {channel_id}")
+                return
+
+            # Active session exists (either recording or paused) - initiate stop process
+            meeting_id = session.meeting_id
+            logger.info(
+                f"Active recording session detected (meeting_id={meeting_id}). "
+                "Initiating auto-stop process..."
+            )
+
+            try:
+                # Stop the recording session
+                await self.services.discord_recorder_service_manager.stop_session(
+                    channel_id=channel_id
+                )
+                logger.info(
+                    f"Successfully auto-stopped recording session for meeting {meeting_id} "
+                    f"after bot was kicked from channel {channel_id}"
+                )
+
+                # Remove from active sessions cache
+                self.services.discord_recorder_service_manager.sessions.pop(channel_id, None)
+
+            except Exception as e:
+                logger.error(
+                    f"Error auto-stopping recording session for meeting {meeting_id}: {e}",
+                    exc_info=True,
+                )
 
     # -------------------------------------------------------------- #
     # Slash Commands
