@@ -394,23 +394,31 @@ class MySQLServer(SQLDatabase):
 
                 logger.debug(f"[{self.name}] Found parameters in query: {param_matches}")
 
-                # Build tuple of values in the correct order
+                # Build tuple of values in the correct order based on ALL parameters found in query
+                # This includes parameters in INSERT, UPDATE, WHERE clauses, etc.
                 if param_matches:
+                    # Get values in the exact order they appear in the query
                     param_values = tuple(processed_params.get(name) for name in param_matches)
+
+                    # Log parameter extraction for debugging
+                    logger.debug(
+                        f"[{self.name}] Param extraction: matches={param_matches}, values_count={len(param_values)}"
+                    )
+                    missing_params = [
+                        name for name in param_matches if name not in processed_params
+                    ]
+                    if missing_params:
+                        logger.error(f"[{self.name}] Missing parameters: {missing_params}")
+
                     # Replace %(name)s with %s
                     query = param_pattern.sub("%s", query)
                 elif processed_params:
                     # If no named parameters found, but we have params,
-                    # the query might already be using %s placeholders
-                    # In this case, we need to order params by their keys in the VALUES clause
-                    # Extract column names from INSERT statement
-                    insert_match = re.search(r"INSERT INTO \w+ \(([^)]+)\)", query)
-                    if insert_match:
-                        columns = [col.strip() for col in insert_match.group(1).split(",")]
-                        param_values = tuple(processed_params.get(col) for col in columns)
-                    else:
-                        # Fallback: use dict values in iteration order
-                        param_values = tuple(processed_params.values())
+                    # the query is already using %s placeholders.
+                    # For mysql_insert with ON DUPLICATE KEY UPDATE, SQLAlchemy generates %s placeholders directly
+                    # and the params dict maintains the correct order.
+                    # We need to provide ALL parameters in the order they appear in processed_params
+                    param_values = tuple(processed_params.values())
                 else:
                     param_values = None
 

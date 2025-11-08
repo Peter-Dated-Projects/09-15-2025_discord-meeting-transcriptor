@@ -1,13 +1,13 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import insert, select, update
-
-if TYPE_CHECKING:
-    from source.context import Context
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from source.server.sql_models import JobsStatus, JobsStatusModel, JobsType
 from source.services.manager import BaseSQLLoggingServiceManager
+
+if TYPE_CHECKING:
+    from source.context import Context
 
 # -------------------------------------------------------------- #
 # SQL Logging Manager Service
@@ -82,58 +82,41 @@ class SQLLoggingManagerService(BaseSQLLoggingServiceManager):
         if not isinstance(job_type, JobsType):
             raise ValueError("job_type must be a valid JobsType enum value")
 
-        # Check if job already exists
-        stmt = select(JobsStatusModel).where(JobsStatusModel.id == job_id)
-        existing_jobs = await self.server.sql_client.execute(stmt)
+        # Use INSERT ... ON DUPLICATE KEY UPDATE to handle race conditions
+        # This is atomic and prevents duplicate key errors
+        job_data = {
+            "id": job_id,  # Use job_id as the primary key
+            "type": job_type.value,  # Use the enum value string
+            "meeting_id": meeting_id,
+            "created_at": created_at,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "status": status.value,  # Use the enum value string
+            "error_log": error_log,
+        }
 
-        if existing_jobs:
-            # UPDATE existing job
-            existing_job = existing_jobs[0]
+        # Build insert statement with ON DUPLICATE KEY UPDATE
+        stmt = mysql_insert(JobsStatusModel).values(**job_data)
 
-            # Preserve timestamps that shouldn't change
-            if started_at is None and "started_at" in existing_job:
-                started_at = existing_job["started_at"]
-            if finished_at is None and "finished_at" in existing_job:
-                finished_at = existing_job["finished_at"]
-            if error_log is None and "error_log" in existing_job:
-                error_log = existing_job["error_log"]
+        # Define what to update if the key already exists
+        # Only update fields that are explicitly provided (not None)
+        update_dict = {"status": status.value}
+        if started_at is not None:
+            update_dict["started_at"] = started_at
+        if finished_at is not None:
+            update_dict["finished_at"] = finished_at
+        if error_log is not None:
+            update_dict["error_log"] = error_log
 
-            # UPDATE the row
-            update_stmt = (
-                update(JobsStatusModel)
-                .where(JobsStatusModel.id == job_id)
-                .values(
-                    status=status.value,  # Use the enum value string
-                    started_at=started_at,
-                    finished_at=finished_at,
-                    error_log=error_log,
-                )
-            )
-            await self.server.sql_client.execute(update_stmt)
-            await self.services.logging_service.log(
-                f"Updated job status: job_id={job_id}, status={status.value}, "
-                f"started_at={started_at}, finished_at={finished_at}"
-            )
-        else:
-            # INSERT new job
-            job_data = {
-                "id": job_id,  # Use job_id as the primary key
-                "type": job_type.value,  # Use the enum value string
-                "meeting_id": meeting_id,
-                "created_at": created_at,
-                "started_at": started_at,
-                "finished_at": finished_at,
-                "status": status.value,  # Use the enum value string
-                "error_log": error_log,
-            }
+        # Add ON DUPLICATE KEY UPDATE clause
+        stmt = stmt.on_duplicate_key_update(**update_dict)
 
-            # Build and execute insert statement
-            stmt = insert(JobsStatusModel).values(**job_data)
-            await self.server.sql_client.execute(stmt)
-            await self.services.logging_service.log(
-                f"Inserted new job status: job_id={job_id}, type={job_type.value}, "
-                f"status={status.value}, meeting_id={meeting_id}"
-            )
+        # Execute the upsert
+        await self.server.sql_client.execute(stmt)
+        await self.services.logging_service.log(
+            f"Upserted job status: job_id={job_id}, type={job_type.value}, "
+            f"status={status.value}, meeting_id={meeting_id}"
+        )
 
     async def fetch_logs(self) -> list:
         """Fetch logs from the SQL database."""
