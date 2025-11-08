@@ -363,7 +363,7 @@ class SQLRecordingManagerService(Manager):
             updated_at=timestamp,
             status=MeetingStatus.RECORDING.value,
             requested_by=requested_by,
-            participants={},  # Will be populated as users join
+            participants={},  # Will be populated when recording stops with users who spoke
             recording_files={},  # Will be populated as recordings are created
             transcript_ids={},  # Will be populated when transcripts are generated
         )
@@ -417,6 +417,38 @@ class SQLRecordingManagerService(Manager):
         await self.server.sql_client.execute(stmt)
         await self.services.logging_service.info(
             f"Updated meeting {meeting_id} status to {status.value}"
+        )
+
+    async def update_meeting_participants(
+        self, meeting_id: str, participant_user_ids: list[int | str]
+    ) -> None:
+        """
+        Update the participants list for a meeting.
+
+        Args:
+            meeting_id: Meeting ID (16 chars)
+            participant_user_ids: List of Discord User IDs who spoke during the meeting
+        """
+        # Validate input
+        if len(meeting_id) != MEETING_UUID_LENGTH:
+            raise ValueError(f"meeting_id must be {MEETING_UUID_LENGTH} characters long")
+
+        # Convert all user IDs to strings for consistency
+        participants_list = {"users": [str(user_id) for user_id in participant_user_ids]}
+
+        timestamp = get_current_timestamp_est()
+
+        # Build update query
+        stmt = (
+            update(MeetingModel)
+            .where(MeetingModel.id == meeting_id)
+            .values(participants=participants_list, updated_at=timestamp)
+        )
+
+        # Execute update
+        await self.server.sql_client.execute(stmt)
+        await self.services.logging_service.info(
+            f"Updated meeting {meeting_id} with {len(participants_list)} participants: {participants_list}"
         )
 
     async def check_and_update_meeting_status(
