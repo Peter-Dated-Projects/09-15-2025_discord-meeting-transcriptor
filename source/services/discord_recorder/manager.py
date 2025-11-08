@@ -11,6 +11,7 @@ from sqlalchemy import select
 if TYPE_CHECKING:
     from source.context import Context
 
+from source.api.discord.handler import DiscordAPIHandler
 from source.server.sql_models import MeetingStatus, TempRecordingModel, TranscodeStatus
 from source.services.discord_recorder.pcm_generator import (
     SilentPCM,
@@ -1838,6 +1839,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         user_id: int | str,
         meeting_id: str,
         recording_id: str,
+        guild_name: str,
         output_filename: str,
     ) -> bool:
         """
@@ -1947,6 +1949,13 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                 )
             )
 
+            # Request guild_name from discord api
+            meeting_data = await self.services.sql_recording_service_manager.get_meeting(
+                meeting_id=meeting_id
+            )
+            guild_data = await self.context.bot.fetch_guild(int(meeting_data["guild_id"]))
+            guild_name = guild_data.name if guild_data else "Unknown Guild"
+
             await self.services.logging_service.info(
                 f"Successfully created persistent recording {recording_id} for user {user_id} in meeting {meeting_id}"
             )
@@ -1981,6 +1990,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                 user_id=user_id,
                 meeting_id=meeting_id,
                 recording_id=recording_id,
+                guild_name=guild_name,
                 output_filename=output_filename,
             )
 
