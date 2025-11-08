@@ -47,6 +47,7 @@ def construct_services_manager(
     sql_recording_service_manager = None
     sql_logging_service_manager = None
     discord_recorder_service_manager = None
+    presence_manager_service = None
 
     # create logger
     logging_service = AsyncLoggingService(
@@ -105,6 +106,14 @@ def construct_services_manager(
 
         discord_recorder_service_manager = DiscordRecorderManagerService(context=context)
 
+        # -------------------------------------------------------------- #
+        # Presence Manager Setup
+        # -------------------------------------------------------------- #
+
+        from source.services.presence_manager.manager import PresenceManagerService
+
+        presence_manager_service = PresenceManagerService(context=context)
+
     # TODO: https://www.notion.so/DISC-19-create-ffmpeg-service-29c5eca3b9df805a949fdcd5850eaf5a?source=copy_link
     # # create ffmpeg service manager
     # if service_type == ServerManagerType.DEVELOPMENT:
@@ -126,4 +135,5 @@ def construct_services_manager(
         sql_recording_service_manager=sql_recording_service_manager,
         sql_logging_service_manager=sql_logging_service_manager,
         discord_recorder_service_manager=discord_recorder_service_manager,
+        presence_manager_service=presence_manager_service,
     )
