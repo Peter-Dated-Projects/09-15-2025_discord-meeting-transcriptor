@@ -80,6 +80,16 @@ async def load_cogs(context: Context):
 @bot.command(name="murder", description="Stops the bot for real")
 async def murder(ctx: discord.ApplicationContext):
     """Stop the bot."""
+
+    # Only work if user is developer
+    info = await bot.application_info()
+    if info.team and ctx.author.id not in [member.id for member in info.team.members]:
+        await ctx.respond("❌ You do not have permission to use this command.")
+        return
+    elif ctx.author.id != info.owner.id:
+        await ctx.respond("❌ You do not have permission to use this command.")
+        return
+
     await ctx.respond("🔪 Stopping the bot...")
     await bot.close()
 
