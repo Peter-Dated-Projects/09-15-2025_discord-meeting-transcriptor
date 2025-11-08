@@ -166,6 +166,47 @@ class DiscordSessionHandler:
     # Session Lifecycle Methods
     # -------------------------------------------------------------- #
 
+    async def _initialize_channel_members(self) -> None:
+        """
+        Initialize tracking dictionaries for all human users currently in the voice channel.
+
+        This ensures that get_recorded_user_ids() returns ALL users who were present,
+        not just users who spoke during the meeting.
+
+        Called during:
+        - start_recording: Initialize all current channel members
+        - resume_recording: Re-initialize after pause (users may have joined/left)
+        """
+        if not self.discord_voice_client or not self.discord_voice_client.channel:
+            await self.services.logging_service.warning(
+                f"Cannot initialize channel members - voice client or channel not available"
+            )
+            return
+
+        channel = self.discord_voice_client.channel
+        human_members = [member for member in channel.members if not member.bot]
+
+        initialized_count = 0
+        for member in human_members:
+            user_id = member.id
+
+            # Only initialize if user is not already tracked
+            if user_id not in self._user_chunk_counters:
+                self._user_audio_buffers[user_id] = bytearray()
+                self._user_chunk_counters[user_id] = 0
+                self._user_temp_recording_ids[user_id] = []
+                self._user_bytes_read[user_id] = 0
+                initialized_count += 1
+
+                await self.services.logging_service.debug(
+                    f"Initialized tracking for user {user_id} ({member.name}) in meeting {self.meeting_id}"
+                )
+
+        await self.services.logging_service.info(
+            f"Initialized tracking for {initialized_count} user(s) in channel {self.channel_id} "
+            f"(total tracked: {len(self._user_chunk_counters)})"
+        )
+
     async def start_recording(self) -> None:
         """Start the recording session using Pycord's recording API."""
         if self.is_recording:
@@ -183,6 +224,9 @@ class DiscordSessionHandler:
         self._user_temp_recording_ids = {}
         self._user_bytes_read = {}
         self._user_last_wall_ms = {}
+
+        # Initialize tracking for all users currently in the voice channel
+        await self._initialize_channel_members()
 
         await self.services.logging_service.info(
             f"Started recording session for meeting {self.meeting_id}, "
@@ -374,6 +418,9 @@ class DiscordSessionHandler:
 
         # Clear sink audio data and reset tracking to start fresh
         await self._clear_sink_and_reset_tracking()
+
+        # Re-initialize channel members (users may have joined/left during pause)
+        await self._initialize_channel_members()
 
         # Reset empty call detection counter to prevent premature auto-stop after resume
         self._consecutive_empty_flush_cycles = 0
@@ -1107,6 +1154,9 @@ class DiscordSessionHandler:
                 )
 
                 if temp_recording_id:
+                    # Ensure user has entry in temp_recording_ids dict
+                    if user_id not in self._user_temp_recording_ids:
+                        self._user_temp_recording_ids[user_id] = []
                     self._user_temp_recording_ids[user_id].append(temp_recording_id)
             except Exception as e:
                 await self.services.logging_service.error(
@@ -1177,6 +1227,9 @@ class DiscordSessionHandler:
                 )
 
                 if temp_recording_id:
+                    # Ensure user has entry in temp_recording_ids dict
+                    if user_id not in self._user_temp_recording_ids:
+                        self._user_temp_recording_ids[user_id] = []
                     self._user_temp_recording_ids[user_id].append(temp_recording_id)
             except Exception as e:
                 await self.services.logging_service.error(
@@ -1308,8 +1361,22 @@ class DiscordSessionHandler:
         return all_ids
 
     def get_recorded_user_ids(self) -> list[int]:
-        """Get list of Discord user IDs that have been recorded in this session."""
-        return list(self._user_audio_buffers.keys())
+        """
+        Get list of Discord user IDs that have been recorded in this session.
+
+        Returns all users who were present in the voice channel during the recording,
+        regardless of whether they spoke or remained silent. Users are tracked from
+        the moment recording starts and when they join during an active session.
+
+        Uses _user_chunk_counters as the source of truth since it:
+        - Persists throughout the session (survives pause/resume cycles)
+        - Is initialized for all channel members when recording starts
+        - Tracks all users who were present, not just those who spoke
+
+        Returns:
+            List of Discord user IDs (integers) for all recorded participants
+        """
+        return list(self._user_chunk_counters.keys())
 
     def was_auto_stopped_due_to_empty_call(self) -> bool:
         """
@@ -1606,6 +1673,20 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         # Stop recording
         await session.stop_recording()
 
+        # Update meeting participants with users who spoke during the meeting
+        if self.services.sql_recording_service_manager and recorded_user_ids:
+            try:
+                await self.services.sql_recording_service_manager.update_meeting_participants(
+                    meeting_id=meeting_id, participant_user_ids=recorded_user_ids
+                )
+                await self.services.logging_service.info(
+                    f"Updated meeting {meeting_id} participants list with {len(recorded_user_ids)} users who spoke"
+                )
+            except Exception as e:
+                await self.services.logging_service.error(
+                    f"Failed to update meeting participants for meeting {meeting_id}: {e}"
+                )
+
         # Wait for pending transcodes
         if self.services.sql_recording_service_manager:
             await self.services.logging_service.info(
@@ -1843,7 +1924,6 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         user_id: int | str,
         guild_data: dict,
         meeting_data: dict,
-        recording_id: str,
         output_filename: str,
     ) -> bool:
         """
@@ -1865,9 +1945,6 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             return False
 
         # Get variables
-        meeting_id = (
-            meeting_data.id if hasattr(meeting_data, "id") else meeting_data.get("id", "Unknown")
-        )
         guild_name = (
             guild_data.name
             if hasattr(guild_data, "name")
@@ -1907,8 +1984,6 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             value=f"<t:{created_at_timestamp}:F>",
             inline=False,
         )
-        # embed.add_field(name="Meeting ID", value=f"`{meeting_id}`", inline=False)
-        # embed.add_field(name="Recording ID", value=f"`{recording_id}`", inline=True)
         embed.add_field(name="File", value=f"`{output_filename}`", inline=False)
 
         # Set footer with requested_by user info and avatar
@@ -2058,7 +2133,6 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                 user_id=user_id,
                 guild_data=guild_data,
                 meeting_data=meeting_data,
-                recording_id=recording_id,
                 output_filename=output_filename,
             )
 
