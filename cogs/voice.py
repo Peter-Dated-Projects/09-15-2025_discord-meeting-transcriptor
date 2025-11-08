@@ -189,6 +189,7 @@ class Voice(commands.Cog):
         # 2. Connect to voice channel with robust error handling
         await ctx.edit(content="⏳ Connecting to voice channel...")
         voice_client = await voice_channel.connect(timeout=5.0, reconnect=True)
+        await ctx.guild.change_voice_state(channel=voice_channel, self_mute=True)
 
         # 3. Start recording session
         await ctx.edit(content="🎙️ Starting recording...")
