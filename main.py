@@ -136,6 +136,11 @@ async def on_ready():
             "   💡 TIP: Set DEBUG_GUILD_IDS for instant registration during development"
         )
 
+    # Initialize bot presence
+    if bot.context.services_manager.presence_manager_service:
+        await bot.context.services_manager.presence_manager_service.force_update_presence()
+        await logger.info("✓ Bot presence initialized")
+
 
 @bot.event
 async def on_application_command_error(

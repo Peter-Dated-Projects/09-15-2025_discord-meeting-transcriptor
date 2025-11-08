@@ -1636,6 +1636,11 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         await self.services.logging_service.info(
             f"Started recording session for meeting {meeting_id}, channel {channel_id}"
         )
+
+        # Notify presence manager about new meeting
+        if self.services.presence_manager_service:
+            await self.services.presence_manager_service.increment_meeting_count()
+
         return session
 
     async def stop_session(self, channel_id: int) -> bool:
@@ -1717,6 +1722,10 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
         # Cleanup session
         del self.sessions[channel_id]
+
+        # Notify presence manager about meeting ending
+        if self.services.presence_manager_service:
+            await self.services.presence_manager_service.decrement_meeting_count()
 
         # Process recordings in background
         asyncio.create_task(
