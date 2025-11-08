@@ -22,7 +22,7 @@ class PresenceManagerService:
 
     Features:
     - Tracks active meeting count across all guilds
-    - Updates bot presence every 1 minute
+    - Updates bot presence on-demand when meetings start/stop
     - Displays "Playing Notetaker" status
 
     Note: py-cord does not support full rich presence features like details, state, or timestamps.
@@ -36,9 +36,6 @@ class PresenceManagerService:
         # Track active meetings count
         self._active_meetings_count: int = 0
         self._active_meetings_lock = asyncio.Lock()
-
-        # Background task for presence updates
-        self._presence_update_task: asyncio.Task | None = None
 
     # -------------------------------------------------------------- #
     # Lifecycle Methods
@@ -61,19 +58,8 @@ class PresenceManagerService:
                 f"Initialized meeting count to {self._active_meetings_count} from active sessions"
             )
 
-        # Start background presence update task
-        self._presence_update_task = asyncio.create_task(self._presence_update_loop())
-
     async def on_close(self) -> bool:
         """Stop the Presence Manager Service."""
-        # Cancel presence update task
-        if self._presence_update_task:
-            self._presence_update_task.cancel()
-            try:
-                await self._presence_update_task
-            except asyncio.CancelledError:
-                pass
-
         if self.services:
             await self.services.logging_service.info("Presence Manager Service stopped")
 
@@ -83,32 +69,6 @@ class PresenceManagerService:
     # Meeting Tracking Methods
     # -------------------------------------------------------------- #
 
-    async def increment_meeting_count(self) -> None:
-        """Increment the active meetings count."""
-        async with self._active_meetings_lock:
-            self._active_meetings_count += 1
-
-        if self.services:
-            await self.services.logging_service.info(
-                f"Meeting count incremented to {self._active_meetings_count}"
-            )
-
-        # Trigger immediate presence update
-        await self._update_presence()
-
-    async def decrement_meeting_count(self) -> None:
-        """Decrement the active meetings count."""
-        async with self._active_meetings_lock:
-            self._active_meetings_count = max(0, self._active_meetings_count - 1)
-
-        if self.services:
-            await self.services.logging_service.info(
-                f"Meeting count decremented to {self._active_meetings_count}"
-            )
-
-        # Trigger immediate presence update
-        await self._update_presence()
-
     async def get_meeting_count(self) -> int:
         """Get the current active meetings count."""
         async with self._active_meetings_lock:
@@ -117,21 +77,6 @@ class PresenceManagerService:
     # -------------------------------------------------------------- #
     # Presence Update Methods
     # -------------------------------------------------------------- #
-
-    async def _presence_update_loop(self) -> None:
-        """Background task that updates presence every 1 minute."""
-        await asyncio.sleep(5)  # Initial delay to let bot fully start
-
-        while True:
-            try:
-                await self._update_presence()
-                await asyncio.sleep(60)  # Update every 1 minute
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                if self.services:
-                    await self.services.logging_service.error(f"Error in presence update loop: {e}")
-                await asyncio.sleep(60)  # Continue on error
 
     async def _update_presence(self) -> None:
         """Update the bot's presence with current meeting count."""
