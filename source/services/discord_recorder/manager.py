@@ -1876,8 +1876,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
         # Create embed
         embed = discord.Embed(
-            title=f"Recording Processed: Meeting in `{guild_name}`",
-            description=(f"✅ Your recording has been processed and saved!\n\n"),
+            title=f"**Meeting Finished**: Meeting in `{guild_name}`",
+            description=(f"**✅ Your recording has been processed and saved!**\n\n"),
             color=discord.Color.green(),
         )
 
