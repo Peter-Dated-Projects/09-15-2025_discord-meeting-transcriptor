@@ -1,0 +1,7 @@
+# Requirements for chatbot_v2.py
+# Install with: pip install -r requirements-chatbot.txt
+
+langchain-ollama>=0.1.0
+langchain-core>=0.3.0
+python-dotenv>=1.0.0
+openai-harmony>=0.1.0

@@ -92,7 +92,7 @@ def construct_services_manager(
         # DB Interfaces Setup
         # -------------------------------------------------------------- #
 
-        from source.services.recording_sql.manager import SQLRecordingManagerService
+        from source.services.recording_sql_manager.manager import SQLRecordingManagerService
         from source.services.sql_logging.manager import SQLLoggingManagerService
 
         sql_recording_service_manager = SQLRecordingManagerService(context=context)
