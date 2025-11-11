@@ -41,7 +41,11 @@ dotenv.load_dotenv(dotenv_path=".env.local")
 
 # Add your Discord server ID(s) here for instant command registration during development
 # You can find your server ID by right-clicking your server icon with Developer Mode enabled
-DEBUG_GUILD_IDS = [1233459903696208014, 1266931275047108691]  # Example: [123456789012345678]
+DEBUG_GUILD_IDS = [
+    1233459903696208014,
+    1266931275047108691,
+    1235590570773057566,
+]  # Example: [123456789012345678]
 # Leave empty [] for global commands (takes up to 1 hour to register)
 # Or add your guild IDs for instant registration during development
 
