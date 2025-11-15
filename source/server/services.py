@@ -1,7 +1,54 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Any
 
-from .server import BaseSQLServerHandler
+# -------------------------------------------------------------- #
+# Base Server Handler
+# -------------------------------------------------------------- #
+
+
+class BaseServerHandler(ABC):
+    """Abstract base class for all server handlers."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self._connected = False
+
+    # -------------------------------------------------------------- #
+    # Handler Methods
+    # -------------------------------------------------------------- #
+
+    async def on_startup(self) -> None:
+        """Actions to perform on server startup."""
+        pass
+
+    async def on_close(self) -> None:
+        """Actions to perform on server close."""
+        pass
+
+    # -------------------------------------------------------------- #
+    # Abstract Methods
+    # -------------------------------------------------------------- #
+
+    @abstractmethod
+    async def connect(self) -> None:
+        """Establish connection to the server."""
+        pass
+
+    @abstractmethod
+    async def disconnect(self) -> None:
+        """Close connection to the server."""
+        pass
+
+    @abstractmethod
+    async def health_check(self) -> bool:
+        """Check if the server is healthy and responding."""
+        pass
+
+    @property
+    def is_connected(self) -> bool:
+        """Check if currently connected to the server."""
+        return self._connected
+
 
 # -------------------------------------------------------------- #
 # Base Service Structures
@@ -11,7 +58,7 @@ from .server import BaseSQLServerHandler
 # Base SQL Database Handler
 
 
-class SQLDatabase(BaseSQLServerHandler):
+class SQLDatabase(BaseServerHandler):
     """SQL Database server handler."""
 
     def __init__(self, name: str, connection_string: str):
@@ -19,9 +66,21 @@ class SQLDatabase(BaseSQLServerHandler):
         self.connection_string = connection_string
         self.connection = None
 
+    # -------------------------------------------------------------- #
+    # Handler Methods
+    # -------------------------------------------------------------- #
+
+    async def on_startup(self) -> None:
+        await self.create_tables()
+
     # ------------------------------------------------------ #
     # Utils
     # ------------------------------------------------------ #
+
+    @abstractmethod
+    async def create_tables(self) -> None:
+        """Create database tables from models."""
+        pass
 
     @abstractmethod
     def compile_query_object(self, stmt) -> str:
@@ -46,5 +105,52 @@ class SQLDatabase(BaseSQLServerHandler):
 
         Returns:
             List of result rows as dictionaries (empty list for non-SELECT queries)
+        """
+        pass
+
+
+# VectorDB Database Handler
+
+
+class VectorDBDatabase(BaseServerHandler):
+    """VectorDB Database server handler."""
+
+    def __init__(self, name: str, client: Any):
+        super().__init__(name)
+        self.client = client
+
+
+# Whisper Server Handler
+class WhisperServerHandler(BaseServerHandler):
+    """Whisper Server handler."""
+
+    def __init__(self, name: str, endpoint: str):
+        super().__init__(name)
+        self.endpoint = endpoint
+
+    # -------------------------------------------------------------- #
+    # Methods
+    # -------------------------------------------------------------- #
+
+    @abstractmethod
+    async def select_load_model(self, model_path: str) -> None:
+        """
+        Load a Whisper model on the server.
+
+        Args:
+            model_name: Name of the model to load
+        """
+        pass
+
+    @abstractmethod
+    async def inference(self, audio_path: str) -> str:
+        """
+        Perform transcription on the given audio file.
+
+        Args:
+            audio_path: Path to the audio file
+
+        Returns:
+            Transcribed text
         """
         pass

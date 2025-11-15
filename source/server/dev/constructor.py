@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 from source.server.dev.mysql import MySQLServer
 from source.server.server import ServerManager
+from source.server.common import vector_db, whisper_server
 
 load_dotenv(dotenv_path=".env.local")
 
@@ -32,6 +33,27 @@ def load_sql_client() -> MySQLServer:
     return sql_handler
 
 
+def load_vectordb_client():
+    """Load and return the VectorDB client for development."""
+    host = os.getenv("CHROMADB_HOST", "localhost")
+    port = int(os.getenv("CHROMADB_PORT", "8000"))
+
+    # create VectorDB client
+    vector_db_client = vector_db.construct_vector_db_client(host=host, port=port)
+    return vector_db_client
+
+
+def load_whisper_server_client():
+    """Load and return the Whisper server client for development."""
+    host = os.getenv("WHISPER_HOST", "localhost")
+    port = int(os.getenv("WHISPER_PORT", "50021"))
+    endpoint = f"http://{host}:{port}"
+
+    # create Whisper server client
+    whisper_server_client = whisper_server.construct_whisper_server_client(endpoint=endpoint)
+    return whisper_server_client
+
+
 def construct_server_manager(context: "Context") -> ServerManager:
     """
     Construct and return a ServerManager instance.
@@ -42,9 +64,16 @@ def construct_server_manager(context: "Context") -> ServerManager:
     Returns:
         Configured ServerManager instance
     """
-    sql_handler = load_sql_client()
+    sql_client = load_sql_client()
+    vector_db_client = load_vectordb_client()
+    whisper_server_client = load_whisper_server_client()
 
     # create server manager
-    server_manager = ServerManager(context=context, sql_client=sql_handler)
+    server_manager = ServerManager(
+        context=context,
+        sql_client=sql_client,
+        vector_db_client=vector_db_client,
+        whisper_server_client=whisper_server_client,
+    )
 
     return server_manager
