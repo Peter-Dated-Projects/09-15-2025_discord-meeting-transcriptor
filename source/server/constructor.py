@@ -19,7 +19,11 @@ def construct_server_manager(client_type: ServerManagerType, context: "Context")
 
         return construct_server_manager(context)
     elif client_type == ServerManagerType.PRODUCTION:
-        from source.server.constructor import construct_server_manager
+        from source.server.production.constructor import construct_server_manager
+
+        return construct_server_manager(context)
+    elif client_type == ServerManagerType.TESTING:
+        from source.server.testing.constructor import construct_server_manager
 
         return construct_server_manager(context)
 

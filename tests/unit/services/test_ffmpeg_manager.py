@@ -75,10 +75,15 @@ class TestFFmpegHandlerValidation:
 
     def test_validate_ffmpeg_installed(self, ffmpeg_handler_from_services):
         """Test that FFmpeg is properly installed and accessible."""
+        import asyncio
+
         handler = ffmpeg_handler_from_services
 
         # Act: Validate FFmpeg
-        is_valid = handler.validate_ffmpeg()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        is_valid = loop.run_until_complete(handler.validate_ffmpeg())
+        loop.close()
 
         # Assert: FFmpeg should be installed
         if not is_valid:
@@ -88,11 +93,16 @@ class TestFFmpegHandlerValidation:
 
     def test_validate_ffmpeg_not_found(self):
         """Test FFmpeg validation when FFmpeg is not installed."""
+        import asyncio
+
         # Setup: Use a nonexistent FFmpeg path
         handler = FFmpegHandler(None, "/nonexistent/path/to/ffmpeg")
 
         # Act
-        is_valid = handler.validate_ffmpeg()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        is_valid = loop.run_until_complete(handler.validate_ffmpeg())
+        loop.close()
 
         # Assert
         assert is_valid is False
@@ -154,6 +164,8 @@ class TestFFmpegHandlerConversion:
 
     def test_convert_file_with_real_ffmpeg(self, ffmpeg_handler_and_services, tmp_path):
         """Test real file conversion using actual FFmpeg via constructors."""
+        import asyncio
+
         # Setup: Get test audio file
         test_audio_file = os.path.join(
             os.path.dirname(__file__), "..", "..", "assets", "audio-recording-1.m4a"
@@ -165,7 +177,10 @@ class TestFFmpegHandlerConversion:
         handler, _ = ffmpeg_handler_and_services
 
         # Validate FFmpeg is available
-        if not handler.validate_ffmpeg():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        if not loop.run_until_complete(handler.validate_ffmpeg()):
+            loop.close()
             pytest.skip("FFmpeg not installed or not accessible")
 
         output_path = str(tmp_path / "test_output.wav")
@@ -173,7 +188,9 @@ class TestFFmpegHandlerConversion:
 
         try:
             # Act: Convert the file
-            success, stdout, stderr = handler.convert_file(test_audio_file, output_path, options)
+            success, stdout, stderr = loop.run_until_complete(
+                handler.convert_file(test_audio_file, output_path, options)
+            )
 
             # Assert: Conversion should succeed
             assert success is True, f"Conversion failed. stderr: {stderr}"
@@ -186,15 +203,21 @@ class TestFFmpegHandlerConversion:
             assert file_size > 0, "Output file should not be empty"
 
         finally:
+            loop.close()
             # Cleanup: Remove output file if it exists
             if os.path.exists(output_path):
                 os.remove(output_path)
 
     def test_convert_file_with_nonexistent_input(self, ffmpeg_handler_and_services, tmp_path):
         """Test conversion failure with nonexistent input file."""
+        import asyncio
+
         handler, _ = ffmpeg_handler_and_services
 
-        if not handler.validate_ffmpeg():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        if not loop.run_until_complete(handler.validate_ffmpeg()):
+            loop.close()
             pytest.skip("FFmpeg not installed or not accessible")
 
         input_path = str(tmp_path / "nonexistent_file.m4a")
@@ -203,7 +226,9 @@ class TestFFmpegHandlerConversion:
 
         try:
             # Act: Attempt conversion with nonexistent input
-            success, stdout, stderr = handler.convert_file(input_path, output_path, options)
+            success, stdout, stderr = loop.run_until_complete(
+                handler.convert_file(input_path, output_path, options)
+            )
 
             # Assert: Conversion should fail
             assert success is False, "Conversion should fail for nonexistent input file"
@@ -212,12 +237,15 @@ class TestFFmpegHandlerConversion:
             assert not os.path.exists(output_path), "Output file should not be created on failure"
 
         finally:
+            loop.close()
             # Cleanup: Remove output file if it was created despite failure
             if os.path.exists(output_path):
                 os.remove(output_path)
 
     def test_convert_file_with_invalid_output_path(self, ffmpeg_handler_and_services, tmp_path):
         """Test conversion with invalid output directory path."""
+        import asyncio
+
         # Setup: Get test audio file
         test_audio_file = os.path.join(
             os.path.dirname(__file__), "..", "..", "assets", "audio-recording-1.m4a"
@@ -228,7 +256,10 @@ class TestFFmpegHandlerConversion:
 
         handler, _ = ffmpeg_handler_and_services
 
-        if not handler.validate_ffmpeg():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        if not loop.run_until_complete(handler.validate_ffmpeg()):
+            loop.close()
             pytest.skip("FFmpeg not installed or not accessible")
 
         # Use path with nonexistent directories
@@ -237,18 +268,23 @@ class TestFFmpegHandlerConversion:
 
         try:
             # Act: Attempt conversion with invalid output path
-            success, stdout, stderr = handler.convert_file(test_audio_file, output_path, options)
+            success, stdout, stderr = loop.run_until_complete(
+                handler.convert_file(test_audio_file, output_path, options)
+            )
 
             # Assert: Conversion should fail (FFmpeg cannot write to nonexistent directory)
             assert success is False, "Conversion should fail for nonexistent output directory"
 
         finally:
+            loop.close()
             # Cleanup: Try to remove any created files
             if os.path.exists(output_path):
                 os.remove(output_path)
 
     def test_convert_file_preserves_audio_properties(self, ffmpeg_handler_and_services, tmp_path):
         """Test that converted file has the specified audio properties."""
+        import asyncio
+
         # Setup: Get test audio file
         test_audio_file = os.path.join(
             os.path.dirname(__file__), "..", "..", "assets", "audio-recording-1.m4a"
@@ -259,7 +295,10 @@ class TestFFmpegHandlerConversion:
 
         handler, _ = ffmpeg_handler_and_services
 
-        if not handler.validate_ffmpeg():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        if not loop.run_until_complete(handler.validate_ffmpeg()):
+            loop.close()
             pytest.skip("FFmpeg not installed or not accessible")
 
         output_path = str(tmp_path / "test_output_properties.wav")
@@ -268,7 +307,9 @@ class TestFFmpegHandlerConversion:
 
         try:
             # Act: Convert the file
-            success, stdout, stderr = handler.convert_file(test_audio_file, output_path, options)
+            success, stdout, stderr = loop.run_until_complete(
+                handler.convert_file(test_audio_file, output_path, options)
+            )
 
             # Assert: Conversion should succeed
             assert success is True, f"Conversion failed. stderr: {stderr}"
@@ -284,6 +325,7 @@ class TestFFmpegHandlerConversion:
                 assert wav_header == b"RIFF", "Output should be a valid WAV file"
 
         finally:
+            loop.close()
             # Cleanup: Remove output file
             if os.path.exists(output_path):
                 os.remove(output_path)

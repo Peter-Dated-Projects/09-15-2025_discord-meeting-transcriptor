@@ -441,6 +441,100 @@ def cleanup_after_test() -> Generator[None, None, None]:
 
 
 # ============================================================================
+# Testing Environment Fixtures (for unit tests with in-memory databases)
+# ============================================================================
+
+
+@pytest.fixture
+async def test_context():
+    """
+    Create a test context instance.
+
+    This fixture provides a Context instance for testing.
+
+    Yields:
+        Context: Test context instance
+    """
+    from source.context import Context
+
+    context = Context()
+    yield context
+
+
+@pytest.fixture
+async def test_server_manager(test_context):
+    """
+    Create and connect a test server manager with in-memory databases.
+
+    This fixture provides a ServerManager instance with:
+    - In-memory SQLite database (mimics MySQL)
+    - In-memory ChromaDB
+    - Real Whisper server client (uses common implementation)
+
+    Ideal for unit tests that need database access without external dependencies.
+    Note: Whisper server tests will require a running Whisper server or additional mocking.
+
+    Args:
+        test_context: Test context from test_context fixture
+
+    Yields:
+        ServerManager: Connected test server manager instance
+    """
+    from source.constructor import ServerManagerType
+    from source.server.constructor import construct_server_manager
+
+    server = construct_server_manager(ServerManagerType.TESTING, test_context)
+    test_context.set_server_manager(server)
+    await server.connect_all()
+
+    yield server
+
+    await server.disconnect_all()
+
+
+@pytest.fixture
+async def test_sql_client(test_server_manager):
+    """
+    Get the in-memory SQL client from test server manager.
+
+    Args:
+        test_server_manager: Test server manager fixture
+
+    Yields:
+        InMemoryMySQLServer: In-memory SQL database client
+    """
+    yield test_server_manager.sql_client
+
+
+@pytest.fixture
+async def test_vector_db_client(test_server_manager):
+    """
+    Get the in-memory ChromaDB client from test server manager.
+
+    Args:
+        test_server_manager: Test server manager fixture
+
+    Yields:
+        InMemoryChromaDBClient: In-memory vector database client
+    """
+    yield test_server_manager.vector_db_client
+
+
+@pytest.fixture
+async def test_whisper_client(test_server_manager):
+    """
+    Get the Whisper server client from test server manager.
+
+    Args:
+        test_server_manager: Test server manager fixture
+
+    Yields:
+        WhisperServerClient: Whisper server client (uses common implementation)
+    """
+    yield test_server_manager.whisper_server_client
+
+
+# ============================================================================
 # Shared Server and Services Fixtures (for integration tests)
 # ============================================================================
 
