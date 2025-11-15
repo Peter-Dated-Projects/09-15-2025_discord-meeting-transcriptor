@@ -24,6 +24,7 @@ def construct_services_manager(
     context: "Context",
     storage_path: str,
     recording_storage_path: str,
+    transcription_storage_path: str,
     default_logging_path: str = "logs",
     log_file: str | None = None,
     use_timestamp_logs: bool = True,
@@ -35,6 +36,7 @@ def construct_services_manager(
         context: Context instance containing server and services
         storage_path: Path for general file storage
         recording_storage_path: Path for recording file storage
+        transcription_storage_path: Path for transcription JSON file storage
         default_logging_path: Directory to store log files (default: "logs")
         log_file: Specific log file name (optional, overrides use_timestamp_logs)
         use_timestamp_logs: If True and log_file is None, creates timestamped log files (default: True)
@@ -72,10 +74,16 @@ def construct_services_manager(
         from source.services.recording_file_manager.manager import (
             RecordingFileManagerService,
         )
+        from source.services.transcription_file_manager.manager import (
+            TranscriptionFileManagerService,
+        )
 
         file_service_manager = FileManagerService(context=context, storage_path=storage_path)
         recording_file_service_manager = RecordingFileManagerService(
             context=context, recording_storage_path=recording_storage_path
+        )
+        transcription_file_service_manager = TranscriptionFileManagerService(
+            context=context, transcription_storage_path=transcription_storage_path
         )
 
         # Decide ffmpeg binary path based on environment and platform

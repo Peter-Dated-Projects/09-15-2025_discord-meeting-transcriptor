@@ -183,6 +183,9 @@ async def main():
 
     storage_path = os.path.join("assets", "data")
     recording_storage_path = os.path.join(storage_path, "recordings")
+    transcription_storage_path = os.getenv(
+        "TRANSCRIPTION_STORAGE_PATH", "assets/data/transcriptions"
+    )
 
     # Use the same log file that was created for built-in logging
     services_manager = construct_services_manager(
@@ -190,6 +193,7 @@ async def main():
         context=context,
         storage_path=storage_path,
         recording_storage_path=recording_storage_path,
+        transcription_storage_path=transcription_storage_path,
         log_file=log_file.name,  # Use the same log file
     )
     context.set_services_manager(services_manager)

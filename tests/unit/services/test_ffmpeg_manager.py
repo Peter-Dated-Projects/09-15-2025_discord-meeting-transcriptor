@@ -26,23 +26,30 @@ class TestFFmpegHandlerValidation:
         import asyncio
 
         from source.constructor import ServerManagerType
+        from source.context import Context
         from source.server.constructor import construct_server_manager
         from source.services.constructor import construct_services_manager
 
         async def setup():
+            # Create context
+            context = Context()
+
             # Create server manager
-            server_manager = construct_server_manager(ServerManagerType.DEVELOPMENT)
+            server_manager = construct_server_manager(ServerManagerType.DEVELOPMENT, context)
+            context.set_server_manager(server_manager)
             await server_manager.connect_all()
 
             # Create services manager
             storage_path = str(tmp_path / "data")
             recording_storage_path = str(tmp_path / "data" / "recordings")
+            transcription_storage_path = str(tmp_path / "data" / "transcriptions")
 
             services_manager = construct_services_manager(
                 ServerManagerType.DEVELOPMENT,
-                server=server_manager,
+                context=context,
                 storage_path=storage_path,
                 recording_storage_path=recording_storage_path,
+                transcription_storage_path=transcription_storage_path,
             )
             await services_manager.initialize_all()
 
@@ -101,23 +108,30 @@ class TestFFmpegHandlerConversion:
         import asyncio
 
         from source.constructor import ServerManagerType
+        from source.context import Context
         from source.server.constructor import construct_server_manager
         from source.services.constructor import construct_services_manager
 
         async def setup():
+            # Create context
+            context = Context()
+
             # Create server manager (same as playground.py)
-            server_manager = construct_server_manager(ServerManagerType.DEVELOPMENT)
+            server_manager = construct_server_manager(ServerManagerType.DEVELOPMENT, context)
+            context.set_server_manager(server_manager)
             await server_manager.connect_all()
 
             # Create services manager (same as playground.py)
             storage_path = str(tmp_path / "data")
             recording_storage_path = str(tmp_path / "data" / "recordings")
+            transcription_storage_path = str(tmp_path / "data" / "transcriptions")
 
             services_manager = construct_services_manager(
                 ServerManagerType.DEVELOPMENT,
-                server=server_manager,
+                context=context,
                 storage_path=storage_path,
                 recording_storage_path=recording_storage_path,
+                transcription_storage_path=transcription_storage_path,
             )
             await services_manager.initialize_all()
 
