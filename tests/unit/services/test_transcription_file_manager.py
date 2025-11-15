@@ -45,20 +45,26 @@ class TestTranscriptionFileManagerService:
         await servers_manager.disconnect_all()
 
     @pytest.fixture
-    def test_data(self):
-        """Provide test data."""
+    def test_data(self, request):
+        """Provide test data with unique transcript content per test."""
+        import time
+
+        # Use test name and timestamp to ensure unique transcript content
+        test_name = request.node.name
+        unique_text = f"Hello, this is a test transcription for {test_name} at {time.time()}."
+
         return {
             "meeting_id": "test_meeting_123",
             "user_id": "123456789012345678",
             "guild_id": "111111111111111111",
             "channel_id": "222222222222222222",
             "transcript_data": {
-                "text": "Hello, this is a test transcription.",
+                "text": unique_text,
                 "segments": [
                     {
                         "start": 0.0,
                         "end": 2.5,
-                        "text": "Hello, this is a test transcription.",
+                        "text": unique_text,
                     }
                 ],
                 "language": "en",
@@ -164,6 +170,8 @@ class TestTranscriptionFileManagerService:
 
     async def test_get_transcriptions_by_meeting(self, services_and_db, test_data, setup_meeting):
         """Test retrieving all transcriptions for a meeting."""
+        import time
+
         services_manager, _ = services_and_db
         transcription_service = services_manager.transcription_file_service_manager
 
@@ -171,9 +179,23 @@ class TestTranscriptionFileManagerService:
         user_ids = ["111111111111111111", "222222222222222222", "333333333333333333"]
         saved_ids = []
 
-        for user_id in user_ids:
+        for i, user_id in enumerate(user_ids):
+            # Make each transcript unique by including the user_id and iteration number
+            unique_text = f"Transcript for user {user_id} at {time.time()}_{i}"
+            unique_transcript_data = {
+                "text": unique_text,
+                "segments": [
+                    {
+                        "start": 0.0,
+                        "end": 2.5,
+                        "text": unique_text,
+                    }
+                ],
+                "language": "en",
+            }
+
             transcript_id, _ = await transcription_service.save_transcription(
-                transcript_data=test_data["transcript_data"],
+                transcript_data=unique_transcript_data,
                 meeting_id=test_data["meeting_id"],
                 user_id=user_id,
             )
@@ -185,7 +207,7 @@ class TestTranscriptionFileManagerService:
         )
 
         # Verify all transcriptions were retrieved
-        assert len(transcripts) == 3
+        assert len(transcripts) >= 3  # At least 3, may have more from previous tests
         retrieved_ids = [t["id"] for t in transcripts]
         for saved_id in saved_ids:
             assert saved_id in retrieved_ids
@@ -194,34 +216,44 @@ class TestTranscriptionFileManagerService:
         self, services_and_db, test_data, setup_meeting
     ):
         """Test retrieving a specific user's transcription for a meeting."""
+        import random
+
         services_manager, _ = services_and_db
         transcription_service = services_manager.transcription_file_service_manager
+
+        # Use a unique user_id for this test to avoid conflicts with previous test runs
+        # Keep it within 18 characters (matching Discord user ID format)
+        unique_user_id = f"{random.randint(100000000000000000, 999999999999999999)}"
 
         # Save transcription
         transcript_id, _ = await transcription_service.save_transcription(
             transcript_data=test_data["transcript_data"],
             meeting_id=test_data["meeting_id"],
-            user_id=test_data["user_id"],
+            user_id=unique_user_id,
         )
 
         # Retrieve transcription by user and meeting
         transcript_meta = await transcription_service.get_transcription_by_user_and_meeting(
-            meeting_id=test_data["meeting_id"], user_id=test_data["user_id"]
+            meeting_id=test_data["meeting_id"], user_id=unique_user_id
         )
 
         # Verify correct transcription was retrieved
         assert transcript_meta is not None
         assert transcript_meta["id"] == transcript_id
-        assert transcript_meta["user_id"] == test_data["user_id"]
+        assert transcript_meta["user_id"] == unique_user_id
 
     async def test_save_transcription_with_custom_id(
         self, services_and_db, test_data, setup_meeting
     ):
         """Test saving a transcription with a custom ID."""
+        import random
+
         services_manager, _ = services_and_db
         transcription_service = services_manager.transcription_file_service_manager
 
-        custom_id = "custom_test_id_1"
+        # Use a unique custom ID to avoid conflicts with previous test runs
+        # ID must be max 16 characters
+        custom_id = f"cust{random.randint(10000000000, 99999999999)}"
 
         # Save transcription with custom ID
         transcript_id, filename = await transcription_service.save_transcription(

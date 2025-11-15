@@ -13,7 +13,7 @@ from source.constructor import ServerManagerType
 from source.server.constructor import construct_server_manager
 from source.server.sql_models import MeetingStatus
 from source.services.constructor import construct_services_manager
-from source.services.recording_sql.manager import SQLRecordingManagerService
+from source.services.recording_sql_manager.manager import SQLRecordingManagerService
 from source.utils import generate_16_char_uuid, get_current_timestamp_est
 
 
