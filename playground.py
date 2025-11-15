@@ -24,19 +24,28 @@ async def main():
     print("=" * 60)
 
     # Initialize server manager
-    servers_manager = construct_server_manager(ServerManagerType.DEVELOPMENT)
+    from source.context import Context
+
+    context = Context()
+
+    servers_manager = construct_server_manager(ServerManagerType.DEVELOPMENT, context)
+    context.set_server_manager(servers_manager)
     await servers_manager.connect_all()
     print("✓ Connected all servers")
 
     # Initialize services manager
     storage_path = os.path.join("assets", "data")
     recording_storage_path = os.path.join(storage_path, "recordings")
+    transcription_storage_path = os.getenv(
+        "TRANSCRIPTION_STORAGE_PATH", "assets/data/transcriptions"
+    )
 
     services_manager = construct_services_manager(
         ServerManagerType.DEVELOPMENT,
-        server=servers_manager,
+        context=context,
         storage_path=storage_path,
         recording_storage_path=recording_storage_path,
+        transcription_storage_path=transcription_storage_path,
     )
     await services_manager.initialize_all()
     print("✓ Initialized all services")

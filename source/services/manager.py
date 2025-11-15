@@ -59,6 +59,7 @@ class ServicesManager:
         # Services managers
         await self.file_service_manager.on_start(self)
         await self.recording_file_service_manager.on_start(self)
+        await self.transcription_file_service_manager.on_start(self)
         await self.ffmpeg_service_manager.on_start(self)
 
         # DB interfaces
@@ -71,9 +72,6 @@ class ServicesManager:
         # Presence manager
         if self.presence_manager_service:
             await self.presence_manager_service.on_start(self)
-
-        # TODO - need to create
-        # await self.transcription_file_service_manager.on_start(self)
 
 
 # -------------------------------------------------------------- #

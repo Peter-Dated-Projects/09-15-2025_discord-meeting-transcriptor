@@ -24,19 +24,27 @@ class TestSQLRecordingManagerService:
     @pytest.fixture
     async def services_and_db(self, tmp_path):
         """Setup services and database for testing."""
+        from source.context import Context
+
+        # Create context
+        context = Context()
+
         # Initialize server manager
-        servers_manager = construct_server_manager(ServerManagerType.DEVELOPMENT)
+        servers_manager = construct_server_manager(ServerManagerType.DEVELOPMENT, context)
+        context.set_server_manager(servers_manager)
         await servers_manager.connect_all()
 
         # Initialize services manager
         storage_path = os.path.join(str(tmp_path), "data")
         recording_storage_path = os.path.join(storage_path, "recordings")
+        transcription_storage_path = os.path.join(storage_path, "transcriptions")
 
         services_manager = construct_services_manager(
             ServerManagerType.DEVELOPMENT,
-            server=servers_manager,
+            context=context,
             storage_path=storage_path,
             recording_storage_path=recording_storage_path,
+            transcription_storage_path=transcription_storage_path,
         )
         await services_manager.initialize_all()
 

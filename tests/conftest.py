@@ -473,6 +473,7 @@ async def server_manager(_test_environment: str):
         ServerManager: Connected server manager instance
     """
     from source.constructor import ServerManagerType
+    from source.context import Context
     from source.server.constructor import construct_server_manager
 
     # Map test environment to ServerManagerType
@@ -482,7 +483,11 @@ async def server_manager(_test_environment: str):
         else ServerManagerType.PRODUCTION
     )
 
-    server = construct_server_manager(server_type)
+    # Create context
+    context = Context()
+
+    server = construct_server_manager(server_type, context)
+    context.set_server_manager(server)
     await server.connect_all()
 
     yield server
@@ -512,6 +517,7 @@ async def services_manager(server_manager, tmp_path):
     # Create temporary storage paths
     storage_path = str(tmp_path / "data")
     recording_storage_path = str(tmp_path / "data" / "recordings")
+    transcription_storage_path = str(tmp_path / "data" / "transcriptions")
 
     # Determine server type from server_manager
     # This is a bit of a hack, but it works for both dev and prod
@@ -521,11 +527,15 @@ async def services_manager(server_manager, tmp_path):
         else ServerManagerType.PRODUCTION
     )
 
+    # Get context from server_manager
+    context = server_manager.context
+
     services = construct_services_manager(
         service_type=server_type,
-        server=server_manager,
+        context=context,
         storage_path=storage_path,
         recording_storage_path=recording_storage_path,
+        transcription_storage_path=transcription_storage_path,
     )
 
     await services.initialize_all()
