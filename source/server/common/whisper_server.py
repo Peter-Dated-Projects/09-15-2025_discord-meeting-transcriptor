@@ -103,13 +103,23 @@ class WhisperServerClient(WhisperServerHandler):
             logger.error(f"Failed to load model: {e}")
             raise
 
-    async def inference(self, audio_path: str, **kwargs) -> str:
+    async def inference(
+        self,
+        audio_path: str,
+        word_timestamps=True,
+        response_format="verbose_json",
+        temperature="0.1",
+        temperature_inc="0.1",
+        language="en",
+    ) -> str:
         """
         Perform transcription on the given audio file.
 
         Args:
             audio_path: Path to the audio file
-            **kwargs: Additional whisper params (temperature, response_format, etc.)
+            word_timestamps: Whether to include word-level timestamps
+            response_format: Format of the response (e.g., "verbose_json", "json", "text")
+            temperature: Sampling temperature for the model
 
         Returns:
             Transcribed text
@@ -118,8 +128,7 @@ class WhisperServerClient(WhisperServerHandler):
             raise RuntimeError("Not connected to Whisper server")
 
         # Default to JSON so we can safely parse it
-        response_format = kwargs.get("response_format", "json")
-        kwargs["response_format"] = response_format
+        response_format = response_format or "json"
 
         data = aiohttp.FormData()
         f = open(audio_path, "rb")  # Keep open until request is done
@@ -127,7 +136,13 @@ class WhisperServerClient(WhisperServerHandler):
             data.add_field("file", f, filename=os.path.basename(audio_path))
 
             # Add optional parameters
-            for key, value in kwargs.items():
+            for key, value in {
+                "word_timestamps": word_timestamps,
+                "response_format": response_format,
+                "temperature": temperature,
+                "temperature_inc": temperature_inc,
+                "language": language,
+            }.items():
                 data.add_field(key, str(value))
 
             async with self.session.post(f"{self.endpoint}/inference", data=data) as response:

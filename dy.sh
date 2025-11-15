@@ -372,8 +372,20 @@ case "${1:-}" in
     status)
         show_status
         ;;
+    logs)
+        echo -e "${BLUE}=== Service Logs ===${NC}"
+        echo -e "\n${BLUE}Available log files in $LOGS_DIR:${NC}"
+        if [ -d "$LOGS_DIR" ]; then
+            ls -lh "$LOGS_DIR"
+        else
+            echo -e "${YELLOW}Logs directory not found${NC}"
+        fi
+        echo -e "\n${BLUE}Docker service logs:${NC}"
+        echo -e "Use: ${GREEN}docker compose -f $DOCKER_COMPOSE_FILE logs [service_name]${NC}"
+        echo -e "Services: mysql, chromadb"
+        ;;
     *)
-        echo "Usage: $0 {up|down|restart|destroy|status}"
+        echo "Usage: $0 {up|down|restart|destroy|status|logs}"
         echo ""
         echo "Commands:"
         echo "  up      - Start all services (Docker, Ollama & Whisper)"
@@ -381,6 +393,7 @@ case "${1:-}" in
         echo "  restart - Restart all services"
         echo "  destroy - Stop and remove all Docker containers"
         echo "  status  - Show service status"
+        echo "  logs    - Show log file locations"
         exit 1
         ;;
 esac

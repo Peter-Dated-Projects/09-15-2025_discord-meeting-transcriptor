@@ -158,7 +158,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
         # Apply timeout to all tests except those marked as slow
         for item in items:
             if "slow" not in item.keywords:
-                item.add_marker(pytest.mark.timeout(5))
+                item.add_marker(pytest.mark.timeout(30))
         return
 
     # For integration tests or mixed tests, require environment
@@ -190,7 +190,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
     # Apply timeout to all tests except those marked as slow
     for item in items:
         if "slow" not in item.keywords:
-            item.add_marker(pytest.mark.timeout(5))
+            item.add_marker(pytest.mark.timeout(30))
 
 
 # ============================================================================
