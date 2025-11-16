@@ -268,16 +268,19 @@ class DiscordSessionHandler:
             with suppress(asyncio.CancelledError):
                 await self._flush_task
 
-        # Stop Pycord recording
-        if self.discord_voice_client.recording:
-            self.discord_voice_client.stop_recording()
-
         # Only extract and flush if we weren't paused
         # (when paused, audio has already been flushed to temp files)
         if not was_paused:
-            # Extract any final audio data from sink before flushing
+            # IMPORTANT: Extract audio BEFORE stopping Pycord recording
+            # Stopping the Discord recording might clear the sink, so we must extract first
             await self._extract_user_audio_from_sink()
 
+        # Stop Pycord recording (do this AFTER extraction to preserve sink data)
+        if self.discord_voice_client.recording:
+            self.discord_voice_client.stop_recording()
+
+        # Continue with flush if not paused
+        if not was_paused:
             # Final flush of any remaining data for ALL users (regardless of buffer length)
             await self._flush_all_users(force=True)
 
@@ -1698,6 +1701,10 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Timeout waiting for transcodes on meeting {meeting_id}"
                 )
 
+            # Add a small delay to ensure file system operations complete
+            # FFmpeg may have updated the status but file might still be flushing to disk
+            await asyncio.sleep(0.5)
+
             # Update meeting status to PROCESSING (transcoding is done, but not persistent recordings yet)
             from source.server.sql_models import MeetingStatus
 
@@ -1715,12 +1722,24 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         # Cleanup session
         del self.sessions[channel_id]
 
-        # Process recordings in background
-        asyncio.create_task(
+        # Process recordings in background with proper exception handling
+        task = asyncio.create_task(
             self._process_recordings_post_stop(
                 meeting_id=meeting_id,
             )
         )
+        
+        # Add done callback to catch exceptions
+        def handle_task_exception(t: asyncio.Task) -> None:
+            try:
+                t.result()  # This will raise any exception that occurred
+            except Exception as e:
+                # Log synchronously since this is a callback
+                import traceback
+                print(f"ERROR: Exception in _process_recordings_post_stop: {e}")
+                print(traceback.format_exc())
+        
+        task.add_done_callback(handle_task_exception)
 
         await self.services.logging_service.info(f"Stopped recording in channel {channel_id}")
         return True
@@ -2060,8 +2079,10 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                         )
 
             if not mp3_files:
-                await self.services.logging_service.warning(
-                    f"No MP3 files found for user {user_id} in meeting {meeting_id}"
+                await self.services.logging_service.error(
+                    f"No MP3 files found for user {user_id} in meeting {meeting_id}. "
+                    f"Temp recordings exist ({len(recordings)} total) but MP3 transcoding may have failed. "
+                    f"Check transcode_status in temp_recordings table."
                 )
                 return False
 
@@ -2167,7 +2188,11 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
             if not temp_recordings:
                 await self.services.logging_service.warning(
-                    f"No temp recordings found for meeting {meeting_id}"
+                    f"No temp recordings found for meeting {meeting_id}. "
+                    f"This may indicate that: (1) no users spoke during the recording, "
+                    f"(2) the recording was stopped before any audio was captured, "
+                    f"or (3) temp recording creation failed during flush. "
+                    f"Check earlier logs for flush cycle and temp recording insertion messages."
                 )
                 return
 
@@ -2207,8 +2232,10 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
         except Exception as e:
             await self.services.logging_service.error(
-                f"Error in post-stop processing for meeting {meeting_id}: {e}"
+                f"Error in post-stop processing for meeting {meeting_id}: {type(e).__name__}: {str(e)}"
             )
+            # Re-raise to ensure the exception is caught by the task done callback
+            raise
 
     async def _concatenate_mp3_files(
         self,

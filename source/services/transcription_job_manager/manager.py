@@ -130,7 +130,7 @@ class TranscriptionJob(Job):
                 "meeting_id": self.meeting_id,
                 "user_id": user_id,
                 "recording_id": recording_id,
-                "text": transcript_text,
+                "whisper_data": transcript_text,
                 "created_at": get_current_timestamp_est().isoformat(),
             }
 
