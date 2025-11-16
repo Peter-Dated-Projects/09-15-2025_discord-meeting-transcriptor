@@ -1318,6 +1318,10 @@ class DiscordSessionHandler:
 
         # Define callback to update SQL status
         async def on_transcode_complete(success: bool) -> None:
+            # Skip database operations during shutdown
+            if self.context.is_shutting_down():
+                return
+
             if not self.services.sql_recording_service_manager or not temp_recording_id:
                 return
 
@@ -1513,6 +1517,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         self.sessions: dict[int, DiscordSessionHandler] = {}
         self._cleanup_task: asyncio.Task | None = None
         self._monitor_task: asyncio.Task | None = None
+        self._processing_tasks: set[asyncio.Task] = set()  # Track background processing tasks
 
     # -------------------------------------------------------------- #
     # Discord Recorder Manager Methods
@@ -1535,6 +1540,25 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         # Stop all active sessions
         for channel_id in list(self.sessions.keys()):
             await self.stop_session(channel_id)
+
+        # Wait for all background processing tasks to complete
+        if self._processing_tasks:
+            await self.services.logging_service.info(
+                f"Waiting for {len(self._processing_tasks)} background recording processing task(s) to complete..."
+            )
+            # Gather all tasks, catching exceptions to ensure we don't fail shutdown
+            results = await asyncio.gather(*self._processing_tasks, return_exceptions=True)
+
+            # Log any exceptions that occurred
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    await self.services.logging_service.error(
+                        f"Background processing task {i+1} failed during shutdown: {result}"
+                    )
+
+            await self.services.logging_service.info(
+                "All background recording processing tasks completed"
+            )
 
         # Cancel cleanup task
         if self._cleanup_task:
@@ -1729,7 +1753,10 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             )
         )
 
-        # Add done callback to catch exceptions
+        # Track the task for graceful shutdown
+        self._processing_tasks.add(task)
+
+        # Add done callback to catch exceptions and clean up tracking
         def handle_task_exception(t: asyncio.Task) -> None:
             try:
                 t.result()  # This will raise any exception that occurred
@@ -1739,6 +1766,9 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
                 print(f"ERROR: Exception in _process_recordings_post_stop: {e}")
                 print(traceback.format_exc())
+            finally:
+                # Remove from tracking set when done
+                self._processing_tasks.discard(t)
 
         task.add_done_callback(handle_task_exception)
 
@@ -2173,6 +2203,13 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             meeting_id: Meeting ID for the recording session
         """
         try:
+            # Check if shutdown is in progress before starting
+            if self.context.is_shutting_down():
+                await self.services.logging_service.warning(
+                    f"Shutdown in progress, skipping post-stop processing for meeting {meeting_id}"
+                )
+                return
+
             await self.services.logging_service.info(
                 f"Starting post-stop processing for meeting {meeting_id}"
             )
@@ -2198,6 +2235,13 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                 f"Retrieved {len(temp_recordings)} temp recordings for meeting {meeting_id}"
             )
 
+            # Check shutdown before heavy processing
+            if self.context.is_shutting_down():
+                await self.services.logging_service.warning(
+                    f"Shutdown detected during post-stop processing for meeting {meeting_id}, halting"
+                )
+                return
+
             # Group temp recordings by user
             user_recordings = {}
             for recording in temp_recordings:
@@ -2212,6 +2256,13 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
             # Process each user's recordings
             for rec_user_id, recordings in user_recordings.items():
+                # Check shutdown before each user processing
+                if self.context.is_shutting_down():
+                    await self.services.logging_service.warning(
+                        f"Shutdown detected, halting remaining user processing for meeting {meeting_id}"
+                    )
+                    return
+
                 await self._process_user_recordings(
                     user_id=rec_user_id,
                     recordings=recordings,
@@ -2221,6 +2272,13 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             await self.services.logging_service.info(
                 f"Completed post-stop processing for meeting {meeting_id}"
             )
+
+            # Check shutdown before creating transcription job
+            if self.context.is_shutting_down():
+                await self.services.logging_service.warning(
+                    f"Shutdown detected, skipping transcription job creation for meeting {meeting_id}"
+                )
+                return
 
             # Now that all persistent recordings are created, trigger transcription job
             if self.services.sql_recording_service_manager:
