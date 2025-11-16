@@ -35,9 +35,14 @@ def load_vectordb_client() -> InMemoryChromaDBClient:
 
 def load_whisper_server_client():
     """Load and return the Whisper server client for testing."""
-    host = os.getenv("WHISPER_HOST", "localhost")
-    port = int(os.getenv("WHISPER_PORT", "50021"))
-    endpoint = f"http://{host}:{port}"
+    # Use Flask microservice endpoint instead of direct whisper-server
+    endpoint = os.getenv("WHISPER_FLASK_ENDPOINT")
+
+    # Fallback to direct whisper-server if Flask endpoint not configured
+    if not endpoint:
+        host = os.getenv("WHISPER_HOST", "localhost")
+        port = int(os.getenv("WHISPER_PORT", "50021"))
+        endpoint = f"http://{host}:{port}"
 
     # create Whisper server client using common implementation
     whisper_server_client = whisper_server.construct_whisper_server_client(endpoint=endpoint)

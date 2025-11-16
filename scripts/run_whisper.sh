@@ -2,6 +2,10 @@
 
 # Script to run Whisper server
 # Loads environment variables from .env.local and starts the Whisper server
+#
+# NOTE: For production use, consider using the Flask microservice instead:
+#   cd whisper_wrapper && python main.py
+# This script is primarily for manual debugging and testing.
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

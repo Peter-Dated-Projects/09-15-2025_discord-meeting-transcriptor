@@ -1,0 +1,6 @@
+# Whisper Flask Microservice Requirements
+# This microservice wraps whisper-server with a simple REST API
+
+flask>=3.1.0
+requests>=2.32.0
+python-dotenv>=1.0.0

@@ -192,77 +192,44 @@ start_ollama() {
     fi
 }
 
-# Function to start Whisper server
+# Function to start Whisper Flask microservice
 start_whisper() {
-    echo -e "${BLUE}Starting Whisper server...${NC}"
+    echo -e "${BLUE}Starting Whisper Flask microservice...${NC}"
     
     if is_running "$WHISPER_PID_FILE"; then
-        echo -e "${YELLOW}Whisper is already running (PID: $(cat $WHISPER_PID_FILE))${NC}"
+        echo -e "${YELLOW}Whisper service is already running (PID: $(cat $WHISPER_PID_FILE))${NC}"
         return 0
     fi
     
-    # Detect OS and set appropriate path
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        WHISPER_PATH="${MAC_WHISPER_SERVER_PATH:-assets/binaries/whisper/whisper-server}"
-    elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
-        WHISPER_PATH="${WINDOWS_WHISPER_SERVER_PATH:-assets/binaries/whisper/whisper-server.exe}"
-    else
-        WHISPER_PATH="${MAC_WHISPER_SERVER_PATH:-assets/binaries/whisper/whisper-server}"
-    fi
-    
-    # Convert to absolute path
-    WHISPER_PATH="$PROJECT_ROOT/$WHISPER_PATH"
-    
-    # Check if whisper server exists
-    if [ ! -f "$WHISPER_PATH" ]; then
-        echo -e "${RED}✗ Whisper server binary not found at $WHISPER_PATH${NC}"
+    # Check if run script exists
+    RUN_SCRIPT="$PROJECT_ROOT/scripts/run_whisper_service.sh"
+    if [ ! -f "$RUN_SCRIPT" ]; then
+        echo -e "${RED}✗ Whisper service run script not found at $RUN_SCRIPT${NC}"
         return 1
     fi
     
-    # Make executable on Unix-like systems
-    if [[ "$OSTYPE" != "msys" && "$OSTYPE" != "cygwin" && "$OSTYPE" != "win32" ]]; then
-        chmod +x "$WHISPER_PATH"
-    fi
-    
-    # Set paths from environment
-    MODEL_PATH="${WHISPER_MODEL_PATH:-assets/models/ggml-large-v2.bin}"
-    if [[ "$MODEL_PATH" != /* ]]; then
-        MODEL_PATH="$PROJECT_ROOT/$MODEL_PATH"
-    fi
-    
-    PUBLIC_PATH="${WHISPER_PUBLIC_PATH:-./}"
-    if [[ "$PUBLIC_PATH" != /* ]]; then
-        PUBLIC_PATH="$PROJECT_ROOT/$PUBLIC_PATH"
-    fi
-    
-    WHISPER_HOST="${WHISPER_HOST:-localhost}"
-    WHISPER_PORT="${WHISPER_PORT:-50021}"
-    
-    # Check if model exists
-    if [ ! -f "$MODEL_PATH" ]; then
-        echo -e "${YELLOW}Warning: Model file not found at $MODEL_PATH${NC}"
-    fi
-    
-    # Start Whisper in background
-    nohup "$WHISPER_PATH" \
-        --host "$WHISPER_HOST" \
-        --port "$WHISPER_PORT" \
-        --model "$MODEL_PATH" \
-        --public "$PUBLIC_PATH" \
-        --convert > "$WHISPER_LOG" 2>&1 &
+    # Start Flask microservice in background using the run script
+    nohup "$RUN_SCRIPT" --background > "$WHISPER_LOG" 2>&1 &
     local pid=$!
     echo $pid > "$WHISPER_PID_FILE"
     
-    sleep 2
+    # Wait a moment for service to start
+    sleep 3
     
     if is_running "$WHISPER_PID_FILE"; then
-        echo -e "${GREEN}✓ Whisper server started successfully (PID: $pid)${NC}"
-        echo -e "  Host: ${WHISPER_HOST}:${WHISPER_PORT}"
-        echo -e "  Model: $MODEL_PATH"
+        # Get Flask configuration from environment
+        FLASK_HOST="${FLASK_HOST:-0.0.0.0}"
+        FLASK_PORT="${FLASK_PORT:-5000}"
+        
+        echo -e "${GREEN}✓ Whisper Flask microservice started successfully (PID: $pid)${NC}"
+        echo -e "  API: http://${FLASK_HOST}:${FLASK_PORT}"
+        echo -e "  Health: http://${FLASK_HOST}:${FLASK_PORT}/health"
+        echo -e "  Inference: http://${FLASK_HOST}:${FLASK_PORT}/inference"
         echo -e "  Logs: $WHISPER_LOG"
         return 0
     else
-        echo -e "${RED}✗ Failed to start Whisper server${NC}"
+        echo -e "${RED}✗ Failed to start Whisper Flask microservice${NC}"
+        echo -e "  Check logs at: $WHISPER_LOG"
         return 1
     fi
 }
@@ -311,16 +278,18 @@ show_status() {
     fi
     
     echo -e "\n${BLUE}Native Services:${NC}"
-    echo -n "Ollama:  "
+    echo -n "Ollama:         "
     if is_running "$OLLAMA_PID_FILE"; then
         echo -e "${GREEN}Running${NC} (PID: $(cat $OLLAMA_PID_FILE))"
     else
         echo -e "${RED}Stopped${NC}"
     fi
     
-    echo -n "Whisper: "
+    echo -n "Whisper Flask:  "
     if is_running "$WHISPER_PID_FILE"; then
         echo -e "${GREEN}Running${NC} (PID: $(cat $WHISPER_PID_FILE))"
+        FLASK_PORT="${FLASK_PORT:-5000}"
+        echo -e "                API: http://localhost:${FLASK_PORT}"
     else
         echo -e "${RED}Stopped${NC}"
     fi
@@ -340,7 +309,7 @@ case "${1:-}" in
     down)
         echo -e "${BLUE}=== Stopping All Services ===${NC}"
         stop_service "Ollama" "$OLLAMA_PID_FILE"
-        stop_service "Whisper" "$WHISPER_PID_FILE"
+        stop_service "Whisper Flask" "$WHISPER_PID_FILE"
         echo ""
         stop_docker_services
         echo ""
@@ -349,7 +318,7 @@ case "${1:-}" in
     restart)
         echo -e "${BLUE}=== Restarting All Services ===${NC}"
         stop_service "Ollama" "$OLLAMA_PID_FILE"
-        stop_service "Whisper" "$WHISPER_PID_FILE"
+        stop_service "Whisper Flask" "$WHISPER_PID_FILE"
         stop_docker_services
         echo ""
         sleep 2
@@ -363,7 +332,7 @@ case "${1:-}" in
     destroy)
         echo -e "${BLUE}=== Destroying All Services ===${NC}"
         stop_service "Ollama" "$OLLAMA_PID_FILE"
-        stop_service "Whisper" "$WHISPER_PID_FILE"
+        stop_service "Whisper Flask" "$WHISPER_PID_FILE"
         echo ""
         destroy_docker_services
         echo ""
@@ -388,12 +357,17 @@ case "${1:-}" in
         echo "Usage: $0 {up|down|restart|destroy|status|logs}"
         echo ""
         echo "Commands:"
-        echo "  up      - Start all services (Docker, Ollama & Whisper)"
+        echo "  up      - Start all services (Docker, Ollama & Whisper Flask microservice)"
         echo "  down    - Stop all services (keeps containers)"
         echo "  restart - Restart all services"
         echo "  destroy - Stop and remove all Docker containers"
         echo "  status  - Show service status"
         echo "  logs    - Show log file locations"
+        echo ""
+        echo "Services:"
+        echo "  Docker:         MySQL, ChromaDB (via docker-compose.local.yml)"
+        echo "  Ollama:         LLM service for chat/RAG"
+        echo "  Whisper Flask:  Transcription microservice API"
         exit 1
         ;;
 esac
