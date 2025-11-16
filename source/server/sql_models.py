@@ -26,6 +26,7 @@ class JobsType(enum.Enum):
     TEMP_TRANSCODING = "temp_transcoding"
     TRANSCODING = "transcoding"
     TRANSCRIBING = "transcribing"
+    COMPILING = "compiling"
     CLEANING = "cleaning"
 
 

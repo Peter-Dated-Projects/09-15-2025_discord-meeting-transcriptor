@@ -39,6 +39,7 @@ class TranscriptionJob(Job):
     meeting_id: str = ""
     recording_ids: list[str] = field(default_factory=list)
     user_ids: list[str] = field(default_factory=list)
+    transcript_ids: list[str] = field(default_factory=list)  # Track created transcript IDs
     services: "ServicesManager" = None  # type: ignore
 
     # -------------------------------------------------------------- #
@@ -155,6 +156,9 @@ class TranscriptionJob(Job):
             await self.services.logging_service.info(
                 f"Saved transcription {transcript_id} to {transcript_filename}"
             )
+
+            # Track the transcript ID for compilation
+            self.transcript_ids.append(transcript_id)
 
         except Exception as e:
             await self.services.logging_service.error(
@@ -441,6 +445,23 @@ class TranscriptionJobManagerService(BaseTranscriptionJobManagerService):
                 await self.services.logging_service.error(
                     f"Failed to update meeting {job.meeting_id} status to COMPLETED: {e}"
                 )
+
+        # Trigger compilation job if transcription compilation job manager is available
+        if self.services.transcription_compilation_job_manager and job.transcript_ids:
+            try:
+                await self.services.transcription_compilation_job_manager.create_and_queue_compilation_job(
+                    meeting_id=job.meeting_id,
+                    transcript_ids=job.transcript_ids,
+                    user_ids=job.user_ids,
+                )
+            except Exception as e:
+                await self.services.logging_service.error(
+                    f"Failed to create transcription compilation job for meeting {job.meeting_id}: {e}"
+                )
+        elif not job.transcript_ids:
+            await self.services.logging_service.warning(
+                f"No transcript IDs found for meeting {job.meeting_id}, skipping compilation job"
+            )
 
         # Clean up from active jobs after a delay (keep in memory for status queries)
         # We keep it for a while in case status is queried right after completion
