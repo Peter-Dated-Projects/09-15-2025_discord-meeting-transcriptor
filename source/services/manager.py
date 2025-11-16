@@ -27,6 +27,7 @@ class ServicesManager:
         sql_logging_service_manager: BaseSQLLoggingServiceManager,
         discord_recorder_service_manager: BaseDiscordRecorderServiceManager | None = None,
         presence_manager_service: Any | None = None,
+        transcription_job_manager: Any | None = None,
     ):
         self.context = context
         # Backward compatibility - keep server reference
@@ -50,6 +51,9 @@ class ServicesManager:
         # Presence manager
         self.presence_manager_service = presence_manager_service
 
+        # Transcription job manager
+        self.transcription_job_manager = transcription_job_manager
+
     async def initialize_all(self) -> None:
         """Initialize all service managers."""
 
@@ -72,6 +76,10 @@ class ServicesManager:
         # Presence manager
         if self.presence_manager_service:
             await self.presence_manager_service.on_start(self)
+
+        # Transcription job manager
+        if self.transcription_job_manager:
+            await self.transcription_job_manager.on_start(self)
 
 
 # -------------------------------------------------------------- #

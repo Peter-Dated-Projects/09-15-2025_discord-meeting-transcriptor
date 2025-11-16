@@ -17,6 +17,7 @@ class MeetingStatus(enum.Enum):
     RECORDING = "recording"
     PAUSED = "paused"
     PROCESSING = "processing"
+    TRANSCRIBING = "transcribing"
     CLEANING = "cleaning"
     COMPLETED = "completed"
 

@@ -6,6 +6,9 @@ if TYPE_CHECKING:
     from source.context import Context
 
 from source.server.sql_models import (
+    JobsStatus,
+    JobsStatusModel,
+    JobsType,
     MeetingModel,
     MeetingStatus,
     RecordingModel,
@@ -194,9 +197,7 @@ class SQLRecordingManagerService(Manager):
         Args:
             user_id: Discord User ID of the participant
             meeting_id: Meeting ID (16 chars)
-            start_timestamp_ms: Start timestamp in milliseconds
-            filename: Path to the recording file
-            duration_in_ms: Duration of the recording in milliseconds (default: 0)
+            filename: Path to the recording file (can be full path or just filename)
 
         Returns:
             recording_id: The generated ID for the persistent recording
@@ -213,8 +214,15 @@ class SQLRecordingManagerService(Manager):
         # entry data
         entry_id = generate_16_char_uuid()
         timestamp = get_current_timestamp_est()
+
+        # Calculate SHA256 and duration from the file (needs full path)
         sha256 = await calculate_file_sha256(filename)
         file_duration_ms = calculate_audio_file_duration_ms(filename)
+
+        # Extract just the filename (not full path) for database storage
+        import os
+
+        filename_only = os.path.basename(filename)
 
         recording = RecordingModel(
             id=entry_id,
@@ -222,7 +230,7 @@ class SQLRecordingManagerService(Manager):
             meeting_id=meeting_id,
             created_at=timestamp,
             duration_in_ms=file_duration_ms,
-            filename=filename,
+            filename=filename_only,  # Store only the filename, not full path
             sha256=sha256,
         )
 
@@ -493,12 +501,89 @@ class SQLRecordingManagerService(Manager):
             )
             return MeetingStatus.PROCESSING
         else:
-            # All done
+            # All done - update status to COMPLETED
             await self.update_meeting_status(meeting_id, MeetingStatus.COMPLETED)
             await self.services.logging_service.info(
                 f"Meeting {meeting_id} all transcodes complete - status: COMPLETED"
             )
+
+            # Create transcription job for this meeting
+            await self._create_transcription_job_for_meeting(meeting_id)
+
             return MeetingStatus.COMPLETED
+
+    async def create_transcription_job_for_completed_meeting(self, meeting_id: str) -> None:
+        """
+        Create a transcription job for a completed meeting after persistent recordings are ready.
+
+        This is the public method called after all persistent recordings have been created.
+        It updates the meeting status to TRANSCRIBING and creates the transcription job.
+
+        Args:
+            meeting_id: Meeting ID
+        """
+        try:
+            # Update meeting status to TRANSCRIBING
+            await self.update_meeting_status(meeting_id, MeetingStatus.TRANSCRIBING)
+            await self.services.logging_service.info(
+                f"Meeting {meeting_id} status updated to TRANSCRIBING"
+            )
+
+            # Create the transcription job
+            await self._create_transcription_job_for_meeting(meeting_id)
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to create transcription job for meeting {meeting_id}: {type(e).__name__}: {str(e)}"
+            )
+
+    async def _create_transcription_job_for_meeting(self, meeting_id: str) -> None:
+        """
+        Create a transcription job for a completed meeting.
+
+        This is called automatically when a meeting's status is updated to TRANSCRIBING.
+        It gathers all recordings for the meeting and creates a transcription job.
+
+        Args:
+            meeting_id: Meeting ID
+        """
+        # Check if transcription job manager is available
+        if not self.services.transcription_job_manager:
+            await self.services.logging_service.warning(
+                f"Transcription job manager not available, skipping job creation for meeting {meeting_id}"
+            )
+            return
+
+        try:
+            # Get all persistent recordings for this meeting
+            recordings = await self.get_persistent_recordings_for_meeting(meeting_id)
+
+            if not recordings:
+                await self.services.logging_service.warning(
+                    f"No recordings found for meeting {meeting_id}, skipping transcription job creation"
+                )
+                return
+
+            # Extract recording IDs and user IDs
+            recording_ids = [rec["id"] for rec in recordings]
+            user_ids = list(set(rec["user_id"] for rec in recordings))  # Deduplicate user IDs
+
+            # Create and queue the transcription job
+            job_id = (
+                await self.services.transcription_job_manager.create_and_queue_transcription_job(
+                    meeting_id=meeting_id, recording_ids=recording_ids, user_ids=user_ids
+                )
+            )
+
+            await self.services.logging_service.info(
+                f"Created transcription job {job_id} for meeting {meeting_id} "
+                f"with {len(recording_ids)} recordings from {len(user_ids)} users"
+            )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to create transcription job for meeting {meeting_id}: {type(e).__name__}: {str(e)}"
+            )
 
     async def get_temp_recordings_for_meeting(self, meeting_id: str) -> list[dict]:
         """
@@ -590,6 +675,28 @@ class SQLRecordingManagerService(Manager):
 
         return results
 
+    async def get_recording_by_id(self, recording_id: str) -> dict | None:
+        """
+        Get a specific recording by its ID.
+
+        Args:
+            recording_id: The recording ID
+
+        Returns:
+            Recording dictionary or None if not found
+        """
+        # Validate input
+        if len(recording_id) != 16:
+            raise ValueError("recording_id must be 16 characters long")
+
+        # Build and execute query
+        query = select(RecordingModel).where(RecordingModel.id == recording_id)
+        results = await self.server.sql_client.execute(query)
+
+        return results[0] if results else None
+
+        return results
+
     # -------------------------------------------------------------- #
     # User + Meeting Specific Methods
     # -------------------------------------------------------------- #
@@ -651,3 +758,166 @@ class SQLRecordingManagerService(Manager):
         results = await self.server.sql_client.execute(query)
 
         return results
+
+    # -------------------------------------------------------------- #
+    # Job Status Methods
+    # -------------------------------------------------------------- #
+
+    async def create_job_status(
+        self,
+        job_id: str,
+        job_type: JobsType,
+        meeting_id: str,
+        created_at,
+        status: JobsStatus,
+    ) -> None:
+        """
+        Create a new job status entry.
+
+        Args:
+            job_id: Unique job ID (16 chars)
+            job_type: Type of the job (JobsType enum)
+            meeting_id: Meeting ID (16 chars)
+            created_at: Timestamp when the job was created
+            status: Initial status of the job (JobsStatus enum)
+        """
+        # Validate inputs
+        if len(job_id) != 16:
+            raise ValueError("job_id must be 16 characters long")
+        if len(meeting_id) != MEETING_UUID_LENGTH:
+            raise ValueError(f"meeting_id must be {MEETING_UUID_LENGTH} characters long")
+
+        job_status = JobsStatusModel(
+            id=job_id,
+            type=job_type.value,
+            meeting_id=meeting_id,
+            created_at=created_at,
+            started_at=None,
+            finished_at=None,
+            status=status.value,
+            error_log=None,
+        )
+
+        # Convert to dict for insertion
+        data = {
+            "id": job_status.id,
+            "type": job_status.type,
+            "meeting_id": job_status.meeting_id,
+            "created_at": job_status.created_at,
+            "started_at": job_status.started_at,
+            "finished_at": job_status.finished_at,
+            "status": job_status.status,
+            "error_log": job_status.error_log,
+        }
+
+        # Build and execute insert statement
+        stmt = insert(JobsStatusModel).values(**data)
+        await self.server.sql_client.execute(stmt)
+        await self.services.logging_service.info(
+            f"Created job status entry: {job_id} of type {job_type.value} for meeting {meeting_id}"
+        )
+
+    async def update_job_status(
+        self,
+        job_id: str,
+        status: JobsStatus,
+        started_at=None,
+        finished_at=None,
+        error_log: str | None = None,
+    ) -> None:
+        """
+        Update a job status entry.
+
+        Args:
+            job_id: Unique job ID (16 chars)
+            status: New status of the job (JobsStatus enum)
+            started_at: Optional timestamp when the job started
+            finished_at: Optional timestamp when the job finished
+            error_log: Optional error log information
+        """
+        # Validate input
+        if len(job_id) != 16:
+            raise ValueError("job_id must be 16 characters long")
+
+        # Build update values
+        update_values = {"status": status.value}
+        if started_at is not None:
+            update_values["started_at"] = started_at
+        if finished_at is not None:
+            update_values["finished_at"] = finished_at
+        if error_log is not None:
+            update_values["error_log"] = error_log
+
+        # Build and execute update statement
+        stmt = update(JobsStatusModel).where(JobsStatusModel.id == job_id).values(**update_values)
+
+        await self.server.sql_client.execute(stmt)
+        await self.services.logging_service.debug(f"Updated job status {job_id} to {status.value}")
+
+    async def get_job_status(self, job_id: str) -> dict | None:
+        """
+        Get job status by job ID.
+
+        Args:
+            job_id: Unique job ID (16 chars)
+
+        Returns:
+            Dictionary with job status information or None if not found
+        """
+        # Validate input
+        if len(job_id) != 16:
+            raise ValueError("job_id must be 16 characters long")
+
+        # Build and execute query
+        query = select(JobsStatusModel).where(JobsStatusModel.id == job_id)
+        result = await self.server.sql_client.execute(query)
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        return {
+            "job_id": row.id,
+            "type": row.type,
+            "meeting_id": row.meeting_id,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "started_at": row.started_at.isoformat() if row.started_at else None,
+            "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+            "status": row.status,
+            "error_log": row.error_log,
+        }
+
+    async def get_jobs_for_meeting(self, meeting_id: str) -> list[dict]:
+        """
+        Get all jobs for a specific meeting.
+
+        Args:
+            meeting_id: Meeting ID (16 chars)
+
+        Returns:
+            List of job status dictionaries
+        """
+        # Validate input
+        if len(meeting_id) != MEETING_UUID_LENGTH:
+            raise ValueError(f"meeting_id must be {MEETING_UUID_LENGTH} characters long")
+
+        # Build and execute query
+        query = select(JobsStatusModel).where(JobsStatusModel.meeting_id == meeting_id)
+        results = await self.server.sql_client.execute(query)
+
+        jobs = []
+        for row in results:
+            jobs.append(
+                {
+                    "job_id": row.id,
+                    "type": row.type,
+                    "meeting_id": row.meeting_id,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "started_at": row.started_at.isoformat() if row.started_at else None,
+                    "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+                    "status": row.status,
+                    "error_log": row.error_log,
+                }
+            )
+
+        return jobs

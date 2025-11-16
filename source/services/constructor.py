@@ -50,6 +50,7 @@ def construct_services_manager(
     sql_logging_service_manager = None
     discord_recorder_service_manager = None
     presence_manager_service = None
+    transcription_job_manager = None
 
     # create logger
     logging_service = AsyncLoggingService(
@@ -122,6 +123,16 @@ def construct_services_manager(
 
         presence_manager_service = PresenceManagerService(context=context)
 
+        # -------------------------------------------------------------- #
+        # Transcription Job Manager Setup
+        # -------------------------------------------------------------- #
+
+        from source.services.transcription_job_manager.manager import (
+            TranscriptionJobManagerService,
+        )
+
+        transcription_job_manager = TranscriptionJobManagerService(context=context)
+
     # TODO: https://www.notion.so/DISC-19-create-ffmpeg-service-29c5eca3b9df805a949fdcd5850eaf5a?source=copy_link
     # # create ffmpeg service manager
     # if service_type == ServerManagerType.DEVELOPMENT:
@@ -144,4 +155,5 @@ def construct_services_manager(
         sql_logging_service_manager=sql_logging_service_manager,
         discord_recorder_service_manager=discord_recorder_service_manager,
         presence_manager_service=presence_manager_service,
+        transcription_job_manager=transcription_job_manager,
     )
