@@ -1323,11 +1323,6 @@ class DiscordSessionHandler:
                 temp_recording_id=temp_recording_id, status=new_status
             )
 
-            # Check and update meeting status based on recording state and pending transcodes
-            await self.services.sql_recording_service_manager.check_and_update_meeting_status(
-                meeting_id=self.meeting_id, is_recording=self.is_recording
-            )
-
             # Delete PCM file after successful transcode (non-blocking)
             if success and os.path.exists(pcm_path):
                 try:
@@ -1703,9 +1698,11 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Timeout waiting for transcodes on meeting {meeting_id}"
                 )
 
-            # Final meeting status check (all transcodes should be done or failed)
-            await self.services.sql_recording_service_manager.check_and_update_meeting_status(
-                meeting_id=meeting_id, is_recording=False
+            # Update meeting status to PROCESSING (transcoding is done, but not persistent recordings yet)
+            from source.server.sql_models import MeetingStatus
+
+            await self.services.sql_recording_service_manager.update_meeting_status(
+                meeting_id=meeting_id, status=MeetingStatus.PROCESSING
             )
 
             # Note: Temp recordings remain in temp storage and SQL
@@ -2199,6 +2196,12 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             await self.services.logging_service.info(
                 f"Completed post-stop processing for meeting {meeting_id}"
             )
+
+            # Now that all persistent recordings are created, trigger transcription job
+            if self.services.sql_recording_service_manager:
+                await self.services.sql_recording_service_manager.create_transcription_job_for_completed_meeting(
+                    meeting_id=meeting_id
+                )
 
         except Exception as e:
             await self.services.logging_service.error(
