@@ -168,18 +168,22 @@ class TranscriptionCompilationJob(Job):
 
     async def _save_compilation(self, compilation_data: dict) -> str:
         """
-        Save the compiled transcription JSON object to a file.
+        Save the compiled transcription JSON object to a file and database.
 
         Args:
             compilation_data: The compiled transcription data
 
         Returns:
-            The filename of the saved compilation
+            The compiled transcript ID
         """
         import json
         import os
         import asyncio
         import aiofiles
+        from datetime import datetime
+        from sqlalchemy import insert
+        from source.server.sql_models import CompiledTranscriptsModel
+        from source.utils import calculate_file_sha256, generate_16_char_uuid
 
         # Create compilations directory if it doesn't exist
         base_path = "assets/data/transcriptions"
@@ -204,7 +208,29 @@ class TranscriptionCompilationJob(Job):
             f"Saved compilation to {filename} ({len(compilation_data['segments'])} segments)"
         )
 
-        return filename
+        # Calculate SHA256 hash
+        sha256_hash = await calculate_file_sha256(file_path)
+
+        # Generate compiled transcript ID
+        compiled_transcript_id = generate_16_char_uuid()
+
+        # Create SQL entry for compiled transcript
+        created_at = datetime.now()
+
+        stmt = insert(CompiledTranscriptsModel).values(
+            id=compiled_transcript_id,
+            created_at=created_at,
+            meeting_id=self.meeting_id,
+            sha256=sha256_hash,
+            transcript_filename=filename,
+        )
+        await self.services.server.sql_client.execute(stmt)
+
+        await self.services.logging_service.info(
+            f"Created SQL entry for compiled transcript: {compiled_transcript_id}"
+        )
+
+        return compiled_transcript_id
 
 
 class BaseTranscriptionCompilationJobManagerService(Manager):
@@ -575,7 +601,9 @@ class TranscriptionCompilationJobManagerService(BaseTranscriptionCompilationJobM
                     )
 
                     embed.add_field(
-                        name="Compilation", value=f"`transcript_{job.meeting_id}.json`", inline=False
+                        name="Compilation",
+                        value=f"`transcript_{job.meeting_id}.json`",
+                        inline=False,
                     )
 
                     embed.set_footer(
@@ -584,7 +612,9 @@ class TranscriptionCompilationJobManagerService(BaseTranscriptionCompilationJobM
                     )
 
                     # Send DM
-                    success = await BotUtils.send_dm(self.services.context.bot, user_id, embed=embed)
+                    success = await BotUtils.send_dm(
+                        self.services.context.bot, user_id, embed=embed
+                    )
 
                     if success:
                         await self.services.logging_service.info(

@@ -7,7 +7,8 @@ from source.server.sql_models import (
     MeetingModel,
     RecordingModel,
     TempRecordingModel,
-    TranscriptsModel,
+    UserTranscriptsModel,
+    CompiledTranscriptsModel,
 )
 
 # -------------------------------------------------------------- #
@@ -18,7 +19,8 @@ SQL_DATABASE_MODELS = [
     MeetingModel,
     RecordingModel,
     JobsStatusModel,
-    TranscriptsModel,
+    UserTranscriptsModel,
+    CompiledTranscriptsModel,
     GuildAdminWhitelistModel,
     JobsStatusErrorLogModel,
     TempRecordingModel,
