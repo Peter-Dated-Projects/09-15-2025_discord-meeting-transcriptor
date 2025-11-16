@@ -79,7 +79,7 @@ async def load_cogs(context: Context):
 
 @bot.command(name="murder", description="Stops the bot for real")
 async def murder(ctx: discord.ApplicationContext):
-    """Stop the bot."""
+    """Stop the bot gracefully, waiting for all backend services to complete."""
 
     # Only work if user is developer
     info = await bot.application_info()
@@ -91,7 +91,33 @@ async def murder(ctx: discord.ApplicationContext):
         await ctx.respond("❌ You do not have permission to use this command.")
         return
 
-    await ctx.respond("🔪 Stopping the bot...")
+    await ctx.respond(
+        "🔪 Initiating graceful shutdown... Please wait for all services to complete."
+    )
+
+    # Get the logger from context (with safety checks)
+    try:
+        if not bot.context or not bot.context.services_manager:
+            await ctx.followup.send("⚠️ Bot context not initialized properly. Forcing shutdown...")
+            await bot.close()
+            return
+
+        logger = bot.context.services_manager.logging_service
+        await logger.info(f"Shutdown initiated by user: {ctx.author.name} ({ctx.author.id})")
+
+        # Perform graceful shutdown of all services
+        await bot.context.services_manager.shutdown_all(timeout=60.0)
+        await ctx.followup.send(
+            "✅ All services have been shut down successfully. Bot stopping now..."
+        )
+    except Exception as e:
+        # Try to send error message to user
+        try:
+            await ctx.followup.send(f"⚠️ Shutdown completed with errors: {str(e)}")
+        except Exception:
+            pass  # Ignore if we can't send the message
+
+    # Finally, close the bot
     await bot.close()
 
 
