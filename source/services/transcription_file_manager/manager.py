@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 from sqlalchemy import delete, insert, select, update
 
-from source.server.sql_models import TranscriptsModel
+from source.server.sql_models import UserTranscriptsModel
 from source.services.manager import BaseTranscriptionFileServiceManager
 from source.utils import calculate_file_sha256, generate_16_char_uuid
 
@@ -117,7 +117,7 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             # Create SQL entry
             created_at = datetime.now()
 
-            stmt = insert(TranscriptsModel).values(
+            stmt = insert(UserTranscriptsModel).values(
                 id=transcript_id,
                 created_at=created_at,
                 meeting_id=meeting_id,
@@ -157,7 +157,7 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
         """
         try:
             # Get the filename from SQL
-            stmt = select(TranscriptsModel).where(TranscriptsModel.id == transcript_id)
+            stmt = select(UserTranscriptsModel).where(UserTranscriptsModel.id == transcript_id)
             result = await self.server.sql_client.execute(stmt)
 
             if not result:
@@ -206,7 +206,7 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
         """
         try:
             # Get the filename from SQL
-            stmt = select(TranscriptsModel).where(TranscriptsModel.id == transcript_id)
+            stmt = select(UserTranscriptsModel).where(UserTranscriptsModel.id == transcript_id)
             result = await self.server.sql_client.execute(stmt)
 
             if not result:
@@ -219,7 +219,9 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             filename = transcript_model["transcript_filename"]
 
             # Delete SQL entry
-            delete_stmt = delete(TranscriptsModel).where(TranscriptsModel.id == transcript_id)
+            delete_stmt = delete(UserTranscriptsModel).where(
+                UserTranscriptsModel.id == transcript_id
+            )
             await self.server.sql_client.execute(delete_stmt)
 
             await self.services.logging_service.info(
@@ -257,7 +259,7 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             List of dictionaries containing transcript metadata (id, user_id, filename, created_at, sha256)
         """
         try:
-            stmt = select(TranscriptsModel).where(TranscriptsModel.meeting_id == meeting_id)
+            stmt = select(UserTranscriptsModel).where(UserTranscriptsModel.meeting_id == meeting_id)
             results = await self.server.sql_client.execute(stmt)
 
             return [
@@ -291,9 +293,9 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             Dictionary containing transcript metadata or None if not found
         """
         try:
-            stmt = select(TranscriptsModel).where(
-                TranscriptsModel.meeting_id == meeting_id,
-                TranscriptsModel.user_id == user_id,
+            stmt = select(UserTranscriptsModel).where(
+                UserTranscriptsModel.meeting_id == meeting_id,
+                UserTranscriptsModel.user_id == user_id,
             )
             results = await self.server.sql_client.execute(stmt)
 
@@ -329,7 +331,7 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             True if transcript exists, False otherwise
         """
         try:
-            stmt = select(TranscriptsModel).where(TranscriptsModel.id == transcript_id)
+            stmt = select(UserTranscriptsModel).where(UserTranscriptsModel.id == transcript_id)
             results = await self.server.sql_client.execute(stmt)
             return len(results) > 0
 

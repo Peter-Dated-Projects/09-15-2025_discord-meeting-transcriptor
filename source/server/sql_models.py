@@ -26,6 +26,7 @@ class JobsType(enum.Enum):
     TEMP_TRANSCODING = "temp_transcoding"
     TRANSCODING = "transcoding"
     TRANSCRIBING = "transcribing"
+    COMPILING = "compiling"
     CLEANING = "cleaning"
 
 
@@ -135,7 +136,7 @@ class JobsStatusModel(Base):
     error_log = Column(String(16), nullable=True)
 
 
-class TranscriptsModel(Base):
+class UserTranscriptsModel(Base):
     """
     ID = Transcript ID
     Created At = Timestamp when transcript was created
@@ -145,7 +146,7 @@ class TranscriptsModel(Base):
     Transcript Filename = Filename of the transcript file
     """
 
-    __tablename__ = "transcripts"
+    __tablename__ = "user_transcripts"
 
     id = Column(String(16), primary_key=True, index=True)
     created_at = Column(DateTime, nullable=False)
@@ -153,6 +154,26 @@ class TranscriptsModel(Base):
         String(MEETING_UUID_LENGTH), ForeignKey("meetings.id"), nullable=False, index=True
     )
     user_id = Column(String(20), nullable=False)
+    sha256 = Column(String(64), nullable=False, unique=True)
+    transcript_filename = Column(String(512), nullable=False)
+
+
+class CompiledTranscriptsModel(Base):
+    """
+    ID = Compiled Transcript ID
+    Created At = Timestamp when compiled transcript was created
+    Meeting ID = Foreign Key to associated Meeting ID
+    sha256 = SHA256 hash of the compiled transcript file
+    Transcript Filename = Filename of the compiled transcript file
+    """
+
+    __tablename__ = "compiled_transcripts"
+
+    id = Column(String(16), primary_key=True, index=True)
+    created_at = Column(DateTime, nullable=False)
+    meeting_id = Column(
+        String(MEETING_UUID_LENGTH), ForeignKey("meetings.id"), nullable=False, index=True
+    )
     sha256 = Column(String(64), nullable=False, unique=True)
     transcript_filename = Column(String(512), nullable=False)
 

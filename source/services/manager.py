@@ -28,6 +28,7 @@ class ServicesManager:
         discord_recorder_service_manager: BaseDiscordRecorderServiceManager | None = None,
         presence_manager_service: Any | None = None,
         transcription_job_manager: Any | None = None,
+        transcription_compilation_job_manager: Any | None = None,
     ):
         self.context = context
         # Backward compatibility - keep server reference
@@ -53,6 +54,9 @@ class ServicesManager:
 
         # Transcription job manager
         self.transcription_job_manager = transcription_job_manager
+
+        # Transcription compilation job manager
+        self.transcription_compilation_job_manager = transcription_compilation_job_manager
 
     async def initialize_all(self) -> None:
         """Initialize all service managers."""
@@ -80,6 +84,10 @@ class ServicesManager:
         # Transcription job manager
         if self.transcription_job_manager:
             await self.transcription_job_manager.on_start(self)
+
+        # Transcription compilation job manager
+        if self.transcription_compilation_job_manager:
+            await self.transcription_compilation_job_manager.on_start(self)
 
 
 # -------------------------------------------------------------- #

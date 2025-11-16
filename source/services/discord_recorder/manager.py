@@ -1728,7 +1728,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                 meeting_id=meeting_id,
             )
         )
-        
+
         # Add done callback to catch exceptions
         def handle_task_exception(t: asyncio.Task) -> None:
             try:
@@ -1736,9 +1736,10 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             except Exception as e:
                 # Log synchronously since this is a callback
                 import traceback
+
                 print(f"ERROR: Exception in _process_recordings_post_stop: {e}")
                 print(traceback.format_exc())
-        
+
         task.add_done_callback(handle_task_exception)
 
         await self.services.logging_service.info(f"Stopped recording in channel {channel_id}")
@@ -1994,6 +1995,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         else:
             # Fallback to current time if started_at is not available
             import datetime
+
             created_at_timestamp = int(datetime.datetime.now().timestamp())
 
         embed.add_field(
@@ -2149,13 +2151,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                         f"Failed to log persistent transcoding completion to SQL: {str(e)}"
                     )
 
-            # Send DM notification to user if bot instance is available
-            await self._send_recording_notification(
-                user_id=user_id,
-                guild_data=guild_data,
-                meeting_data=meeting_data,
-                output_filename=output_filename,
-            )
+            # Note: DM notification will be sent after compilation job completes
+            # See TranscriptionCompilationJobManagerService._on_job_complete
 
             return True
 
