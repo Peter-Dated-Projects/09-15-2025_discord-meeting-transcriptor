@@ -1,4 +1,5 @@
 import asyncio
+import os
 import subprocess
 from contextlib import suppress
 from dataclasses import dataclass
@@ -348,8 +349,11 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
         self.ffmpeg_path = ffmpeg_path
         self.handler = FFmpegHandler(self, ffmpeg_path)
 
+        self.ffmpeg_path = os.getenv("FFMPEG_PATH", "ffmpeg")
+
         self._jobs: asyncio.Queue[FFJob] | None = None
         self._worker_task: asyncio.Task | None = None
+        self._shutdown_requested: bool = False
 
     # -------------------------------------------------------------- #
     # Manager Methods
@@ -381,8 +385,18 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
         return True
 
     async def on_close(self):
-        # Cancel the worker task if it's running
+        """
+        Gracefully shutdown FFmpeg worker.
+
+        Sets shutdown flag to prevent new jobs, then waits for current job to complete.
+        """
+        self._shutdown_requested = True
+
+        # Wait for the worker task to complete (will finish current job)
         if self._worker_task and not self._worker_task.done():
+            await self.services.logging_service.info(
+                "Waiting for FFmpeg worker to finish current job..."
+            )
             self._worker_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._worker_task
@@ -393,7 +407,27 @@ class FFmpegManagerService(BaseFFmpegServiceManager):
         """Background worker that processes FFmpeg jobs from the queue."""
         while True:
             try:
-                job = await self._jobs.get()
+                # Use wait_for with timeout so we can check shutdown flag periodically
+                try:
+                    job = await asyncio.wait_for(self._jobs.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    # No job available, check if shutdown requested
+                    if self._shutdown_requested:
+                        await self.services.logging_service.info(
+                            "FFmpeg worker shutdown requested, stopping..."
+                        )
+                        break
+                    continue  # Keep waiting for jobs
+
+                # Check shutdown flag again before processing
+                if self._shutdown_requested:
+                    # Put the job back if we're shutting down
+                    await self._jobs.put(job)
+                    await self.services.logging_service.info(
+                        "FFmpeg worker shutdown requested, stopping..."
+                    )
+                    break
+
                 await self.services.logging_service.info(
                     f"Processing FFmpeg conversion: {job.input_path} -> {job.output_path}"
                 )

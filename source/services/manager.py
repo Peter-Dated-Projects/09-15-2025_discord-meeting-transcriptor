@@ -89,6 +89,115 @@ class ServicesManager:
         if self.transcription_compilation_job_manager:
             await self.transcription_compilation_job_manager.on_start(self)
 
+    async def shutdown_all(self, timeout: float = 60.0) -> None:
+        """
+        Gracefully shutdown all service managers, waiting for ongoing work to complete.
+
+        This method ensures that:
+        1. No new work is accepted
+        2. Active sessions are stopped
+        3. Job queues complete their current work
+        4. Background tasks are cancelled
+        5. Database connections are closed
+        6. All logs are flushed
+
+        Args:
+            timeout: Maximum time in seconds to wait for services to shutdown (default: 60s)
+        """
+        import asyncio
+
+        await self.logging_service.info("=" * 60)
+        await self.logging_service.info("Starting graceful shutdown of all services...")
+
+        # Mark context as shutting down to prevent new operations
+        if self.context:
+            self.context.mark_shutdown_started()
+            await self.logging_service.info("✓ Shutdown flag set - no new operations will start")
+
+        try:
+            # Timeout budget: allocate time across phases (total = 100% of timeout)
+            # Phase 1-2: 10% each, Phase 3-4: 25% each, Phase 5: 10%, Reserve: 20%
+
+            # Phase 1: Stop accepting new work (Discord recorder sessions)
+            await self.logging_service.info(
+                "Phase 1: Stopping active Discord recording sessions..."
+            )
+            if self.discord_recorder_service_manager:
+                await asyncio.wait_for(
+                    self.discord_recorder_service_manager.on_close(), timeout=timeout * 0.1
+                )
+                await self.logging_service.info("✓ All recording sessions stopped")
+
+            # Phase 2: Stop presence updates
+            await self.logging_service.info("Phase 2: Stopping presence manager...")
+            if self.presence_manager_service:
+                await asyncio.wait_for(
+                    self.presence_manager_service.on_close(), timeout=timeout * 0.1
+                )
+                await self.logging_service.info("✓ Presence manager stopped")
+
+            # Phase 3: Wait for transcription jobs to complete
+            await self.logging_service.info(
+                "Phase 3: Waiting for transcription jobs to complete..."
+            )
+            if self.transcription_job_manager:
+                await asyncio.wait_for(
+                    self.transcription_job_manager.on_close(), timeout=timeout * 0.25
+                )
+                await self.logging_service.info("✓ All transcription jobs completed")
+
+            # Phase 4: Wait for compilation jobs to complete
+            await self.logging_service.info("Phase 4: Waiting for compilation jobs to complete...")
+            if self.transcription_compilation_job_manager:
+                await asyncio.wait_for(
+                    self.transcription_compilation_job_manager.on_close(), timeout=timeout * 0.25
+                )
+                await self.logging_service.info("✓ All compilation jobs completed")
+
+            # Phase 5: Stop FFmpeg conversions
+            await self.logging_service.info("Phase 5: Stopping FFmpeg conversions...")
+            await asyncio.wait_for(self.ffmpeg_service_manager.on_close(), timeout=timeout * 0.1)
+            await self.logging_service.info("✓ FFmpeg conversions stopped")
+
+            # Phase 6: Close file managers (no timeout needed - should be fast)
+            await self.logging_service.info("Phase 6: Closing file managers...")
+            await self.file_service_manager.on_close()
+            await self.recording_file_service_manager.on_close()
+            await self.transcription_file_service_manager.on_close()
+            await self.logging_service.info("✓ File managers closed")
+
+            # Phase 7: Close database connections (no timeout needed)
+            await self.logging_service.info("Phase 7: Closing database connections...")
+            await self.sql_recording_service_manager.on_close()
+            await self.sql_logging_service_manager.on_close()
+            await self.logging_service.info("✓ Database connections closed")
+
+            # Phase 8: Disconnect from all servers (SQL, Vector DB, Whisper)
+            await self.logging_service.info("Phase 8: Disconnecting from all servers...")
+            if self.context and self.context.server_manager:
+                await self.context.server_manager.disconnect_all()
+                await self.logging_service.info("✓ All servers disconnected")
+
+            await self.logging_service.info("✓ Graceful shutdown completed successfully")
+            await self.logging_service.info("=" * 60)
+
+        except asyncio.TimeoutError:
+            await self.logging_service.error(
+                f"⚠️  Shutdown timeout exceeded ({timeout}s) - forcing shutdown"
+            )
+        except Exception as e:
+            await self.logging_service.error(f"⚠️  Error during shutdown: {e}")
+            # Give logging a moment to flush the error
+            await asyncio.sleep(0.1)
+
+        # Phase 9: Always flush and close logging (even if there were errors)
+        try:
+            await asyncio.wait_for(self.logging_service.on_close(), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass  # Don't wait forever for logging to flush
+        except Exception:
+            pass  # Suppress any logging errors during shutdown
+
 
 # -------------------------------------------------------------- #
 # Base Service Manager Class
