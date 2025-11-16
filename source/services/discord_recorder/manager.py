@@ -2081,12 +2081,14 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                 )
                 return False
 
-            # Insert persistent recording into SQL (use full path for file operations)
+            # Insert persistent recording into SQL
+            # Note: We pass the full path so SHA256 and duration can be calculated,
+            # but insert_persistent_recording will extract just the filename for storage
             recording_id = (
                 await self.services.sql_recording_service_manager.insert_persistent_recording(
                     user_id=user_id,
                     meeting_id=meeting_id,
-                    filename=output_path,  # Use full path for SHA256 and duration calculation
+                    filename=output_path,  # Full path for SHA256/duration, will extract basename
                 )
             )
 

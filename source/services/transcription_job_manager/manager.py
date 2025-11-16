@@ -112,7 +112,7 @@ class TranscriptionJob(Job):
 
         # Send to Whisper for transcription
         try:
-            transcript_text = await self.services.server_manager.whisper_server.inference(
+            transcript_text = await self.services.server.whisper_server_client.inference(
                 audio_path=audio_file_path,
                 word_timestamps=True,
                 response_format="verbose_json",

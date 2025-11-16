@@ -197,9 +197,7 @@ class SQLRecordingManagerService(Manager):
         Args:
             user_id: Discord User ID of the participant
             meeting_id: Meeting ID (16 chars)
-            start_timestamp_ms: Start timestamp in milliseconds
-            filename: Path to the recording file
-            duration_in_ms: Duration of the recording in milliseconds (default: 0)
+            filename: Path to the recording file (can be full path or just filename)
 
         Returns:
             recording_id: The generated ID for the persistent recording
@@ -216,8 +214,15 @@ class SQLRecordingManagerService(Manager):
         # entry data
         entry_id = generate_16_char_uuid()
         timestamp = get_current_timestamp_est()
+
+        # Calculate SHA256 and duration from the file (needs full path)
         sha256 = await calculate_file_sha256(filename)
         file_duration_ms = calculate_audio_file_duration_ms(filename)
+
+        # Extract just the filename (not full path) for database storage
+        import os
+
+        filename_only = os.path.basename(filename)
 
         recording = RecordingModel(
             id=entry_id,
@@ -225,7 +230,7 @@ class SQLRecordingManagerService(Manager):
             meeting_id=meeting_id,
             created_at=timestamp,
             duration_in_ms=file_duration_ms,
-            filename=filename,
+            filename=filename_only,  # Store only the filename, not full path
             sha256=sha256,
         )
 
