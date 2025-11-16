@@ -33,11 +33,13 @@ class TranscriptionJob(Job):
         meeting_id: ID of the meeting to transcribe
         recording_ids: List of recording IDs to transcribe
         user_ids: List of user IDs associated with the recordings
+        services: Reference to ServicesManager for accessing services
     """
 
     meeting_id: str = ""
     recording_ids: list[str] = field(default_factory=list)
     user_ids: list[str] = field(default_factory=list)
+    services: "ServicesManager" = None  # type: ignore
 
     async def execute(self) -> None:
         """
@@ -46,22 +48,111 @@ class TranscriptionJob(Job):
         This will:
         1. Fetch all recording files for the meeting
         2. Send them to the transcription service (whisper)
-        3. Process and store the results
-        4. Update the meeting status
+        3. Process and store the results to data/transcriptions/storage/
         """
-        # TODO: Implement actual transcription logic
-        # For now, this is a placeholder that will be filled in when
-        # the transcription service is fully implemented
+        if not self.services:
+            raise RuntimeError("ServicesManager not provided to TranscriptionJob")
 
-        # Placeholder for transcription logic:
-        # 1. Get ServicesManager reference (will be passed in execute context)
-        # 2. For each recording_id:
-        #    - Fetch the recording file
-        #    - Send to transcription service
-        #    - Process the transcribed text
-        #    - Store transcript to file and database
-        # 3. Update meeting status to COMPLETED
-        pass
+        await self.services.logging_service.info(
+            f"Starting transcription for meeting {self.meeting_id} with {len(self.recording_ids)} recordings"
+        )
+
+        # Process each recording
+        for recording_id in self.recording_ids:
+            try:
+                await self._transcribe_recording(recording_id)
+            except Exception as e:
+                await self.services.logging_service.error(
+                    f"Failed to transcribe recording {recording_id}: {e}"
+                )
+                # Continue with other recordings even if one fails
+                continue
+
+        await self.services.logging_service.info(
+            f"Completed transcription for meeting {self.meeting_id}"
+        )
+
+    async def _transcribe_recording(self, recording_id: str) -> None:
+        """
+        Transcribe a single recording file.
+
+        Args:
+            recording_id: The recording ID to transcribe
+        """
+        import os
+
+        # Get recording metadata from SQL
+        recording = await self.services.sql_recording_service_manager.get_recording_by_id(
+            recording_id
+        )
+
+        if not recording:
+            await self.services.logging_service.warning(
+                f"Recording {recording_id} not found in database"
+            )
+            return
+
+        user_id = recording["user_id"]
+        filename = recording["filename"]
+
+        await self.services.logging_service.info(
+            f"Transcribing recording {recording_id} for user {user_id}: {filename}"
+        )
+
+        # Get full path to recording file
+        storage_path = self.services.recording_file_service_manager.get_persistent_storage_path()
+        audio_file_path = os.path.join(storage_path, filename)
+
+        # Check if file exists
+        if not os.path.exists(audio_file_path):
+            await self.services.logging_service.error(
+                f"Recording file not found: {audio_file_path}"
+            )
+            return
+
+        # Send to Whisper for transcription
+        try:
+            transcript_text = await self.services.server_manager.whisper_server.inference(
+                audio_path=audio_file_path,
+                word_timestamps=True,
+                response_format="verbose_json",
+                temperature="0.0",
+                temperature_inc="0.2",
+                language="en",
+            )
+
+            await self.services.logging_service.info(
+                f"Successfully transcribed recording {recording_id}"
+            )
+
+            # Prepare transcript data
+            transcript_data = {
+                "meeting_id": self.meeting_id,
+                "user_id": user_id,
+                "recording_id": recording_id,
+                "text": transcript_text,
+                "created_at": get_current_timestamp_est().isoformat(),
+            }
+
+            # Save transcription to file and database
+            # File will be saved as: data/transcriptions/storage/transcript_{meeting_id}_{user_id}_{transcript_id}.json
+            transcript_id, transcript_filename = (
+                await self.services.transcription_file_service_manager.save_transcription(
+                    transcript_data=transcript_data,
+                    meeting_id=self.meeting_id,
+                    user_id=user_id,
+                )
+            )
+
+            await self.services.logging_service.info(
+                f"Saved transcription {transcript_id} to {transcript_filename}"
+            )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to transcribe or save recording {recording_id}: {e}"
+            )
+            raise
 
 
 class BaseTranscriptionJobManagerService(Manager):
@@ -161,6 +252,7 @@ class TranscriptionJobManagerService(BaseTranscriptionJobManagerService):
             meeting_id=meeting_id,
             recording_ids=recording_ids,
             user_ids=user_ids,
+            services=self.services,
             metadata={
                 "recording_count": len(recording_ids),
                 "user_count": len(user_ids),

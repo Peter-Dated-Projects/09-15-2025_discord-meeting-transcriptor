@@ -2315,6 +2315,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             )
 
             # Check for pending transcodes using enum values
+            # Include QUEUED and IN_PROGRESS statuses (PENDING is the job_status, not transcode_status)
             pending = [
                 c
                 for c in chunks

@@ -670,6 +670,28 @@ class SQLRecordingManagerService(Manager):
 
         return results
 
+    async def get_recording_by_id(self, recording_id: str) -> dict | None:
+        """
+        Get a specific recording by its ID.
+
+        Args:
+            recording_id: The recording ID
+
+        Returns:
+            Recording dictionary or None if not found
+        """
+        # Validate input
+        if len(recording_id) != 16:
+            raise ValueError("recording_id must be 16 characters long")
+
+        # Build and execute query
+        query = select(RecordingModel).where(RecordingModel.id == recording_id)
+        results = await self.server.sql_client.execute(query)
+
+        return results[0] if results else None
+
+        return results
+
     # -------------------------------------------------------------- #
     # User + Meeting Specific Methods
     # -------------------------------------------------------------- #
