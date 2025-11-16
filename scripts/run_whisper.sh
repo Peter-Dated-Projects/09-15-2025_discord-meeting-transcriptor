@@ -96,7 +96,6 @@ fi
 echo "Running Whisper server..."
 "$WHISPER_PATH" \
     -p 2 \
-    -sow \
     --host "$WHISPER_HOST" \
     --port "$WHISPER_PORT" \
     --model "$MODEL_PATH" \
