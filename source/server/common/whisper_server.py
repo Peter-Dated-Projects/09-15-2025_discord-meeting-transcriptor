@@ -108,10 +108,10 @@ class WhisperServerClient(WhisperServerHandler):
         audio_path: str,
         word_timestamps=True,
         response_format="verbose_json",
-        temperature="0.1",
-        temperature_inc="0.1",
+        temperature="0.0",
+        temperature_inc="0.2",
         language="en",
-    ) -> str:
+    ) -> str | dict:
         """
         Perform transcription on the given audio file.
 
@@ -120,9 +120,12 @@ class WhisperServerClient(WhisperServerHandler):
             word_timestamps: Whether to include word-level timestamps
             response_format: Format of the response (e.g., "verbose_json", "json", "text")
             temperature: Sampling temperature for the model
+            temperature_inc: Temperature increment for fallback
+            language: Language code (e.g., "en" for English)
 
         Returns:
-            Transcribed text
+            For "text" format: string with transcribed text
+            For "json" or "verbose_json" format: dict with full response including timestamps
         """
         if not self.session:
             raise RuntimeError("Not connected to Whisper server")
@@ -151,20 +154,13 @@ class WhisperServerClient(WhisperServerHandler):
                 if response.status != 200:
                     raise RuntimeError(f"Inference failed ({response.status}): {body}")
 
-                # Text-only response
+                # Text-only response - return as plain string
                 if response_format == "text":
                     return body
 
-                # JSON / verbose_json
+                # JSON / verbose_json - return full parsed response
                 result = json.loads(body)
-
-                # Default JSON has "text"
-                if "text" in result:
-                    return result["text"]
-
-                # verbose_json-style: segments
-                segments = result.get("segments") or []
-                return " ".join(seg.get("text", "") for seg in segments)
+                return result
         except Exception as e:
             logger.error(f"Inference failed: {e}")
             raise
