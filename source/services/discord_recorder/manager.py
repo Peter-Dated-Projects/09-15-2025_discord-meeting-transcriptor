@@ -1985,15 +1985,16 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             embed.set_thumbnail(url=guild_icon_url)
 
         # Add additional information
-        created_at = (
-            meeting_data.started_at
-            if hasattr(meeting_data, "started_at")
-            else meeting_data.get("created_at", 0)
-        )
-        if hasattr(created_at, "timestamp"):
+        # meeting_data is a dict, so access it properly
+        created_at = meeting_data.get("started_at")
+        if created_at and hasattr(created_at, "timestamp"):
             created_at_timestamp = int(created_at.timestamp())
-        else:
+        elif created_at:
             created_at_timestamp = int(created_at)
+        else:
+            # Fallback to current time if started_at is not available
+            import datetime
+            created_at_timestamp = int(datetime.datetime.now().timestamp())
 
         embed.add_field(
             name="Recording Date",
