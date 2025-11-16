@@ -41,6 +41,10 @@ class TranscriptionJob(Job):
     user_ids: list[str] = field(default_factory=list)
     services: "ServicesManager" = None  # type: ignore
 
+    # -------------------------------------------------------------- #
+    # Job Execution
+    # -------------------------------------------------------------- #
+
     async def execute(self) -> None:
         """
         Execute the transcription job.
@@ -63,7 +67,7 @@ class TranscriptionJob(Job):
                 await self._transcribe_recording(recording_id)
             except Exception as e:
                 await self.services.logging_service.error(
-                    f"Failed to transcribe recording {recording_id}: {e}"
+                    f"Failed to transcribe recording {recording_id}: {type(e).__name__}: {str(e)}"
                 )
                 # Continue with other recordings even if one fails
                 continue
@@ -71,6 +75,10 @@ class TranscriptionJob(Job):
         await self.services.logging_service.info(
             f"Completed transcription for meeting {self.meeting_id}"
         )
+
+    # -------------------------------------------------------------- #
+    # Transcription Methods
+    # -------------------------------------------------------------- #
 
     async def _transcribe_recording(self, recording_id: str) -> None:
         """
