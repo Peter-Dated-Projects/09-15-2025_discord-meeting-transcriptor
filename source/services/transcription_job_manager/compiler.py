@@ -473,9 +473,137 @@ class TranscriptionCompilationJobManagerService(BaseTranscriptionCompilationJobM
         # Update SQL status
         await self._update_sql_job_status(job)
 
-        # Optionally update meeting status or trigger next phase
-        # For example, you might want to update meeting status to a new state
-        # after compilation is complete
+        # Send DM notifications to all users who participated in the meeting
+        await self._send_compilation_notifications(job)
+
+    async def _send_compilation_notifications(self, job: TranscriptionCompilationJob) -> None:
+        """
+        Send DM notifications to all users who participated in the meeting.
+
+        Args:
+            job: The completed compilation job
+        """
+        try:
+            # Import required modules
+            import discord
+            from source.utils import BotUtils
+
+            # Get meeting data
+            meeting_data = await self.services.sql_recording_service_manager.get_meeting(
+                meeting_id=job.meeting_id
+            )
+
+            if not meeting_data:
+                await self.services.logging_service.warning(
+                    f"Could not find meeting data for {job.meeting_id}, skipping notifications"
+                )
+                return
+
+            # Get guild data
+            if not self.services.context.bot:
+                await self.services.logging_service.warning(
+                    "Bot instance not available, cannot send DM notifications"
+                )
+                return
+
+            try:
+                guild_data = await self.services.context.bot.fetch_guild(
+                    int(meeting_data["guild_id"])
+                )
+            except (ValueError, discord.NotFound, discord.HTTPException) as e:
+                await self.services.logging_service.error(
+                    f"Failed to fetch guild data: {e}, skipping notifications"
+                )
+                return
+
+            # Prepare guild info
+            guild_name = (
+                guild_data.name
+                if hasattr(guild_data, "name")
+                else guild_data.get("name", "Unknown Guild")
+            )
+
+            guild_icon_url = None
+            if hasattr(guild_data, "icon") and guild_data.icon:
+                guild_icon_url = guild_data.icon.url
+            elif isinstance(guild_data, dict) and guild_data.get("icon"):
+                guild_icon_url = guild_data["icon"]
+
+            # Get meeting timestamp
+            created_at = meeting_data.get("started_at")
+            if created_at and hasattr(created_at, "timestamp"):
+                created_at_timestamp = int(created_at.timestamp())
+            elif created_at:
+                created_at_timestamp = int(created_at)
+            else:
+                import datetime
+
+                created_at_timestamp = int(datetime.datetime.now().timestamp())
+
+            # Get requested_by user info
+            requested_by_id = meeting_data.get("requested_by", "Unknown")
+            requested_by_user_name = None
+            footer_icon_url = None
+
+            try:
+                requested_user = await self.services.context.bot.fetch_user(int(requested_by_id))
+                if requested_user and requested_user.avatar:
+                    footer_icon_url = requested_user.avatar.url
+                    requested_by_user_name = requested_user.name
+            except (ValueError, discord.NotFound, discord.HTTPException):
+                pass
+
+            # Create embed for each user
+            for user_id in job.user_ids:
+                try:
+                    embed = discord.Embed(
+                        title=f"**Meeting Finished**: Meeting in `{guild_name}`",
+                        description=(
+                            "**✅ Your recording has been transcribed and compiled!**\n\n"
+                            "The meeting transcription is now available."
+                        ),
+                        color=discord.Color.green(),
+                    )
+
+                    if guild_icon_url:
+                        embed.set_thumbnail(url=guild_icon_url)
+
+                    embed.add_field(
+                        name="Recording Date",
+                        value=f"<t:{created_at_timestamp}:F>",
+                        inline=False,
+                    )
+
+                    embed.add_field(
+                        name="Compilation", value=f"`transcript_{job.meeting_id}.json`", inline=False
+                    )
+
+                    embed.set_footer(
+                        text=f"Requested by {requested_by_user_name or requested_by_id}",
+                        icon_url=footer_icon_url,
+                    )
+
+                    # Send DM
+                    success = await BotUtils.send_dm(self.services.context.bot, user_id, embed=embed)
+
+                    if success:
+                        await self.services.logging_service.info(
+                            f"Sent compilation notification to user {user_id} for meeting {job.meeting_id}"
+                        )
+                    else:
+                        await self.services.logging_service.warning(
+                            f"Failed to send compilation notification to user {user_id}"
+                        )
+
+                except Exception as e:
+                    await self.services.logging_service.error(
+                        f"Error sending notification to user {user_id}: {e}"
+                    )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Error in _send_compilation_notifications: {e}"
+            )
 
     async def _on_job_failed(self, job: TranscriptionCompilationJob) -> None:
         """

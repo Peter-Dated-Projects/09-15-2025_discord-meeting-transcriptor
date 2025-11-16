@@ -2149,13 +2149,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                         f"Failed to log persistent transcoding completion to SQL: {str(e)}"
                     )
 
-            # Send DM notification to user if bot instance is available
-            await self._send_recording_notification(
-                user_id=user_id,
-                guild_data=guild_data,
-                meeting_data=meeting_data,
-                output_filename=output_filename,
-            )
+            # Note: DM notification will be sent after compilation job completes
+            # See TranscriptionCompilationJobManagerService._on_job_complete
 
             return True
 
