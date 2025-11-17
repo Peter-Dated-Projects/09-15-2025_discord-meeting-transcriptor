@@ -15,6 +15,7 @@ from flask import Flask, request, jsonify
 
 from config import config
 from whisper_server import WhisperServer
+from timestamp_sanitizer import sanitize_whisper_result
 
 # Configure logging
 logging.basicConfig(
@@ -148,10 +149,20 @@ def inference():
                 502,
             )
 
-        # Return the raw response from whisper-server as-is
+        # Get raw response from whisper-server
+        raw = response.json()
+
+        # Sanitize timestamps to fix whisper-cpp bugs with long audio files
+        try:
+            raw = sanitize_whisper_result(raw)
+        except Exception as e:
+            logger.error(f"Failed to sanitize whisper timestamps: {e}", exc_info=True)
+            # Fall back to raw if sanitizer fails
+
+        # Return the sanitized response
         logger.info("Received response from whisper server, forwarding to client")
 
-        return response.json(), 200
+        return raw, 200
 
     except requests.exceptions.Timeout:
         logger.error("Whisper server request timed out")
