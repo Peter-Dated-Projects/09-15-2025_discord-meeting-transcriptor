@@ -22,6 +22,7 @@ def sanitize_whisper_segments(
     """
     Heuristic sanitizer for Whisper segments + words.
 
+    Uses segment IDs as the source of truth for ordering, then:
     - Keeps timestamps that look sane and monotonic.
     - Fixes obviously broken ones (negative, inverted, huge jumps).
     - Uses word-level timing as fallback where reliable.
@@ -35,17 +36,25 @@ def sanitize_whisper_segments(
     Returns:
         List of sanitized segment dictionaries
     """
+    if not segments:
+        return []
+
+    # Step 1: Sort by ID to establish correct ordering
+    # IDs are the source of truth for segment order
+    sorted_segments = sorted(segments, key=lambda s: int(s.get("id", 0)))
+
     fixed = []
     last_end = 0.0
+    fixed_count = 0  # Track how many segments we had to fix
 
     # If duration isn't provided, estimate from existing ends
     if audio_duration is None:
         audio_duration = max(
-            (float(s.get("end", 0.0)) for s in segments if s.get("end", 0.0) > 0),
+            (float(s.get("end", 0.0)) for s in sorted_segments if s.get("end", 0.0) > 0),
             default=0.0,
         )
 
-    for seg in segments:
+    for seg in sorted_segments:
         s_start = float(seg.get("start", 0.0))
         s_end = float(seg.get("end", 0.0))
         text = seg.get("text", "") or ""
@@ -92,6 +101,13 @@ def sanitize_whisper_segments(
             new_end = max(new_start + 0.05, min(s_end + 0.2, new_start + est_dur + 0.5))
         else:
             # Broken timestamps: place segment sequentially after last_end
+            seg_id = seg.get("id", "?")
+            logger.warning(
+                f"Segment {seg_id} has broken timestamps (start={s_start:.2f}, end={s_end:.2f}). "
+                f"Fixing to follow segment ordering. Placing after {last_end:.2f}s"
+            )
+
+            fixed_count += 1
             new_start = last_end
 
             if word_span > 0.05:
@@ -138,6 +154,9 @@ def sanitize_whisper_segments(
         last_end = seg["end"]
         fixed.append(seg)
 
+    if fixed_count > 0:
+        logger.info(f"Fixed {fixed_count} segments with broken timestamps")
+
     return fixed
 
 
@@ -162,7 +181,10 @@ def sanitize_whisper_result(result: dict) -> dict:
 
     logger.info(f"Sanitizing {len(segments)} segments (audio duration: {duration:.2f}s)")
 
-    result["segments"] = sanitize_whisper_segments(segments, audio_duration=duration)
+    # First pass: ensure segments are sorted by ID
+    sorted_segments = sorted(segments, key=lambda s: int(s.get("id", 0)))
+
+    result["segments"] = sanitize_whisper_segments(sorted_segments, audio_duration=duration)
 
     logger.info("Timestamp sanitization complete")
 

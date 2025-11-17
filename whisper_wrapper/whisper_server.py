@@ -56,14 +56,11 @@ class WhisperServer:
         logger.info(f"Starting whisper-server: {' '.join(cmd)}")
 
         try:
-            # Start the process
+            # Start the process - don't capture output, let it go to parent's stdout/stderr
             self.process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True,
+                stdout=None,
+                stderr=None,
             )
 
             # Wait for server to be ready
@@ -135,18 +132,6 @@ class WhisperServer:
                     return
             except requests.exceptions.RequestException as e:
                 last_error = e
-                # Read and log any output from the process
-                if self.process and self.process.stdout:
-                    try:
-                        # Non-blocking read
-                        import select
-
-                        if select.select([self.process.stdout], [], [], 0)[0]:
-                            line = self.process.stdout.readline()
-                            if line:
-                                logger.debug(f"Whisper server: {line.strip()}")
-                    except:
-                        pass
 
             # Check if process died
             if self.process and self.process.poll() is not None:
