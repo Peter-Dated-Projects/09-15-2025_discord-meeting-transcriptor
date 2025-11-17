@@ -6,12 +6,40 @@ Fixes common issues with whisper-cpp timestamps on long audio files:
 - Inverted timestamps (end < start)
 - Non-monotonic segments
 - Word-level timestamp misalignment
+- Extra whitespace in text
 """
 
 import logging
+import re
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def clean_text(text: str) -> str:
+    """
+    Clean text by removing extra whitespace.
+
+    - Strips leading/trailing whitespace
+    - Collapses multiple spaces into single space
+    - Preserves single spaces between words
+
+    Args:
+        text: Text to clean
+
+    Returns:
+        Cleaned text
+    """
+    if not text:
+        return ""
+
+    # Replace multiple whitespace (spaces, tabs, newlines) with single space
+    text = re.sub(r"\s+", " ", text)
+
+    # Strip leading/trailing whitespace
+    text = text.strip()
+
+    return text
 
 
 def sanitize_whisper_segments(
@@ -60,6 +88,15 @@ def sanitize_whisper_segments(
         text = seg.get("text", "") or ""
         words = seg.get("words") or []
         seg_dur = max(s_end - s_start, 0.0)
+
+        # Clean the segment text
+        cleaned_text = clean_text(text)
+        seg["text"] = cleaned_text
+
+        # Clean word-level text as well
+        for w in words:
+            if "word" in w:
+                w["word"] = clean_text(w["word"])
 
         # Word stats
         if words:
@@ -114,7 +151,8 @@ def sanitize_whisper_segments(
                 est_dur = word_span
             else:
                 # Rough speech rate ~15 chars/sec, clipped
-                est_dur = max(min(len(text) / 15.0, 10.0), 0.3)
+                # Use cleaned text for duration estimate
+                est_dur = max(min(len(cleaned_text) / 15.0, 10.0), 0.3)
 
             new_end = new_start + est_dur
 

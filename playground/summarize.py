@@ -15,8 +15,9 @@ async def main():
     audio_path = os.path.join("playground", "assets", "podcast.mp3")
     transcript_path = os.path.join("playground", "assets", "transcript.json")
     compiled_path = os.path.join("playground", "assets", f"transcript_{meeting_id}.json")
+    raw_text_path = os.path.join("playground", "assets", f"transcript_{meeting_id}_raw.txt")
 
-    # Create Whisper server client
+    # phase 1 -- Create Whisper server client
     whisper_client = construct_whisper_server_client(endpoint="http://localhost:5000")
     await whisper_client.connect()
 
@@ -79,6 +80,18 @@ async def main():
     with open(compiled_path, "w", encoding="utf-8") as f:
         json.dump(compilation_result, f, ensure_ascii=False, indent=2)
     print(f"Compiled transcription saved to: {compiled_path}")
+
+    # phase 3 -- create summary of the transcription with ollama
+    print("Creating raw text of transcription for summarization...")
+
+    with open(compiled_path, "r", encoding="utf-8") as f:
+        compilation_data = json.load(f)
+    raw = "\n".join([segment["content"] for segment in compilation_data.get("segments", [])])
+    print(f"Raw transcription text length: {len(raw)} characters")
+
+    with open(raw_text_path, "w", encoding="utf-8") as f:
+        f.write(raw)
+    print(f"Raw transcription text saved to: {raw_text_path}")
 
 
 if __name__ == "__main__":
