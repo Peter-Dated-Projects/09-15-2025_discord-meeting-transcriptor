@@ -14,11 +14,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from source.services.discord_recorder.manager import (
+from source.services.discord_recorder_manager.manager import (
     DiscordRecorderConstants,
     DiscordSessionHandler,
 )
-from source.services.discord_recorder.pcm_generator import (
+from source.services.discord_recorder_manager.pcm_generator import (
     calculate_pcm_bytes,
     calculate_pcm_duration_ms,
 )

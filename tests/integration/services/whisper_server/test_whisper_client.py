@@ -4,22 +4,46 @@ Integration tests for Whisper server client.
 These tests require:
 1. Whisper server running (./dy.sh up)
 2. Audio test files in tests/assets/
+3. Configuration from .env.local
 """
 
 import os
 from pathlib import Path
 
 import pytest
+from dotenv import load_dotenv
 
 from source.server.common.whisper_server import WhisperServerClient
+
+# Load environment variables from .env.local
+env_path = Path(__file__).parent.parent.parent.parent / ".env.local"
+if env_path.exists():
+    load_dotenv(env_path)
 
 # ============================================================================
 # Fixtures
 # ============================================================================
 
 
+@pytest.fixture(scope="module")
+def check_whisper_available():
+    """Check if Whisper server is available before running tests."""
+    import socket
+
+    host = os.getenv("WHISPER_HOST", "localhost")
+    port = int(os.getenv("WHISPER_PORT", "50021"))
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(2)
+    result = sock.connect_ex((host, port))
+    sock.close()
+
+    if result != 0:
+        pytest.skip(f"Whisper server not available at {host}:{port}")
+
+
 @pytest.fixture
-def whisper_endpoint() -> str:
+def whisper_endpoint(check_whisper_available) -> str:  # noqa: ARG001
     """Get Whisper server endpoint from environment."""
     host = os.getenv("WHISPER_HOST", "localhost")
     port = os.getenv("WHISPER_PORT", "50021")

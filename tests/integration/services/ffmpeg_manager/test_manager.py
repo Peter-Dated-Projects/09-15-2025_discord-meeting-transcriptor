@@ -74,10 +74,10 @@ class TestFFmpegManagerService:
             services_manager: Fixture providing initialized services
         """
         # Access the FFmpeg handler through the service manager
-        ffmpeg_handler = services_manager.ffmpeg_service_manager.ffmpeg_handler
+        ffmpeg_handler = services_manager.ffmpeg_service_manager.handler
 
         # Verify FFmpeg is available
-        is_valid = ffmpeg_handler.validate_ffmpeg()
+        is_valid = await ffmpeg_handler.validate_ffmpeg()
 
         assert is_valid, (
             "FFmpeg should be installed and accessible. "
