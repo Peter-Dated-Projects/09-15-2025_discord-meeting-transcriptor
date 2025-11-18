@@ -429,7 +429,9 @@ class TestJSONOutput:
             # For gpt-oss:20b, sometimes the thinking field contains reasoning
             # Check if there's actual JSON-like content
             if "{" in result.content or "[" in result.content:
-                print(f"\n✓ Response contains JSON-like content (may be incomplete): {result.content[:200]}...")
+                print(
+                    f"\n✓ Response contains JSON-like content (may be incomplete): {result.content[:200]}..."
+                )
             else:
                 pytest.fail(f"Response is not valid JSON: {result.content}")
 
