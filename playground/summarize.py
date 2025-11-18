@@ -122,6 +122,9 @@ async def main():
     all_summaries = []  # Track all summaries at each level
     level = 0
 
+    # load up the ollama model
+    print(f"Using Ollama model: {OLLAMA_MODEL} at {BASE_URL}")
+
     # Recursive summarization loop
     while True:
         word_count = len(text.split())
@@ -198,6 +201,8 @@ Summary section:
                     },
                 ],
                 "stream": False,
+                # keep model in memory for 15 seconds after request
+                "keep_alive": 10,
             }
 
             response = requests.post(f"{BASE_URL}/api/chat", json=payload, timeout=120)
@@ -230,13 +235,15 @@ Summary section:
 
     # Save final summary
     final_path = os.path.join(summaries_dir, f"{meeting_id}_final_summary.txt")
+    final_result = {
+        "meeting_id": meeting_id,
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "levels_processed": level,
+        "final_word_count": len(final_summary.split()),
+        "final_summary": final_summary,
+    }
     with open(final_path, "w", encoding="utf-8") as f:
-        f.write(f"Meeting: {meeting_id}\n")
-        f.write(f"Generated: {datetime.utcnow().isoformat()}Z\n")
-        f.write(f"Levels processed: {level}\n")
-        f.write(f"Final word count: {len(final_summary.split())}\n")
-        f.write("\n" + "=" * 60 + "\n")
-        f.write(final_summary)
+        json.dump(final_result, f, indent=2)
 
     print(f"\n✅ Final summary saved to: {final_path}")
     print(f"Total levels: {level}")
