@@ -52,6 +52,7 @@ def construct_services_manager(
     presence_manager_service = None
     transcription_job_manager = None
     transcription_compilation_job_manager = None
+    gpu_resource_manager = None
 
     # create logger
     logging_service = AsyncLoggingService(
@@ -140,6 +141,14 @@ def construct_services_manager(
             context=context
         )
 
+        # -------------------------------------------------------------- #
+        # GPU Resource Manager Setup
+        # -------------------------------------------------------------- #
+
+        from source.services.gpu_resource_manager import GPUResourceManager
+
+        gpu_resource_manager = GPUResourceManager(context=context)
+
     # TODO: https://www.notion.so/DISC-19-create-ffmpeg-service-29c5eca3b9df805a949fdcd5850eaf5a?source=copy_link
     # # create ffmpeg service manager
     # if service_type == ServerManagerType.DEVELOPMENT:
@@ -164,4 +173,5 @@ def construct_services_manager(
         presence_manager_service=presence_manager_service,
         transcription_job_manager=transcription_job_manager,
         transcription_compilation_job_manager=transcription_compilation_job_manager,
+        gpu_resource_manager=gpu_resource_manager,
     )

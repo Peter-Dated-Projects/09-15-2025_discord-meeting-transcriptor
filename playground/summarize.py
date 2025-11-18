@@ -153,38 +153,28 @@ async def main():
 
             # Choose system message and user content based on level
             if level == 0:
-                system_message = "<|start|>system<|message|>You are an expert at summarizing meeting transcripts. Extract key topics, decisions, and action items concisely.<|end|>"
+                system_message = "You are an expert at summarizing meeting transcripts. Extract key topics, decisions, and action items concisely."
                 user_content = f"""
-<|start|>developer<|message|>Summarize this meeting transcript section (part {i+1} of {len(chunks)}). 
+Summarize this meeting transcript section (part {i+1} of {len(chunks)}). 
 Provide a 200-500 word summary covering: 
 - Main topics discussed
 - Key points and decisions for each topic discussed
 - Important action items
 - Notable speakers/perspectives
-<|end|>
 
-<|start|>user<|message|>
 Transcript:
 {chunk}
-
-<|end|><|start|>assistant
 """
             else:
                 system_message = """
-<|start|>system<|message|>
 You are an expert at summarizing summaries of meeting transcripts. Create a concise overview that preserves the most important information from multiple summaries.
-<|end|>
 """
                 user_content = f"""
-<|start|>developer<|message|>
 Create a consolidated summary from this summary section (part {i+1} of {len(chunks)}).
 Provide a 200-500 word overview that combines and preserves the most important information:
-<|end|>
 
-<|start|>user<|message|>
 Summary section:
 {chunk}
-<|end|><|start|>assistant
 """
 
             # Call ollama
