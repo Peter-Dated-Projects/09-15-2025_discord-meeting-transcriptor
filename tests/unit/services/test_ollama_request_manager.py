@@ -12,18 +12,16 @@ Tests cover:
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from source.services.ollama_request_manager.manager import (
     GenerationConfig,
     Message,
-    OllamaQueryInput,
     OllamaQueryResult,
     OllamaRequestManager,
 )
-
 
 # -------------------------------------------------------------- #
 # Fixtures
@@ -60,7 +58,7 @@ def mock_ollama_client():
 
 
 @pytest.fixture
-async def ollama_manager(mock_context, mock_ollama_client):
+async def ollama_manager(mock_context, mock_ollama_client):  # noqa: ARG001
     """Create an OllamaRequestManager instance for testing."""
     manager = OllamaRequestManager(
         context=mock_context,
@@ -89,7 +87,7 @@ async def started_manager(ollama_manager, mock_services):
 class TestInitialization:
     """Test manager initialization and configuration."""
 
-    def test_init_with_defaults(self, mock_context, mock_ollama_client):
+    def test_init_with_defaults(self, mock_context, mock_ollama_client):  # noqa: ARG002
         """Test initialization with default parameters."""
         with patch.dict(
             "os.environ",
@@ -102,7 +100,7 @@ class TestInitialization:
             assert manager._max_history_length == 50
             assert manager._max_history_tokens is None
 
-    def test_init_with_custom_params(self, mock_context, mock_ollama_client):
+    def test_init_with_custom_params(self, mock_context, mock_ollama_client):  # noqa: ARG002
         """Test initialization with custom parameters."""
         manager = OllamaRequestManager(
             context=mock_context,
@@ -224,7 +222,7 @@ class TestQueryInterface:
             }
         )
 
-        result = await started_manager.query(
+        _result = await started_manager.query(
             prompt="Test",
             temperature=0.9,
             top_p=0.95,

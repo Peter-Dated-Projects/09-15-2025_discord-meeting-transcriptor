@@ -112,10 +112,10 @@ async def murder(ctx: discord.ApplicationContext):
         )
     except Exception as e:
         # Try to send error message to user
-        try:
+        import contextlib
+
+        with contextlib.suppress(Exception):
             await ctx.followup.send(f"⚠️ Shutdown completed with errors: {str(e)}")
-        except Exception:
-            pass  # Ignore if we can't send the message
 
     # Finally, close the bot
     await bot.close()

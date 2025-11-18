@@ -66,7 +66,7 @@ async def test_vector_db_client_operations(test_vector_db_client):
 async def test_whisper_client_operations(test_whisper_client):
     """Test Whisper client operations."""
     # Health check
-    health = await test_whisper_client.health_check()
+    _health = await test_whisper_client.health_check()
     # Note: This will fail if Whisper server is not running
     # In a real test environment, you may want to mock this or skip if not available
     # For now, we just test that the client exists

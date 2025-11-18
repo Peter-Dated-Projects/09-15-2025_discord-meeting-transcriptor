@@ -566,7 +566,7 @@ class SQLRecordingManagerService(Manager):
 
             # Extract recording IDs and user IDs
             recording_ids = [rec["id"] for rec in recordings]
-            user_ids = list(set(rec["user_id"] for rec in recordings))  # Deduplicate user IDs
+            user_ids = list({rec["user_id"] for rec in recordings})  # Deduplicate user IDs
 
             # Create and queue the transcription job
             job_id = (

@@ -148,7 +148,7 @@ class TranscriptionCompilationJob(Job):
                 "meeting_id": self.meeting_id,
                 "compiled_at": get_current_timestamp_est().isoformat(),
                 "transcript_count": len(transcription_metadata),
-                "user_ids": list(set(m["user_id"] for m in transcription_metadata)),
+                "user_ids": list({m["user_id"] for m in transcription_metadata}),
                 "segment_count": len(all_segments),
                 "segments": all_segments,
             }

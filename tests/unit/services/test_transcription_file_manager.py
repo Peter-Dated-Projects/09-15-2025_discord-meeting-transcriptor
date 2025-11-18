@@ -91,7 +91,9 @@ class TestTranscriptionFileManagerService:
 
         return test_data["meeting_id"]
 
-    async def test_save_transcription(self, services_and_db, test_data, setup_meeting):
+    async def test_save_transcription(
+        self, services_and_db, test_data, setup_meeting  # noqa: ARG002
+    ):
         """Test saving a transcription."""
         services_manager, _ = services_and_db
         transcription_service = services_manager.transcription_file_service_manager
@@ -120,7 +122,9 @@ class TestTranscriptionFileManagerService:
         # Verify SQL entry exists
         assert await transcription_service.transcript_exists(transcript_id)
 
-    async def test_retrieve_transcription(self, services_and_db, test_data, setup_meeting):
+    async def test_retrieve_transcription(
+        self, services_and_db, test_data, setup_meeting  # noqa: ARG002
+    ):
         """Test retrieving a transcription."""
         services_manager, _ = services_and_db
         transcription_service = services_manager.transcription_file_service_manager
@@ -141,7 +145,9 @@ class TestTranscriptionFileManagerService:
         assert retrieved_data["language"] == test_data["transcript_data"]["language"]
         assert len(retrieved_data["segments"]) == len(test_data["transcript_data"]["segments"])
 
-    async def test_delete_transcription(self, services_and_db, test_data, setup_meeting):
+    async def test_delete_transcription(
+        self, services_and_db, test_data, setup_meeting  # noqa: ARG002
+    ):
         """Test deleting a transcription."""
         services_manager, _ = services_and_db
         transcription_service = services_manager.transcription_file_service_manager
@@ -167,7 +173,9 @@ class TestTranscriptionFileManagerService:
         assert not os.path.exists(file_path)
         assert not await transcription_service.transcript_exists(transcript_id)
 
-    async def test_get_transcriptions_by_meeting(self, services_and_db, test_data, setup_meeting):
+    async def test_get_transcriptions_by_meeting(
+        self, services_and_db, test_data, setup_meeting  # noqa: ARG002
+    ):
         """Test retrieving all transcriptions for a meeting."""
         import time
 
@@ -212,7 +220,7 @@ class TestTranscriptionFileManagerService:
             assert saved_id in retrieved_ids
 
     async def test_get_transcription_by_user_and_meeting(
-        self, services_and_db, test_data, setup_meeting
+        self, services_and_db, test_data, setup_meeting  # noqa: ARG002
     ):
         """Test retrieving a specific user's transcription for a meeting."""
         import random
@@ -242,7 +250,7 @@ class TestTranscriptionFileManagerService:
         assert transcript_meta["user_id"] == unique_user_id
 
     async def test_save_transcription_with_custom_id(
-        self, services_and_db, test_data, setup_meeting
+        self, services_and_db, test_data, setup_meeting  # noqa: ARG002
     ):
         """Test saving a transcription with a custom ID."""
         import random

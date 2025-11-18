@@ -376,7 +376,7 @@ class OllamaRequestManager(Manager):
                 message = response.get("message", {})
                 content = message.get("content", "")
                 thinking = message.get("thinking", "")
-                
+
                 # If content is empty but thinking exists, use thinking as fallback
                 # This handles models like gpt-oss:20b that prioritize thinking field
                 if not content and thinking:
@@ -455,12 +455,12 @@ class OllamaRequestManager(Manager):
             async for chunk in await self._client.chat(**request_params):
                 message = chunk.get("message", {})
                 content = message.get("content") or ""
-                
+
                 # Handle models with thinking field (like gpt-oss)
                 # If content is empty, try thinking field
                 if not content:
                     content = message.get("thinking") or ""
-                
+
                 if content:  # Only process and yield non-empty content
                     full_content += content
                     yield content

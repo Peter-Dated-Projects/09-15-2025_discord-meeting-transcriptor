@@ -22,10 +22,9 @@ from dotenv import load_dotenv
 
 from source.context import Context
 from source.services.ollama_request_manager.manager import (
-    OllamaRequestManager,
     OllamaQueryResult,
+    OllamaRequestManager,
 )
-
 
 # Load environment variables from .env.local
 env_path = Path(__file__).parent.parent.parent.parent / ".env.local"
@@ -63,7 +62,7 @@ def test_context():
 
 
 @pytest.fixture
-async def ollama_manager(test_context, check_ollama_available):
+async def ollama_manager(test_context, check_ollama_available):  # noqa: ARG001
     """Create an OllamaRequestManager instance with real Ollama connection."""
     host = os.getenv("OLLAMA_HOST", "localhost")
     port = os.getenv("OLLAMA_PORT", "11434")
