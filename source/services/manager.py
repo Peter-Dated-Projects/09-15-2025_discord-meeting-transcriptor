@@ -29,6 +29,7 @@ class ServicesManager:
         presence_manager_service: Any | None = None,
         transcription_job_manager: Any | None = None,
         transcription_compilation_job_manager: Any | None = None,
+        gpu_resource_manager: Any | None = None,
     ):
         self.context = context
         # Backward compatibility - keep server reference
@@ -51,6 +52,9 @@ class ServicesManager:
 
         # Presence manager
         self.presence_manager_service = presence_manager_service
+
+        # GPU resource manager
+        self.gpu_resource_manager = gpu_resource_manager
 
         # Transcription job manager
         self.transcription_job_manager = transcription_job_manager
@@ -80,6 +84,10 @@ class ServicesManager:
         # Presence manager
         if self.presence_manager_service:
             await self.presence_manager_service.on_start(self)
+
+        # GPU resource manager
+        if self.gpu_resource_manager:
+            await self.gpu_resource_manager.on_start(self)
 
         # Transcription job manager
         if self.transcription_job_manager:
@@ -136,18 +144,24 @@ class ServicesManager:
                 )
                 await self.logging_service.info("✓ Presence manager stopped")
 
-            # Phase 3: Wait for transcription jobs to complete
+            # Phase 3: Wait for GPU jobs to complete
+            await self.logging_service.info("Phase 3: Waiting for GPU jobs to complete...")
+            if self.gpu_resource_manager:
+                await asyncio.wait_for(self.gpu_resource_manager.on_close(), timeout=timeout * 0.25)
+                await self.logging_service.info("✓ All GPU jobs completed")
+
+            # Phase 4: Wait for transcription jobs to complete
             await self.logging_service.info(
-                "Phase 3: Waiting for transcription jobs to complete..."
+                "Phase 4: Waiting for transcription jobs to complete..."
             )
             if self.transcription_job_manager:
                 await asyncio.wait_for(
-                    self.transcription_job_manager.on_close(), timeout=timeout * 0.25
+                    self.transcription_job_manager.on_close(), timeout=timeout * 0.2
                 )
                 await self.logging_service.info("✓ All transcription jobs completed")
 
-            # Phase 4: Wait for compilation jobs to complete
-            await self.logging_service.info("Phase 4: Waiting for compilation jobs to complete...")
+            # Phase 5: Wait for compilation jobs to complete
+            await self.logging_service.info("Phase 5: Waiting for compilation jobs to complete...")
             if self.transcription_compilation_job_manager:
                 await asyncio.wait_for(
                     self.transcription_compilation_job_manager.on_close(), timeout=timeout * 0.25

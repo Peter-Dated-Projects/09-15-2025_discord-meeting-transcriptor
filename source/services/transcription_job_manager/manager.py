@@ -119,46 +119,59 @@ class TranscriptionJob(Job):
             )
             return
 
-        # Send to Whisper for transcription
+        # Send to Whisper for transcription WITH GPU LOCK
         try:
-            transcript_text = await self.services.server.whisper_server_client.inference(
-                audio_path=audio_file_path,
-                word_timestamps=True,
-                response_format="verbose_json",
-                temperature="0.0",
-                temperature_inc="0.2",
-                language="en",
-            )
-
-            await self.services.logging_service.info(
-                f"Successfully transcribed recording {recording_id}"
-            )
-
-            # Prepare transcript data
-            transcript_data = {
-                "meeting_id": self.meeting_id,
-                "user_id": user_id,
-                "recording_id": recording_id,
-                "whisper_data": transcript_text,
-                "created_at": get_current_timestamp_est().isoformat(),
-            }
-
-            # Save transcription to file and database
-            # File will be saved as: data/transcriptions/storage/transcript_{meeting_id}_{user_id}_{transcript_id}.json
-            transcript_id, transcript_filename = (
-                await self.services.transcription_file_service_manager.save_transcription(
-                    transcript_data=transcript_data,
-                    meeting_id=self.meeting_id,
-                    user_id=user_id,
+            # Acquire GPU lock before calling Whisper
+            async with self.services.gpu_resource_manager.acquire_lock(
+                job_type="transcription",
+                job_id=self.job_id,
+                metadata={
+                    "meeting_id": self.meeting_id,
+                    "recording_id": recording_id,
+                    "user_id": user_id,
+                },
+            ):
+                # GPU is now locked - perform transcription
+                transcript_text = await self.services.server.whisper_server_client.inference(
+                    audio_path=audio_file_path,
+                    word_timestamps=True,
+                    response_format="verbose_json",
+                    temperature="0.0",
+                    temperature_inc="0.2",
+                    language="en",
                 )
-            )
 
-            await self.services.logging_service.info(
-                f"Saved transcription {transcript_id} to {transcript_filename}"
-            )
+                await self.services.logging_service.info(
+                    f"Successfully transcribed recording {recording_id}"
+                )
 
-            # Track the transcript ID for compilation
-            self.transcript_ids.append(transcript_id)
+                # Prepare transcript data
+                transcript_data = {
+                    "meeting_id": self.meeting_id,
+                    "user_id": user_id,
+                    "recording_id": recording_id,
+                    "whisper_data": transcript_text,
+                    "created_at": get_current_timestamp_est().isoformat(),
+                }
+
+                # Save transcription to file and database
+                # File will be saved as: data/transcriptions/storage/transcript_{meeting_id}_{user_id}_{transcript_id}.json
+                transcript_id, transcript_filename = (
+                    await self.services.transcription_file_service_manager.save_transcription(
+                        transcript_data=transcript_data,
+                        meeting_id=self.meeting_id,
+                        user_id=user_id,
+                    )
+                )
+
+                await self.services.logging_service.info(
+                    f"Saved transcription {transcript_id} to {transcript_filename}"
+                )
+
+                # Track the transcript ID for compilation
+                self.transcript_ids.append(transcript_id)
+
+            # GPU lock automatically released here
 
         except Exception as e:
             await self.services.logging_service.error(
