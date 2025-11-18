@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from source.context import Context
 
-from source.server.server import ServerManager
 from source.server.common import whisper_server
+from source.server.server import ServerManager
 from source.server.testing.mysql import InMemoryMySQLServer
 from source.server.testing.vector_db import InMemoryChromaDBClient
 

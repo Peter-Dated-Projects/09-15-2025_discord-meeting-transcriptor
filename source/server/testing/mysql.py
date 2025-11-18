@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import aiosqlite
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.sql import ddl
 
@@ -160,15 +160,14 @@ class InMemoryMySQLServer(SQLDatabase):
             sql = self.compile_query_object(stmt)
             logger.debug(f"[{self.name}] Executing: {sql}")
 
-            async with self._get_connection() as conn:
-                async with conn.execute(sql) as cursor:
-                    rows = await cursor.fetchall()
-                    await conn.commit()
+            async with self._get_connection() as conn, conn.execute(sql) as cursor:
+                rows = await cursor.fetchall()
+                await conn.commit()
 
-                    # Convert rows to dictionaries
-                    if rows:
-                        return [dict(row) for row in rows]
-                    return []
+                # Convert rows to dictionaries
+                if rows:
+                    return [dict(row) for row in rows]
+                return []
 
         except Exception as e:
             logger.error(f"[{self.name}] Query execution failed: {e}")

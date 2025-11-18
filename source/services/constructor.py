@@ -129,11 +129,11 @@ def construct_services_manager(
         # Transcription Job Manager Setup
         # -------------------------------------------------------------- #
 
-        from source.services.transcription_job_manager.manager import (
-            TranscriptionJobManagerService,
-        )
         from source.services.transcription_job_manager.compiler import (
             TranscriptionCompilationJobManagerService,
+        )
+        from source.services.transcription_job_manager.manager import (
+            TranscriptionJobManagerService,
         )
 
         transcription_job_manager = TranscriptionJobManagerService(context=context)

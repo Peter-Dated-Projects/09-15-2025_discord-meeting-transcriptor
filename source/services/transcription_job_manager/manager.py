@@ -18,9 +18,9 @@ if TYPE_CHECKING:
     from source.context import Context
     from source.services.manager import ServicesManager
 
+from source.server.sql_models import JobsStatus, JobsType
 from source.services.common.job import Job, JobQueue
 from source.services.manager import Manager
-from source.server.sql_models import JobsStatus, JobsType
 from source.utils import generate_16_char_uuid, get_current_timestamp_est
 
 
@@ -40,7 +40,7 @@ class TranscriptionJob(Job):
     recording_ids: list[str] = field(default_factory=list)
     user_ids: list[str] = field(default_factory=list)
     transcript_ids: list[str] = field(default_factory=list)  # Track created transcript IDs
-    services: "ServicesManager" = None  # type: ignore
+    services: ServicesManager = None  # type: ignore
 
     # -------------------------------------------------------------- #
     # Job Execution

@@ -11,7 +11,7 @@ import aiofiles
 if TYPE_CHECKING:
     from source.context import Context
 
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import delete, insert, select
 
 from source.server.sql_models import UserTranscriptsModel
 from source.services.manager import BaseTranscriptionFileServiceManager
@@ -177,7 +177,7 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
                 await self.services.logging_service.error(f"Transcript file not found: {filename}")
                 return None
 
-            async with aiofiles.open(file_path, mode="r", encoding="utf-8") as f:
+            async with aiofiles.open(file_path, encoding="utf-8") as f:
                 content = await f.read()
                 transcript_data = json.loads(content)
 

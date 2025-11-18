@@ -40,8 +40,9 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, AsyncIterator, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import ollama
 
@@ -51,7 +52,6 @@ if TYPE_CHECKING:
 
 from source.services.manager import Manager
 from source.services.ollama_request_manager.conversation import ConversationHistory
-
 
 # -------------------------------------------------------------- #
 # Data Models
@@ -316,7 +316,9 @@ class OllamaRequestManager(Manager):
                         session.add_assistant_message(msg.content)
 
             # Use session history for query
-            messages = [Message(role=m["role"], content=m["content"]) for m in session.get_messages()]
+            messages = [
+                Message(role=m["role"], content=m["content"]) for m in session.get_messages()
+            ]
         elif not messages:
             # No session and no messages provided
             raise ValueError("Either messages or session_id must be provided")
@@ -427,7 +429,9 @@ class OllamaRequestManager(Manager):
             await self.services.logging_service.error(
                 f"Ollama query failed after {query_input.max_retries} attempts: {last_error}"
             )
-        raise RuntimeError(f"Ollama query failed after {query_input.max_retries} attempts") from last_error
+        raise RuntimeError(
+            f"Ollama query failed after {query_input.max_retries} attempts"
+        ) from last_error
 
     async def _query_stream(self, query_input: OllamaQueryInput) -> AsyncIterator[str]:
         """Execute a streaming query."""

@@ -2,18 +2,20 @@
 Ollama Request Manager Service.
 
 This module provides a comprehensive wrapper around the Ollama API with:
+- Stateless base Ollama wrapper (manager.py)
+- Stateful conversation service (conversation.py)
 - Full chat history management
 - Configurable generation parameters
 - Streaming and non-streaming support
-- Session/conversation tracking
+- LangChain integration
 - Retry logic with exponential backoff
 - JSON output mode support
 
-Example usage:
+Example usage (base manager):
     from source.services.ollama_request_manager import OllamaRequestManager
 
     # Initialize manager
-    manager = OllamaRequestManager(context, host="http://localhost:11434")
+    manager = OllamaRequestManager(context)
     await manager.on_start(services)
 
     # Simple query
@@ -23,45 +25,63 @@ Example usage:
     )
     print(result.content)
 
-    # Session-based conversation
-    result = await manager.query(
-        model="llama2",
-        prompt="Tell me about Python",
-        session_id="user_123"
-    )
-    result = await manager.query(
-        model="llama2",
-        prompt="What are its main features?",
-        session_id="user_123"
+Example usage (conversation service):
+    from source.services.ollama_request_manager import (
+        OllamaRequestManager,
+        ConversationService
     )
 
-    # Streaming
-    async for chunk in await manager.query(
-        model="llama2",
-        prompt="Tell me a long story",
-        stream=True
-    ):
-        print(chunk, end="")
+    # Initialize
+    manager = OllamaRequestManager(context)
+    await manager.on_start(services)
+
+    conv_service = ConversationService(manager)
+
+    # Start a conversation
+    response = await conv_service.chat(
+        conversation_id="user_123",
+        user_input="Tell me about Python"
+    )
+
+    # Continue (history is automatic)
+    response = await conv_service.chat(
+        conversation_id="user_123",
+        user_input="What are its main features?"
+    )
 """
 
-from source.services.ollama_request_manager.conversation import (
-    ConversationHistory,
-    ConversationMessage,
-)
+from source.services.ollama_request_manager.conversation import ConversationService
+from source.services.ollama_request_manager.langchain_adapter import LangChainAdapter
 from source.services.ollama_request_manager.manager import (
     GenerationConfig,
-    Message,
+)
+from source.services.ollama_request_manager.manager import Message as OllamaMessage
+from source.services.ollama_request_manager.manager import (
     OllamaQueryInput,
     OllamaQueryResult,
     OllamaRequestManager,
 )
+from source.services.ollama_request_manager.models import (
+    Conversation,
+    Message,
+    MessageChunk,
+    MessageUsage,
+)
 
 __all__ = [
+    # Base manager
     "OllamaRequestManager",
     "OllamaQueryInput",
     "OllamaQueryResult",
     "GenerationConfig",
+    "OllamaMessage",
+    # Conversation service
+    "ConversationService",
+    # Models
     "Message",
-    "ConversationHistory",
-    "ConversationMessage",
+    "MessageUsage",
+    "MessageChunk",
+    "Conversation",
+    # LangChain integration
+    "LangChainAdapter",
 ]

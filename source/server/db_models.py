@@ -1,6 +1,7 @@
 from pydantic import RootModel, field_validator
 
 from source.server.sql_models import (
+    CompiledTranscriptsModel,
     GuildAdminWhitelistModel,
     JobsStatusErrorLogModel,
     JobsStatusModel,
@@ -8,7 +9,6 @@ from source.server.sql_models import (
     RecordingModel,
     TempRecordingModel,
     UserTranscriptsModel,
-    CompiledTranscriptsModel,
 )
 
 # -------------------------------------------------------------- #

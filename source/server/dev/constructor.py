@@ -6,9 +6,9 @@ from dotenv import load_dotenv
 if TYPE_CHECKING:
     from source.context import Context
 
+from source.server.common import vector_db, whisper_server
 from source.server.dev.mysql import MySQLServer
 from source.server.server import ServerManager
-from source.server.common import vector_db, whisper_server
 
 load_dotenv(dotenv_path=".env.local")
 

@@ -6,7 +6,6 @@ without requiring a running ChromaDB server.
 """
 
 import logging
-from typing import Any
 
 from source.server.services import VectorDBDatabase
 
