@@ -89,7 +89,7 @@ class OllamaQueryInput:
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     format: Literal["text", "json"] | None = None
     stream: bool = False
-    keep_alive: str | int = "5m"  # e.g., "5m", 0, -1
+    keep_alive: str | int = 10  # e.g., "5m", 0, -1, 10
     session_id: str | None = None
     timeout_ms: int = 120000  # 2 minutes default
     max_retries: int = 3
