@@ -1,27 +1,21 @@
 import asyncio
-import os
 import json
-import requests
+import os
 from datetime import datetime
-from typing import List, Dict, Any
-from dotenv import load_dotenv
 
-from source.server.common.whisper_server import construct_whisper_server_client
+import requests
+from dotenv import load_dotenv
 
 load_dotenv(".env.local")
 
 
 async def main():
     meeting_id = "example_meeting_001"
-    user_ids = ["user_123"]  # Add more user IDs as needed
 
     # Configuration
     max_words_per_request = 2000
 
     # Path to the audio file to transcribe
-    audio_path = os.path.join("playground", "assets", "podcast.mp3")
-    transcript_path = os.path.join("playground", "assets", "transcript.json")
-    compiled_path = os.path.join("playground", "assets", f"transcript_{meeting_id}.json")
     raw_text_path = os.path.join("playground", "assets", f"transcript_{meeting_id}_raw.txt")
 
     # # phase 1 -- Create Whisper server client
@@ -116,7 +110,7 @@ async def main():
 
     # Load raw text
     print(f"Loading raw text from: {raw_text_path}")
-    with open(raw_text_path, "r", encoding="utf-8") as f:
+    with open(raw_text_path, encoding="utf-8") as f:
         text = f.read()
 
     all_summaries = []  # Track all summaries at each level
@@ -155,8 +149,8 @@ async def main():
             if level == 0:
                 system_message = "You are an expert at summarizing meeting transcripts. Extract key topics, decisions, and action items concisely."
                 user_content = f"""
-Summarize this meeting transcript section (part {i+1} of {len(chunks)}). 
-Provide a 200-500 word summary covering: 
+Summarize this meeting transcript section (part {i+1} of {len(chunks)}).
+Provide a 200-500 word summary covering:
 - Main topics discussed
 - Key points and decisions for each topic discussed
 - Important action items

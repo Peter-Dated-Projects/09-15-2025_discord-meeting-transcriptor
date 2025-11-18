@@ -242,13 +242,13 @@ class GPUResourceManager(Manager):
         if not self._scheduler_running:
             return
 
+        import contextlib
+
         self._scheduler_running = False
         if self._scheduler_task:
             self._scheduler_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._scheduler_task
-            except asyncio.CancelledError:
-                pass
 
     async def _scheduler_loop(self) -> None:
         """

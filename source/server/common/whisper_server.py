@@ -134,8 +134,7 @@ class WhisperServerClient(WhisperServerHandler):
         response_format = response_format or "json"
 
         data = aiohttp.FormData()
-        f = open(audio_path, "rb")  # Keep open until request is done
-        try:
+        with open(audio_path, "rb") as f:
             data.add_field("file", f, filename=os.path.basename(audio_path))
 
             # Add optional parameters
@@ -161,11 +160,6 @@ class WhisperServerClient(WhisperServerHandler):
                 # JSON / verbose_json - return full parsed response
                 result = json.loads(body)
                 return result
-        except Exception as e:
-            logger.error(f"Inference failed: {e}")
-            raise
-        finally:
-            f.close()
 
 
 def construct_whisper_server_client(

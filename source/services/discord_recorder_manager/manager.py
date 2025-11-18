@@ -2150,7 +2150,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             meeting_data = await self.services.sql_recording_service_manager.get_meeting(
                 meeting_id=meeting_id
             )
-            guild_data = await self.context.bot.fetch_guild(int(meeting_data["guild_id"]))
+            _guild_data = await self.context.bot.fetch_guild(int(meeting_data["guild_id"]))
 
             await self.services.logging_service.info(
                 f"Successfully created persistent recording {recording_id} for user {user_id} in meeting {meeting_id}"

@@ -160,7 +160,7 @@ class OllamaRequestManager(Manager):
         # Get configuration from environment variables
         ollama_host = os.environ.get("OLLAMA_HOST", "localhost")
         ollama_port = os.environ.get("OLLAMA_PORT", "11434")
-        ollama_model = os.environ.get("OLLAMA_MODEL", "llama2")
+        ollama_model = os.environ.get("OLLAMA_MODEL", "gpt-oss:20b")
 
         # Build host URL if not provided
         if host is None:
@@ -372,8 +372,15 @@ class OllamaRequestManager(Manager):
                     self._client.chat(**request_params), timeout=query_input.timeout_ms / 1000
                 )
 
-                # Extract result
-                content = response.get("message", {}).get("content", "")
+                # Extract result - handle models with thinking field (like gpt-oss)
+                message = response.get("message", {})
+                content = message.get("content", "")
+                thinking = message.get("thinking", "")
+
+                # If content is empty but thinking exists, use thinking as fallback
+                # This handles models like gpt-oss:20b that prioritize thinking field
+                if not content and thinking:
+                    content = thinking
 
                 # Update session if applicable
                 if query_input.session_id and query_input.session_id in self._sessions:
@@ -446,9 +453,17 @@ class OllamaRequestManager(Manager):
             # Execute streaming request
             full_content = ""
             async for chunk in await self._client.chat(**request_params):
-                content = chunk.get("message", {}).get("content", "")
-                full_content += content
-                yield content
+                message = chunk.get("message", {})
+                content = message.get("content") or ""
+
+                # Handle models with thinking field (like gpt-oss)
+                # If content is empty, try thinking field
+                if not content:
+                    content = message.get("thinking") or ""
+
+                if content:  # Only process and yield non-empty content
+                    full_content += content
+                    yield content
 
             # Update session with full response
             if query_input.session_id and query_input.session_id in self._sessions:

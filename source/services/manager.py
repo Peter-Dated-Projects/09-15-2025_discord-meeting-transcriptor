@@ -228,7 +228,7 @@ class Manager(ABC):
         self.services = None
 
         # check if server has been initialized
-        if not self.server._initialized:
+        if self.server is not None and not self.server._initialized:
             raise RuntimeError(
                 "ServerManager must be initialized before creating Manager instances."
             )
