@@ -113,7 +113,7 @@ class GPUResourceManager(Manager):
     # GPU Lock Acquisition
     # -------------------------------------------------------------- #
 
-    async def acquire_lock(
+    def acquire_lock(
         self, job_type: str | GPUJobType, job_id: str = "unknown", metadata: dict = None
     ):
         """
@@ -170,8 +170,8 @@ class GPUResourceManager(Manager):
         # Wait for the scheduler to grant access
         await ready_event.wait()
 
-        # Now acquire the actual lock
-        await self._gpu_lock.acquire(job_id=job_id, job_type=job_type.value, metadata=metadata)
+        # Now acquire the actual lock (this is just bookkeeping, not blocking)
+        self._gpu_lock.acquire(job_id=job_id, job_type=job_type.value, metadata=metadata)
 
         # Update statistics
         if job_type == GPUJobType.TRANSCRIPTION:

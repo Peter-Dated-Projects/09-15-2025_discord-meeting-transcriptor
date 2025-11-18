@@ -21,9 +21,7 @@ from source.services.manager import ServicesManager
 class TestGPUResourceManagerService:
     """Test GPU Resource Manager Service functionality."""
 
-    async def test_gpu_manager_exists_on_services_manager(
-        self, services_manager: ServicesManager
-    ):
+    async def test_gpu_manager_exists_on_services_manager(self, services_manager: ServicesManager):
         """
         Test that GPU Resource Manager exists on ServicesManager.
 
@@ -37,9 +35,7 @@ class TestGPUResourceManagerService:
         assert hasattr(
             services_manager, "gpu_resource_manager"
         ), "ServicesManager missing gpu_resource_manager attribute"
-        assert (
-            services_manager.gpu_resource_manager is not None
-        ), "gpu_resource_manager is None"
+        assert services_manager.gpu_resource_manager is not None, "gpu_resource_manager is None"
 
     async def test_gpu_manager_initialization(self, services_manager: ServicesManager):
         """
@@ -74,11 +70,10 @@ class TestGPUResourceManagerService:
         """
         gpu_manager = services_manager.gpu_resource_manager
 
-        # Act: Acquire GPU lock using the context manager returned by acquire_lock
-        lock_context = gpu_manager.acquire_lock(
+        # Act: Acquire GPU lock (acquire_lock returns a context manager)
+        async with gpu_manager.acquire_lock(
             job_type="transcription", job_id="test_job_001", metadata={"test": True}
-        )
-        async with lock_context:
+        ):
             # Assert: Lock is held
             assert gpu_manager._gpu_lock.is_locked(), "GPU lock should be locked but isn't"
 
@@ -101,11 +96,10 @@ class TestGPUResourceManagerService:
         """
         gpu_manager = services_manager.gpu_resource_manager
 
-        # Act: Acquire and release lock using the context manager returned by acquire_lock
-        lock_context = gpu_manager.acquire_lock(
+        # Act: Acquire and release lock
+        async with gpu_manager.acquire_lock(
             job_type="transcription", job_id="test_job_002", metadata={"test": True}
-        )
-        async with lock_context:
+        ):
             pass  # Lock acquired
 
         # Assert: Lock is released
@@ -136,9 +130,7 @@ class TestGPUResourceManagerService:
 
         # Assert: Initial values are correct
         assert status["scheduler_running"] is True, "Scheduler should be running"
-        assert (
-            status["gpu_lock"]["is_locked"] is False
-        ), "GPU should not be locked initially"
+        assert status["gpu_lock"]["is_locked"] is False, "GPU should not be locked initially"
 
     async def test_gpu_manager_queue_sizes(self, services_manager: ServicesManager):
         """
@@ -163,9 +155,7 @@ class TestGPUResourceManagerService:
         assert "transcription" in queue_sizes, "Missing transcription queue"
         assert isinstance(queue_sizes["transcription"], int), "Queue size should be integer"
 
-    async def test_concurrent_lock_acquisition_blocks(
-        self, services_manager: ServicesManager
-    ):
+    async def test_concurrent_lock_acquisition_blocks(self, services_manager: ServicesManager):
         """
         Test that concurrent lock acquisition properly blocks.
 
@@ -184,17 +174,14 @@ class TestGPUResourceManagerService:
         async def acquire_lock_task(job_id: str, delay: float):
             """Task to acquire lock and record timing."""
             await asyncio.sleep(delay)
-            lock_context = gpu_manager.acquire_lock(
+            async with gpu_manager.acquire_lock(
                 job_type="transcription", job_id=job_id, metadata={"test": True}
-            )
-            async with lock_context:
+            ):
                 lock_acquired_times.append((job_id, asyncio.get_event_loop().time()))
                 await asyncio.sleep(0.1)  # Hold lock briefly
 
         # Act: Start two tasks trying to acquire the lock
-        await asyncio.gather(
-            acquire_lock_task("job_1", 0.0), acquire_lock_task("job_2", 0.05)
-        )
+        await asyncio.gather(acquire_lock_task("job_1", 0.0), acquire_lock_task("job_2", 0.05))
 
         # Assert: Both tasks completed
         assert len(lock_acquired_times) == 2, "Both tasks should have acquired the lock"
@@ -205,6 +192,4 @@ class TestGPUResourceManagerService:
 
         # Second job should have acquired lock after first job released it
         # Since job_1 holds for 0.1s, job_2 should start at least 0.1s later
-        assert (
-            job_2_time > job_1_time
-        ), "Second job should have acquired lock after first job"
+        assert job_2_time > job_1_time, "Second job should have acquired lock after first job"

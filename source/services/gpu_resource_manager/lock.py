@@ -37,32 +37,32 @@ class GPUResourceLock:
 
     def __init__(self):
         """Initialize the GPU resource lock."""
-        self._lock = asyncio.Lock()
         self._current_holder: Optional[GPULockInfo] = None
-        self._wait_count = 0
 
-    async def acquire(self, job_id: str, job_type: str, metadata: dict = None) -> None:
+    def acquire(self, job_id: str, job_type: str, metadata: dict = None) -> None:
         """
         Acquire the GPU lock for a job.
 
-        This will block until the lock is available.
+        Note: This should only be called after the scheduler grants permission.
+        The actual blocking/waiting is handled by the GPUResourceManager scheduler.
 
         Args:
             job_id: Unique identifier for the job acquiring the lock
             job_type: Type of job (transcription, summarization, chatbot)
             metadata: Optional metadata about the job
         """
-        self._wait_count += 1
-        try:
-            await self._lock.acquire()
-            self._current_holder = GPULockInfo(
-                job_id=job_id,
-                job_type=job_type,
-                acquired_at=get_current_timestamp_est(),
-                metadata=metadata or {},
+        if self._current_holder is not None:
+            raise RuntimeError(
+                f"GPU lock already held by {self._current_holder.job_id}. "
+                f"Cannot acquire for {job_id}. This indicates a scheduler bug."
             )
-        finally:
-            self._wait_count -= 1
+
+        self._current_holder = GPULockInfo(
+            job_id=job_id,
+            job_type=job_type,
+            acquired_at=get_current_timestamp_est(),
+            metadata=metadata or {},
+        )
 
     def release(self) -> None:
         """
@@ -70,21 +70,15 @@ class GPUResourceLock:
 
         This should be called after a job completes its GPU work.
         """
-        if self._lock.locked():
-            self._current_holder = None
-            self._lock.release()
+        self._current_holder = None
 
     def is_locked(self) -> bool:
         """Check if the GPU lock is currently held."""
-        return self._lock.locked()
+        return self._current_holder is not None
 
     def get_current_holder(self) -> Optional[GPULockInfo]:
         """Get information about the current lock holder."""
         return self._current_holder
-
-    def get_wait_count(self) -> int:
-        """Get the number of jobs waiting to acquire the lock."""
-        return self._wait_count
 
     def get_status(self) -> dict:
         """
@@ -110,15 +104,4 @@ class GPUResourceLock:
         return {
             "is_locked": self.is_locked(),
             "current_holder": holder_info,
-            "wait_count": self.get_wait_count(),
         }
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.acquire("context_manager", "unknown")
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        self.release()
-        return False
