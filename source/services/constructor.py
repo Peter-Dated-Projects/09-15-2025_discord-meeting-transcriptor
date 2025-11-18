@@ -104,7 +104,7 @@ def construct_services_manager(
         # -------------------------------------------------------------- #
 
         from source.services.recording_sql_manager.manager import SQLRecordingManagerService
-        from source.services.sql_logging.manager import SQLLoggingManagerService
+        from source.services.sql_logging_manager.manager import SQLLoggingManagerService
 
         sql_recording_service_manager = SQLRecordingManagerService(context=context)
         sql_logging_service_manager = SQLLoggingManagerService(context=context)
@@ -113,7 +113,7 @@ def construct_services_manager(
         # Discord Recorder Setup
         # -------------------------------------------------------------- #
 
-        from source.services.discord_recorder.manager import DiscordRecorderManagerService
+        from source.services.discord_recorder_manager.manager import DiscordRecorderManagerService
 
         discord_recorder_service_manager = DiscordRecorderManagerService(context=context)
 
@@ -129,11 +129,11 @@ def construct_services_manager(
         # Transcription Job Manager Setup
         # -------------------------------------------------------------- #
 
-        from source.services.transcription_job_manager.manager import (
-            TranscriptionJobManagerService,
-        )
         from source.services.transcription_job_manager.compiler import (
             TranscriptionCompilationJobManagerService,
+        )
+        from source.services.transcription_job_manager.manager import (
+            TranscriptionJobManagerService,
         )
 
         transcription_job_manager = TranscriptionJobManagerService(context=context)

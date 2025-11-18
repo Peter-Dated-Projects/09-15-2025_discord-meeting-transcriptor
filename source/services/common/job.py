@@ -10,9 +10,10 @@ This module provides:
 import asyncio
 import enum
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from source.utils import get_current_timestamp_est
 

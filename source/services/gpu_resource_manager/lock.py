@@ -5,10 +5,8 @@ This module provides an async lock system for managing exclusive GPU access.
 Only one job can hold the GPU lock at a time, ensuring proper resource management.
 """
 
-import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 from source.utils import get_current_timestamp_est
 
@@ -37,7 +35,7 @@ class GPUResourceLock:
 
     def __init__(self):
         """Initialize the GPU resource lock."""
-        self._current_holder: Optional[GPULockInfo] = None
+        self._current_holder: GPULockInfo | None = None
 
     def acquire(self, job_id: str, job_type: str, metadata: dict = None) -> None:
         """
@@ -76,7 +74,7 @@ class GPUResourceLock:
         """Check if the GPU lock is currently held."""
         return self._current_holder is not None
 
-    def get_current_holder(self) -> Optional[GPULockInfo]:
+    def get_current_holder(self) -> GPULockInfo | None:
         """Get information about the current lock holder."""
         return self._current_holder
 

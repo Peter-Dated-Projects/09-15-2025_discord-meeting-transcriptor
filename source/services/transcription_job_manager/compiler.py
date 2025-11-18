@@ -28,9 +28,9 @@ if TYPE_CHECKING:
     from source.context import Context
     from source.services.manager import ServicesManager
 
+from source.server.sql_models import JobsStatus, JobsType
 from source.services.common.job import Job, JobQueue
 from source.services.manager import Manager
-from source.server.sql_models import JobsStatus, JobsType
 from source.utils import generate_16_char_uuid, get_current_timestamp_est
 
 
@@ -52,7 +52,7 @@ class TranscriptionCompilationJob(Job):
     meeting_id: str = ""
     transcript_ids: list[str] = field(default_factory=list)
     user_ids: list[str] = field(default_factory=list)
-    services: "ServicesManager" = None  # type: ignore
+    services: ServicesManager = None  # type: ignore
 
     # -------------------------------------------------------------- #
     # Job Execution
@@ -176,12 +176,14 @@ class TranscriptionCompilationJob(Job):
         Returns:
             The compiled transcript ID
         """
+        import asyncio
         import json
         import os
-        import asyncio
-        import aiofiles
         from datetime import datetime
+
+        import aiofiles
         from sqlalchemy import insert
+
         from source.server.sql_models import CompiledTranscriptsModel
         from source.utils import calculate_file_sha256, generate_16_char_uuid
 
@@ -512,6 +514,7 @@ class TranscriptionCompilationJobManagerService(BaseTranscriptionCompilationJobM
         try:
             # Import required modules
             import discord
+
             from source.utils import BotUtils
 
             # Get meeting data

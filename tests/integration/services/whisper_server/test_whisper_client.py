@@ -13,7 +13,6 @@ import pytest
 
 from source.server.common.whisper_server import WhisperServerClient
 
-
 # ============================================================================
 # Fixtures
 # ============================================================================
