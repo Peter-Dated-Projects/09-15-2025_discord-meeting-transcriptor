@@ -234,7 +234,7 @@ Summary section:
         level += 1
 
     # Save final summary
-    final_path = os.path.join(summaries_dir, f"{meeting_id}_final_summary.txt")
+    final_path = os.path.join(summaries_dir, f"{meeting_id}_final_summary.json")
     final_result = {
         "meeting_id": meeting_id,
         "generated_at": datetime.utcnow().isoformat() + "Z",
