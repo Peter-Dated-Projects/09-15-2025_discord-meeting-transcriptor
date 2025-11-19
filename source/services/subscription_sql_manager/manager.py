@@ -109,7 +109,7 @@ class SubscriptionSQLManagerService(Manager):
             f"Deleted subscription for guild: {discord_server_id}"
         )
 
-    async def search_subscription(self, discord_server_id: str) -> SubscriptionsModel | None:
+    async def search_subscription(self, discord_server_id: str) -> dict | None:
         """
         Search for a guild subscription entry by Discord server ID.
 
@@ -117,7 +117,7 @@ class SubscriptionSQLManagerService(Manager):
             discord_server_id: Discord Guild (Server) ID to search for
 
         Returns:
-            SubscriptionsModel if found, None otherwise
+            Subscription dictionary if found, None otherwise
 
         Raises:
             ValueError: If discord_server_id is invalid
@@ -132,19 +132,20 @@ class SubscriptionSQLManagerService(Manager):
         )
 
         # Execute query
-        result = await self.server.sql_client.execute(query)
-        subscription = result.scalars().first()
+        results = await self.server.sql_client.execute(query)
 
-        if subscription:
+        # Handle result - convert list to first element if exists
+        if results:
+            subscription = results[0]
             await self.services.logging_service.debug(
                 f"Found subscription for guild: {discord_server_id}"
             )
+            return subscription
         else:
             await self.services.logging_service.debug(
                 f"No subscription found for guild: {discord_server_id}"
             )
-
-        return subscription
+            return None
 
     async def update_subscription(
         self,
@@ -197,26 +198,23 @@ class SubscriptionSQLManagerService(Manager):
             f"Updated subscription for guild: {discord_server_id} with fields: {list(update_dict.keys())}"
         )
 
-    async def list_all_subscriptions(self) -> list[SubscriptionsModel]:
+    async def list_all_subscriptions(self) -> list[dict]:
         """
         Retrieve all guild subscription entries.
 
         Returns:
-            List of all SubscriptionsModel entries
+            List of all subscription dictionaries
         """
         # Build select query
         query = select(SubscriptionsModel)
 
         # Execute query
-        result = await self.server.sql_client.execute(query)
-        subscriptions = result.scalars().all()
+        results = await self.server.sql_client.execute(query)
 
-        await self.services.logging_service.debug(f"Retrieved {len(subscriptions)} subscriptions")
-        return list(subscriptions)
+        await self.services.logging_service.debug(f"Retrieved {len(results)} subscriptions")
+        return results if isinstance(results, list) else []
 
-    async def search_subscriptions_by_type(
-        self, subscription_type: SubscriptionType
-    ) -> list[SubscriptionsModel]:
+    async def search_subscriptions_by_type(self, subscription_type: SubscriptionType) -> list[dict]:
         """
         Search for guild subscriptions by subscription type.
 
@@ -224,7 +222,7 @@ class SubscriptionSQLManagerService(Manager):
             subscription_type: Type of subscription to filter by (FREE or PAID)
 
         Returns:
-            List of SubscriptionsModel entries matching the subscription type
+            List of subscription dictionaries matching the subscription type
 
         Raises:
             ValueError: If subscription_type is invalid
@@ -239,10 +237,9 @@ class SubscriptionSQLManagerService(Manager):
         )
 
         # Execute query
-        result = await self.server.sql_client.execute(query)
-        subscriptions = result.scalars().all()
+        results = await self.server.sql_client.execute(query)
 
         await self.services.logging_service.debug(
-            f"Found {len(subscriptions)} subscriptions with type: {subscription_type.value}"
+            f"Found {len(results)} subscriptions with type: {subscription_type.value}"
         )
-        return list(subscriptions)
+        return results if isinstance(results, list) else []

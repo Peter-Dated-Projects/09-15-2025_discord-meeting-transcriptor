@@ -75,7 +75,7 @@ class TestSubscriptionSQLManagerService:
     async def setup_subscription_service(self, services_and_db):
         """Setup subscription SQL service with cleanup."""
         services_manager, servers_manager = services_and_db
-        
+
         # Get the subscription service from the services manager
         subscription_service = services_manager.subscription_sql_manager
 
@@ -83,8 +83,9 @@ class TestSubscriptionSQLManagerService:
 
         # Cleanup - delete all test subscriptions
         from sqlalchemy import delete
+
         db_service = servers_manager.sql_client
-        
+
         delete_stmt = delete(SubscriptionsModel)
         await db_service.execute(delete_stmt)
 
@@ -106,11 +107,11 @@ class TestSubscriptionSQLManagerService:
         # Verify the subscription was inserted
         subscription = await subscription_service.search_subscription(test_data["guild_id_1"])
         assert subscription is not None
-        assert subscription.discord_server_id == test_data["guild_id_1"]
-        assert subscription.chroma_collection_name == test_data["collection_name_1"]
-        assert subscription.subscription_type == SubscriptionType.FREE.value
-        assert subscription.joined_guild_at is not None
-        assert subscription.activated_guild_at is None
+        assert subscription.get("discord_server_id") == test_data["guild_id_1"]
+        assert subscription.get("chroma_collection_name") == test_data["collection_name_1"]
+        assert subscription.get("subscription_type") == SubscriptionType.FREE.name
+        assert subscription.get("joined_guild_at") is not None
+        assert subscription.get("activated_guild_at") is None
 
     @pytest.mark.asyncio
     async def test_insert_subscription_paid_with_activation(
@@ -131,9 +132,9 @@ class TestSubscriptionSQLManagerService:
         # Verify the subscription was inserted
         subscription = await subscription_service.search_subscription(test_data["guild_id_2"])
         assert subscription is not None
-        assert subscription.discord_server_id == test_data["guild_id_2"]
-        assert subscription.subscription_type == SubscriptionType.PAID.value
-        assert subscription.activated_guild_at is not None
+        assert subscription.get("discord_server_id") == test_data["guild_id_2"]
+        assert subscription.get("subscription_type") == SubscriptionType.PAID.name
+        assert subscription.get("activated_guild_at") is not None
 
     @pytest.mark.asyncio
     async def test_insert_subscription_invalid_guild_id(
@@ -179,7 +180,7 @@ class TestSubscriptionSQLManagerService:
         # Search for it
         subscription = await subscription_service.search_subscription(test_data["guild_id_1"])
         assert subscription is not None
-        assert subscription.discord_server_id == test_data["guild_id_1"]
+        assert subscription.get("discord_server_id") == test_data["guild_id_1"]
 
     @pytest.mark.asyncio
     async def test_search_subscription_not_exists(self, setup_subscription_service, test_data):
@@ -202,9 +203,7 @@ class TestSubscriptionSQLManagerService:
     # ========================================================================
 
     @pytest.mark.asyncio
-    async def test_update_subscription_collection_name(
-        self, setup_subscription_service, test_data
-    ):
+    async def test_update_subscription_collection_name(self, setup_subscription_service, test_data):
         """Test updating a subscription's collection name."""
         subscription_service, _ = setup_subscription_service
 
@@ -223,7 +222,7 @@ class TestSubscriptionSQLManagerService:
 
         # Verify the update
         subscription = await subscription_service.search_subscription(test_data["guild_id_1"])
-        assert subscription.chroma_collection_name == new_collection_name
+        assert subscription.get("chroma_collection_name") == new_collection_name
 
     @pytest.mark.asyncio
     async def test_update_subscription_type(self, setup_subscription_service, test_data):
@@ -245,7 +244,7 @@ class TestSubscriptionSQLManagerService:
 
         # Verify the update
         subscription = await subscription_service.search_subscription(test_data["guild_id_1"])
-        assert subscription.subscription_type == SubscriptionType.PAID.value
+        assert subscription.get("subscription_type") == SubscriptionType.PAID.name
 
     @pytest.mark.asyncio
     async def test_update_subscription_activation(self, setup_subscription_service, test_data):
@@ -267,12 +266,10 @@ class TestSubscriptionSQLManagerService:
 
         # Verify the update
         subscription = await subscription_service.search_subscription(test_data["guild_id_1"])
-        assert subscription.activated_guild_at is not None
+        assert subscription.get("activated_guild_at") is not None
 
     @pytest.mark.asyncio
-    async def test_update_subscription_multiple_fields(
-        self, setup_subscription_service, test_data
-    ):
+    async def test_update_subscription_multiple_fields(self, setup_subscription_service, test_data):
         """Test updating multiple fields at once."""
         subscription_service, _ = setup_subscription_service
 
@@ -295,9 +292,9 @@ class TestSubscriptionSQLManagerService:
 
         # Verify all updates
         subscription = await subscription_service.search_subscription(test_data["guild_id_1"])
-        assert subscription.chroma_collection_name == new_collection_name
-        assert subscription.activated_guild_at is not None
-        assert subscription.subscription_type == SubscriptionType.PAID.value
+        assert subscription.get("chroma_collection_name") == new_collection_name
+        assert subscription.get("activated_guild_at") is not None
+        assert subscription.get("subscription_type") == SubscriptionType.PAID.name
 
     @pytest.mark.asyncio
     async def test_update_subscription_no_fields(self, setup_subscription_service, test_data):
@@ -387,7 +384,7 @@ class TestSubscriptionSQLManagerService:
         assert len(subscriptions) == 3
 
         # Verify all guild IDs are present
-        guild_ids = {sub.discord_server_id for sub in subscriptions}
+        guild_ids = {sub.get("discord_server_id") for sub in subscriptions}
         assert test_data["guild_id_1"] in guild_ids
         assert test_data["guild_id_2"] in guild_ids
         assert test_data["guild_id_3"] in guild_ids
@@ -397,9 +394,7 @@ class TestSubscriptionSQLManagerService:
     # ========================================================================
 
     @pytest.mark.asyncio
-    async def test_search_subscriptions_by_type_free(
-        self, setup_subscription_service, test_data
-    ):
+    async def test_search_subscriptions_by_type_free(self, setup_subscription_service, test_data):
         """Test searching for FREE subscriptions."""
         subscription_service, _ = setup_subscription_service
 
@@ -425,12 +420,12 @@ class TestSubscriptionSQLManagerService:
             SubscriptionType.FREE
         )
         assert len(free_subscriptions) == 2
-        assert all(sub.subscription_type == SubscriptionType.FREE.value for sub in free_subscriptions)
+        assert all(
+            sub.get("subscription_type") == SubscriptionType.FREE.name for sub in free_subscriptions
+        )
 
     @pytest.mark.asyncio
-    async def test_search_subscriptions_by_type_paid(
-        self, setup_subscription_service, test_data
-    ):
+    async def test_search_subscriptions_by_type_paid(self, setup_subscription_service, test_data):
         """Test searching for PAID subscriptions."""
         subscription_service, _ = setup_subscription_service
 
@@ -451,7 +446,7 @@ class TestSubscriptionSQLManagerService:
             SubscriptionType.PAID
         )
         assert len(paid_subscriptions) == 1
-        assert paid_subscriptions[0].subscription_type == SubscriptionType.PAID.value
+        assert paid_subscriptions[0].get("subscription_type") == SubscriptionType.PAID.name
 
     @pytest.mark.asyncio
     async def test_search_subscriptions_by_type_none_found(self, setup_subscription_service):
