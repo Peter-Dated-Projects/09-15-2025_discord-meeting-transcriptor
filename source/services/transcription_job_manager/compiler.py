@@ -512,6 +512,7 @@ class TranscriptionCompilationJobManagerService(BaseTranscriptionCompilationJobM
                     meeting_id=job.meeting_id,
                     compiled_transcript_id=compiled_transcript_id,
                     transcript_ids=job.transcript_ids,
+                    user_ids=job.user_ids,
                 )
             except Exception as e:
                 await self.services.logging_service.error(
@@ -522,8 +523,7 @@ class TranscriptionCompilationJobManagerService(BaseTranscriptionCompilationJobM
                 f"No transcript IDs found for meeting {job.meeting_id}, skipping summarization job"
             )
 
-        # Send DM notifications to all users who participated in the meeting
-        await self._send_compilation_notifications(job)
+        # Note: DM notifications are now sent after summarization completes
 
     async def _send_compilation_notifications(self, job: TranscriptionCompilationJob) -> None:
         """

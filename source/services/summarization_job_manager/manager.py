@@ -38,12 +38,14 @@ class SummarizationJob(Job):
         meeting_id: ID of the meeting to summarize
         compiled_transcript_id: ID of the compiled transcript to summarize
         transcript_ids: List of individual transcript IDs to update with summaries
+        user_ids: List of user IDs who participated in the meeting
         services: Reference to ServicesManager for accessing services
     """
 
     meeting_id: str = ""
     compiled_transcript_id: str = ""
     transcript_ids: list[str] = field(default_factory=list)
+    user_ids: list[str] = field(default_factory=list)
     services: ServicesManager = None  # type: ignore
 
     # -------------------------------------------------------------- #
@@ -385,7 +387,11 @@ class BaseSummarizationJobManagerService(Manager):
     """Base class for summarization job manager service."""
 
     async def create_and_queue_summarization_job(
-        self, meeting_id: str, compiled_transcript_id: str, transcript_ids: list[str]
+        self,
+        meeting_id: str,
+        compiled_transcript_id: str,
+        transcript_ids: list[str],
+        user_ids: list[str],
     ) -> str:
         """Create a new summarization job and add it to the queue."""
         pass
@@ -453,7 +459,11 @@ class SummarizationJobManagerService(BaseSummarizationJobManagerService):
     # -------------------------------------------------------------- #
 
     async def create_and_queue_summarization_job(
-        self, meeting_id: str, compiled_transcript_id: str, transcript_ids: list[str]
+        self,
+        meeting_id: str,
+        compiled_transcript_id: str,
+        transcript_ids: list[str],
+        user_ids: list[str],
     ) -> str:
         """
         Create a new summarization job and add it to the queue.
@@ -465,6 +475,7 @@ class SummarizationJobManagerService(BaseSummarizationJobManagerService):
             meeting_id: ID of the meeting to summarize
             compiled_transcript_id: ID of the compiled transcript
             transcript_ids: List of individual transcript IDs to update
+            user_ids: List of user IDs who participated in the meeting
 
         Returns:
             The job ID of the created summarization job
@@ -478,9 +489,11 @@ class SummarizationJobManagerService(BaseSummarizationJobManagerService):
             meeting_id=meeting_id,
             compiled_transcript_id=compiled_transcript_id,
             transcript_ids=transcript_ids,
+            user_ids=user_ids,
             services=self.services,
             metadata={
                 "transcript_count": len(transcript_ids),
+                "user_count": len(user_ids),
             },
         )
 
@@ -642,8 +655,142 @@ class SummarizationJobManagerService(BaseSummarizationJobManagerService):
         # Update SQL status
         await self._update_sql_job_status(job)
 
-        # Optionally: Send notifications about completed summarization
-        # This could be a DM to participants or other notification mechanism
+        # Send DM notifications to all users who participated in the meeting
+        await self._send_meeting_complete_notifications(job)
+
+    async def _send_meeting_complete_notifications(self, job: SummarizationJob) -> None:
+        """
+        Send DM notifications to all users who participated in the meeting.
+
+        Args:
+            job: The completed summarization job
+        """
+        try:
+            # Import required modules
+            import discord
+
+            from source.utils import BotUtils
+
+            # Get meeting data
+            meeting_data = await self.services.sql_recording_service_manager.get_meeting(
+                meeting_id=job.meeting_id
+            )
+
+            if not meeting_data:
+                await self.services.logging_service.warning(
+                    f"Could not find meeting data for {job.meeting_id}, skipping notifications"
+                )
+                return
+
+            # Get guild data
+            if not self.services.context.bot:
+                await self.services.logging_service.warning(
+                    "Bot instance not available, cannot send DM notifications"
+                )
+                return
+
+            try:
+                guild_data = await self.services.context.bot.fetch_guild(
+                    int(meeting_data["guild_id"])
+                )
+            except (ValueError, discord.NotFound, discord.HTTPException) as e:
+                await self.services.logging_service.error(
+                    f"Failed to fetch guild data: {e}, skipping notifications"
+                )
+                return
+
+            # Prepare guild info
+            guild_name = (
+                guild_data.name
+                if hasattr(guild_data, "name")
+                else guild_data.get("name", "Unknown Guild")
+            )
+
+            guild_icon_url = None
+            if hasattr(guild_data, "icon") and guild_data.icon:
+                guild_icon_url = guild_data.icon.url
+            elif isinstance(guild_data, dict) and guild_data.get("icon"):
+                guild_icon_url = guild_data["icon"]
+
+            # Get meeting timestamp
+            created_at = meeting_data.get("started_at")
+            if created_at and hasattr(created_at, "timestamp"):
+                created_at_timestamp = int(created_at.timestamp())
+            elif created_at:
+                created_at_timestamp = int(created_at)
+            else:
+                import datetime
+
+                created_at_timestamp = int(datetime.datetime.now().timestamp())
+
+            # Get requested_by user info
+            requested_by_id = meeting_data.get("requested_by", "Unknown")
+            requested_by_user_name = None
+            footer_icon_url = None
+
+            try:
+                requested_user = await self.services.context.bot.fetch_user(int(requested_by_id))
+                if requested_user and requested_user.avatar:
+                    footer_icon_url = requested_user.avatar.url
+                    requested_by_user_name = requested_user.name
+            except (ValueError, discord.NotFound, discord.HTTPException):
+                pass
+
+            # Create embed for each user
+            for user_id in job.user_ids:
+                try:
+                    embed = discord.Embed(
+                        title=f"**Meeting Finished**: Meeting in `{guild_name}`",
+                        description=(
+                            "**✅ Your recording has been transcribed, compiled, and summarized!**\n\n"
+                            "The meeting transcription and AI-generated summary are now available."
+                        ),
+                        color=discord.Color.green(),
+                    )
+
+                    if guild_icon_url:
+                        embed.set_thumbnail(url=guild_icon_url)
+
+                    embed.add_field(
+                        name="Recording Date",
+                        value=f"<t:{created_at_timestamp}:F>",
+                        inline=False,
+                    )
+
+                    embed.add_field(
+                        name="Compilation",
+                        value=f"`transcript_{job.meeting_id}.json`",
+                        inline=False,
+                    )
+
+                    embed.set_footer(
+                        text=f"Requested by {requested_by_user_name or requested_by_id}",
+                        icon_url=footer_icon_url,
+                    )
+
+                    # Send DM
+                    success = await BotUtils.send_dm(
+                        self.services.context.bot, user_id, embed=embed
+                    )
+
+                    if success:
+                        await self.services.logging_service.info(
+                            f"Sent completion notification to user {user_id} for meeting {job.meeting_id}"
+                        )
+                    else:
+                        await self.services.logging_service.warning(
+                            f"Failed to send completion notification to user {user_id}"
+                        )
+
+                except Exception as e:
+                    await self.services.logging_service.error(
+                        f"Error sending notification to user {user_id}: {e}"
+                    )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Error in _send_meeting_complete_notifications: {e}"
+            )
 
     async def _on_job_failed(self, job: SummarizationJob) -> None:
         """
