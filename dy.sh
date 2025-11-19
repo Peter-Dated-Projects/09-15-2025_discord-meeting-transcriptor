@@ -26,12 +26,14 @@ DOCKER_COMPOSE_FILE="$PROJECT_ROOT/docker-compose.local.yml"
 # PID file locations
 OLLAMA_PID_FILE="$PROJECT_ROOT/.ollama.pid"
 WHISPER_PID_FILE="$PROJECT_ROOT/.whisper.pid"
+CHROMADB_ADMIN_PID_FILE="$PROJECT_ROOT/.chromadb_admin.pid"
 
 # Log file locations
 LOGS_DIR="$PROJECT_ROOT/logs"
 mkdir -p "$LOGS_DIR"
 OLLAMA_LOG="$LOGS_DIR/ollama.log"
 WHISPER_LOG="$LOGS_DIR/whisper.log"
+CHROMADB_ADMIN_LOG="$LOGS_DIR/chromadb_admin.log"
 
 # Colors for output
 RED='\033[0;31m'
@@ -234,6 +236,46 @@ start_whisper() {
     fi
 }
 
+# Function to start ChromaDB Admin Dashboard
+start_chromadb_admin() {
+    echo -e "${BLUE}Starting ChromaDB Admin Dashboard...${NC}"
+    
+    if is_running "$CHROMADB_ADMIN_PID_FILE"; then
+        echo -e "${YELLOW}ChromaDB Admin Dashboard is already running (PID: $(cat $CHROMADB_ADMIN_PID_FILE))${NC}"
+        return 0
+    fi
+    
+    # Check if admin page script exists
+    ADMIN_SCRIPT="$PROJECT_ROOT/scripts/chromadb/admin_page.py"
+    if [ ! -f "$ADMIN_SCRIPT" ]; then
+        echo -e "${RED}✗ ChromaDB Admin page script not found at $ADMIN_SCRIPT${NC}"
+        return 1
+    fi
+    
+    # Start admin dashboard in background
+    nohup python "$ADMIN_SCRIPT" > "$CHROMADB_ADMIN_LOG" 2>&1 &
+    local pid=$!
+    echo $pid > "$CHROMADB_ADMIN_PID_FILE"
+    
+    # Wait a moment for service to start
+    sleep 2
+    
+    if is_running "$CHROMADB_ADMIN_PID_FILE"; then
+        CHROMADB_HOST="${CHROMADB_HOST:-localhost}"
+        CHROMADB_PORT="${CHROMADB_PORT:-8000}"
+        
+        echo -e "${GREEN}✓ ChromaDB Admin Dashboard started successfully (PID: $pid)${NC}"
+        echo -e "  Dashboard: http://localhost:3002"
+        echo -e "  ChromaDB: ${CHROMADB_HOST}:${CHROMADB_PORT}"
+        echo -e "  Logs: $CHROMADB_ADMIN_LOG"
+        return 0
+    else
+        echo -e "${RED}✗ Failed to start ChromaDB Admin Dashboard${NC}"
+        echo -e "  Check logs at: $CHROMADB_ADMIN_LOG"
+        return 1
+    fi
+}
+
 # Function to stop a service
 stop_service() {
     local service_name=$1
@@ -293,6 +335,14 @@ show_status() {
     else
         echo -e "${RED}Stopped${NC}"
     fi
+    
+    echo -n "ChromaDB Admin: "
+    if is_running "$CHROMADB_ADMIN_PID_FILE"; then
+        echo -e "${GREEN}Running${NC} (PID: $(cat $CHROMADB_ADMIN_PID_FILE))"
+        echo -e "                Dashboard: http://localhost:3002"
+    else
+        echo -e "${RED}Stopped${NC}"
+    fi
 }
 
 # Main command handling
@@ -303,6 +353,7 @@ case "${1:-}" in
         echo ""
         start_ollama
         start_whisper
+        start_chromadb_admin
         echo ""
         show_status
         ;;
@@ -310,6 +361,7 @@ case "${1:-}" in
         echo -e "${BLUE}=== Stopping All Services ===${NC}"
         stop_service "Ollama" "$OLLAMA_PID_FILE"
         stop_service "Whisper Flask" "$WHISPER_PID_FILE"
+        stop_service "ChromaDB Admin Dashboard" "$CHROMADB_ADMIN_PID_FILE"
         echo ""
         stop_docker_services
         echo ""
@@ -319,6 +371,7 @@ case "${1:-}" in
         echo -e "${BLUE}=== Restarting All Services ===${NC}"
         stop_service "Ollama" "$OLLAMA_PID_FILE"
         stop_service "Whisper Flask" "$WHISPER_PID_FILE"
+        stop_service "ChromaDB Admin Dashboard" "$CHROMADB_ADMIN_PID_FILE"
         stop_docker_services
         echo ""
         sleep 2
@@ -326,6 +379,7 @@ case "${1:-}" in
         echo ""
         start_ollama
         start_whisper
+        start_chromadb_admin
         echo ""
         show_status
         ;;
@@ -333,6 +387,7 @@ case "${1:-}" in
         echo -e "${BLUE}=== Destroying All Services ===${NC}"
         stop_service "Ollama" "$OLLAMA_PID_FILE"
         stop_service "Whisper Flask" "$WHISPER_PID_FILE"
+        stop_service "ChromaDB Admin Dashboard" "$CHROMADB_ADMIN_PID_FILE"
         echo ""
         destroy_docker_services
         echo ""
@@ -357,7 +412,7 @@ case "${1:-}" in
         echo "Usage: $0 {up|down|restart|destroy|status|logs}"
         echo ""
         echo "Commands:"
-        echo "  up      - Start all services (Docker, Ollama & Whisper Flask microservice)"
+        echo "  up      - Start all services (Docker, Ollama, Whisper Flask & ChromaDB Admin)"
         echo "  down    - Stop all services (keeps containers)"
         echo "  restart - Restart all services"
         echo "  destroy - Stop and remove all Docker containers"
@@ -368,6 +423,7 @@ case "${1:-}" in
         echo "  Docker:         MySQL, ChromaDB (via docker-compose.local.yml)"
         echo "  Ollama:         LLM service for chat/RAG"
         echo "  Whisper Flask:  Transcription microservice API"
+        echo "  ChromaDB Admin: Web dashboard for ChromaDB (http://localhost:3002)"
         exit 1
         ;;
 esac

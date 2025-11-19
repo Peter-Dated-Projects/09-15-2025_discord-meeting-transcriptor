@@ -624,10 +624,10 @@ def health():
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🗄️  ChromaDB Admin Dashboard")
+    print("ChromaDB Admin Dashboard")
     print("=" * 60)
-    print(f"📡 ChromaDB Server: {CHROMADB_HOST}:{CHROMADB_PORT}")
-    print(f"🌐 Dashboard URL: http://localhost:3002")
+    print(f"ChromaDB Server: {CHROMADB_HOST}:{CHROMADB_PORT}")
+    print(f"Dashboard URL: http://localhost:3002")
     print("=" * 60)
     print()
 
