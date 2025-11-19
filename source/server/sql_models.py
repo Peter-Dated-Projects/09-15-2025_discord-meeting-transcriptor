@@ -239,27 +239,23 @@ class TempRecordingModel(Base):
 
 class ConversationsModel(Base):
     """
-    ID = Conversation ID (UUID)
+    ID = Conversation ID
     Created At = Timestamp when conversation was created
     Updated At = Timestamp when conversation was last updated
-    Title = Title of the conversation (optional)
     Conversation File = Path to the JSON file containing conversation history
-    Meeting ID = Foreign Key to associated Meeting ID (optional)
-    Discord Guild ID = Discord Guild (Server) ID (optional)
-    Discord Channel ID = Discord Channel ID (optional)
-    Discord User ID = Discord User ID (optional)
-    Metadata = Additional metadata stored as JSONB
+    Discord Guild ID = Discord Guild (Server) ID
+    Discord Message ID = Discord Message ID of thread starter message
+    Requesting User ID = Discord User ID
+    Metadata = Additional metadata stored as JSONB (optional)
     """
 
     __tablename__ = "conversations"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, index=True)
+    id = Column(String(16), primary_key=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)
-    title = Column(Text, nullable=True)
-    conversation_file = Column(Text, nullable=False)
-    meeting_id = Column(String(MEETING_UUID_LENGTH), ForeignKey("meetings.id"), nullable=True)
-    discord_guild_id = Column(Text, nullable=True)
-    discord_channel_id = Column(Text, nullable=True)
-    discord_user_id = Column(Text, nullable=True)
+    conversation_file = Column(String(512), nullable=False)
+    discord_guild_id = Column(String(20), nullable=True)
+    discord_message_id = Column(String(20), nullable=True)
+    requesting_user_id = Column(String(20), nullable=True)
     metadata = Column(JSONB, nullable=False, default=dict, server_default="{}")
