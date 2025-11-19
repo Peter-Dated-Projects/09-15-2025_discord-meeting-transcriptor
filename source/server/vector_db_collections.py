@@ -1,0 +1,1 @@
+DEFAULT_VECTORDB_COLLECTIONS = ["summaries"]

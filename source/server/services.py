@@ -119,6 +119,46 @@ class VectorDBDatabase(BaseServerHandler):
         super().__init__(name)
         self.client = client
 
+    # -------------------------------------------------------------- #
+    # Handler Methods
+    # -------------------------------------------------------------- #
+
+    async def on_startup(self) -> None:
+        """Actions to perform on server startup - create default collections."""
+        await self.create_default_collections()
+
+    # ------------------------------------------------------ #
+    # Utils
+    # ------------------------------------------------------ #
+
+    @abstractmethod
+    async def create_default_collections(self) -> None:
+        """Create default collections that must exist on startup."""
+        pass
+
+    @abstractmethod
+    async def collection_exists(self, name: str) -> bool:
+        """
+        Check if a collection exists.
+
+        Args:
+            name: Collection name
+
+        Returns:
+            True if collection exists, False otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def create_collection(self, name: str) -> None:
+        """
+        Create a collection.
+
+        Args:
+            name: Collection name
+        """
+        pass
+
 
 # Whisper Server Handler
 class WhisperServerHandler(BaseServerHandler):
