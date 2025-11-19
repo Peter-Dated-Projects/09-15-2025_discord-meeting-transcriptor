@@ -1,6 +1,7 @@
 import enum
 
-from sqlalchemy import JSON, Column, DateTime, Enum, ForeignKey, Integer, String
+from sqlalchemy import JSON, Column, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import declarative_base
 
 from source.utils import MEETING_UUID_LENGTH
@@ -234,3 +235,25 @@ class TempRecordingModel(Base):
         nullable=False,
         default=TranscodeStatus.QUEUED.value,
     )
+
+
+class ConversationsModel(Base):
+    """
+    ID = Conversation ID
+    Created At = Timestamp when conversation was created
+    Updated At = Timestamp when conversation was last updated
+    Conversation File = Path to the JSON file containing conversation history
+    Discord Guild ID = Discord Guild (Server) ID of the conversation
+    Discord Message ID = Discord Message ID of thread starter message
+    Requesting User ID = Discord User ID of the user who initiated the conversation
+    """
+
+    __tablename__ = "conversations"
+
+    id = Column(String(16), primary_key=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+    conversation_file = Column(String(512), nullable=False)
+    discord_guild_id = Column(String(20), nullable=False)
+    discord_message_id = Column(String(20), nullable=False)
+    requesting_user_id = Column(String(20), nullable=False)
