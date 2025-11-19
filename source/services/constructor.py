@@ -54,6 +54,7 @@ def construct_services_manager(
     transcription_compilation_job_manager = None
     summarization_job_manager = None
     gpu_resource_manager = None
+    ollama_request_manager = None
 
     # create logger
     logging_service = AsyncLoggingService(
@@ -160,6 +161,14 @@ def construct_services_manager(
 
         gpu_resource_manager = GPUResourceManager(context=context)
 
+        # -------------------------------------------------------------- #
+        # Ollama Request Manager Setup
+        # -------------------------------------------------------------- #
+
+        from source.services.ollama_request_manager.manager import OllamaRequestManager
+
+        ollama_request_manager = OllamaRequestManager(context=context)
+
     # TODO: https://www.notion.so/DISC-19-create-ffmpeg-service-29c5eca3b9df805a949fdcd5850eaf5a?source=copy_link
     # # create ffmpeg service manager
     # if service_type == ServerManagerType.DEVELOPMENT:
@@ -186,4 +195,5 @@ def construct_services_manager(
         transcription_compilation_job_manager=transcription_compilation_job_manager,
         summarization_job_manager=summarization_job_manager,
         gpu_resource_manager=gpu_resource_manager,
+        ollama_request_manager=ollama_request_manager,
     )
