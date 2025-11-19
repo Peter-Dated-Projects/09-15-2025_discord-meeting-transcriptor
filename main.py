@@ -126,6 +126,62 @@ async def murder(ctx: discord.ApplicationContext):
 # -------------------------------------------------------------- #
 
 
+async def _ensure_guild_subscription_and_collection(guilds: list[discord.Guild]) -> None:
+    """
+    Ensure all provided guilds have entries in the subscriptions table and ChromaDB collections.
+
+    Args:
+        guilds: List of Discord Guild objects to process
+    """
+    logger = bot.context.services_manager.logging_service
+    subscription_service = bot.context.services_manager.subscription_sql_manager
+    vector_db_client = bot.context.server_manager.vector_db_client
+
+    from source.server.sql_models import SubscriptionType
+
+    for guild in guilds:
+        guild_id = str(guild.id)
+        collection_name = f"embeddings_{guild_id}"
+
+        try:
+            # Check if guild already has a subscription entry
+            existing_subscription = await subscription_service.search_subscription(guild_id)
+
+            if existing_subscription:
+                await logger.debug(
+                    f"Guild '{guild.name}' (ID: {guild_id}) already has subscription entry"
+                )
+            else:
+                # Create subscription entry
+                await logger.info(
+                    f"Creating subscription entry for guild '{guild.name}' (ID: {guild_id})"
+                )
+                await subscription_service.insert_subscription(
+                    discord_server_id=guild_id,
+                    chroma_collection_name=collection_name,
+                    subscription_type=SubscriptionType.FREE,
+                )
+                await logger.info(f"✓ Created subscription entry for guild: {guild.name}")
+
+            # Check if ChromaDB collection exists
+            collection_exists = await vector_db_client.collection_exists(collection_name)
+
+            if collection_exists:
+                await logger.debug(
+                    f"ChromaDB collection '{collection_name}' already exists for guild: {guild.name}"
+                )
+            else:
+                # Create ChromaDB collection
+                await logger.info(
+                    f"Creating ChromaDB collection '{collection_name}' for guild: {guild.name}"
+                )
+                await vector_db_client.create_collection(collection_name)
+                await logger.info(f"✓ Created ChromaDB collection: {collection_name}")
+
+        except Exception as e:
+            await logger.error(f"Failed to initialize guild '{guild.name}' (ID: {guild_id}): {e}")
+
+
 @bot.event
 async def on_ready():
     """Called when the bot is ready and connected to Discord."""
@@ -163,6 +219,13 @@ async def on_ready():
             "   💡 TIP: Set DEBUG_GUILD_IDS for instant registration during development"
         )
 
+    # Initialize guilds: ensure all guilds have subscriptions and ChromaDB collections
+    await logger.info("\n" + "=" * 60)
+    await logger.info("Initializing guild subscriptions and ChromaDB collections...")
+    await _ensure_guild_subscription_and_collection(bot.guilds)
+    await logger.info("✓ Guild initialization complete")
+    await logger.info("=" * 60)
+
     # Initialize bot presence
     if bot.context.services_manager.presence_manager_service:
         await bot.context.services_manager.presence_manager_service.force_update_presence()
@@ -181,6 +244,22 @@ async def on_application_command_error(
         await ctx.respond("❌ You don't have permission to use this command.", ephemeral=True)
     else:
         await ctx.respond(f"❌ An error occurred: {str(error)}", ephemeral=True)
+
+
+@bot.event
+async def on_guild_join(guild: discord.Guild):
+    """
+    Called when the bot joins a new guild (server).
+    Ensures the guild has a subscription entry and ChromaDB collection.
+    """
+    logger = bot.context.services_manager.logging_service
+
+    await logger.info(f"Bot joined new guild: '{guild.name}' (ID: {guild.id})")
+
+    # Initialize guild subscription and ChromaDB collection
+    await _ensure_guild_subscription_and_collection([guild])
+
+    await logger.info(f"✓ Successfully initialized guild: {guild.name}")
 
 
 # -------------------------------------------------------------- #

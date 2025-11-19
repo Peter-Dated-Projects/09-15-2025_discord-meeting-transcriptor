@@ -5,6 +5,7 @@ This module provides an object-oriented handler for managing connections
 and operations with MySQL database using SQLAlchemy Core for query building.
 """
 
+import enum
 import json
 import logging
 import os
@@ -348,7 +349,7 @@ class MySQLServer(SQLDatabase):
             logger.debug(f"[{self.name}] Original compiled query: {query}")
             logger.debug(f"[{self.name}] Original params: {params}")
 
-            # Convert dict/list parameters to JSON strings for MySQL
+            # Convert dict/list/enum parameters to appropriate types for MySQL
             # But keep list parameters that are for IN clauses as lists
             processed_params = {}
             for key, value in params.items():
@@ -359,6 +360,9 @@ class MySQLServer(SQLDatabase):
                     # Lists in IN clauses should stay as lists, not be JSON encoded
                     # We'll handle them specially below
                     processed_params[key] = value
+                elif isinstance(value, enum.Enum):
+                    # Convert enum to its string value
+                    processed_params[key] = value.value
                 else:
                     processed_params[key] = value
 
