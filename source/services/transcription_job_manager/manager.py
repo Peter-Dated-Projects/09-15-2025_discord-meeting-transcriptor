@@ -152,6 +152,8 @@ class TranscriptionJob(Job):
                     "recording_id": recording_id,
                     "whisper_data": transcript_text,
                     "created_at": get_current_timestamp_est().isoformat(),
+                    "summary_layers": {},  # dict[int, dict[int, str]]
+                    "summary": "",  # Overall summary string
                 }
 
                 # Save transcription to file and database
