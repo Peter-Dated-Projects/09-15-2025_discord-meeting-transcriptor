@@ -10,6 +10,7 @@ from source.server.sql_models import (
     TempRecordingModel,
     UserTranscriptsModel,
     ConversationsModel,
+    SubscriptionsModel,
 )
 
 # -------------------------------------------------------------- #
@@ -26,6 +27,7 @@ SQL_DATABASE_MODELS = [
     JobsStatusErrorLogModel,
     TempRecordingModel,
     ConversationsModel,
+    SubscriptionsModel,
 ]
 
 

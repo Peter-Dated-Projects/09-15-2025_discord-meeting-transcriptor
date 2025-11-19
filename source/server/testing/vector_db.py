@@ -8,6 +8,7 @@ without requiring a running ChromaDB server.
 import logging
 
 from source.server.services import VectorDBDatabase
+from source.server.vector_db_collections import DEFAULT_VECTORDB_COLLECTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,57 @@ class InMemoryChromaDBClient(VectorDBDatabase):
         except Exception as e:
             logger.error(f"[{self.name}] Health check failed: {e}")
             return False
+
+    async def create_default_collections(self) -> None:
+        """Create default collections that must exist on startup."""
+        if not self.client:
+            logger.error(f"[{self.name}] Cannot create collections: client not connected")
+            raise RuntimeError("ChromaDB client not connected")
+
+        logger.info(f"[{self.name}] Creating default collections: {DEFAULT_VECTORDB_COLLECTIONS}")
+        for collection_name in DEFAULT_VECTORDB_COLLECTIONS:
+            if not await self.collection_exists(collection_name):
+                await self.create_collection(collection_name)
+                logger.info(f"[{self.name}] Created collection: {collection_name}")
+            else:
+                logger.info(f"[{self.name}] Collection already exists: {collection_name}")
+
+    async def collection_exists(self, name: str) -> bool:
+        """
+        Check if a collection exists.
+
+        Args:
+            name: Collection name
+
+        Returns:
+            True if collection exists, False otherwise
+        """
+        if not self.client:
+            raise RuntimeError("ChromaDB client not connected")
+
+        try:
+            self.client.get_collection(name=name)
+            return True
+        except Exception:
+            return False
+
+    async def create_collection(self, name: str) -> None:
+        """
+        Create a collection.
+
+        Args:
+            name: Collection name
+        """
+        if not self.client:
+            raise RuntimeError("ChromaDB client not connected")
+
+        try:
+            collection = self.client.create_collection(name=name)
+            self._collections[name] = collection
+            logger.info(f"[{self.name}] Successfully created collection: {name}")
+        except Exception as e:
+            logger.error(f"[{self.name}] Failed to create collection {name}: {e}")
+            raise
 
     async def create_tables(self) -> None:
         """Create collections in ChromaDB (no-op for vector DB)."""
