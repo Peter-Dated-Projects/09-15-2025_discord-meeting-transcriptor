@@ -262,4 +262,4 @@ class ConversationsModel(Base):
     discord_guild_id = Column(Text, nullable=True)
     discord_channel_id = Column(Text, nullable=True)
     discord_user_id = Column(Text, nullable=True)
-    metadata = Column(JSONB, nullable=False, default=dict, server_default='{}')
+    metadata = Column(JSONB, nullable=False, default=dict, server_default="{}")
