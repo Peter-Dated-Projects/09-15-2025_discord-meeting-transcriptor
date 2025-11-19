@@ -188,6 +188,15 @@ class SummarizationJob(Job):
         """
         import os
 
+        from source.services.summarization_job_manager.prompts import (
+            LEVEL_0_SYSTEM_MESSAGE,
+            LEVEL_0_USER_CONTENT_TEMPLATE,
+            LEVEL_N_SYSTEM_MESSAGE,
+            LEVEL_N_USER_CONTENT_TEMPLATE,
+        )
+
+        # TODO: Once OllamaRequestManager is integrated into ServicesManager,
+        # use self.services.ollama_request_manager.query() instead of direct HTTP calls
         import requests
 
         # Get Ollama configuration
@@ -211,7 +220,7 @@ class SummarizationJob(Job):
             )
 
             # Base case: already under max_words_per_request words
-            if word_count <= max_words_per_request:
+            if word_count <= max_words_per_request and level > 0:
                 await self.services.logging_service.info(
                     f"✅ Under {max_words_per_request} words! Done."
                 )
@@ -236,32 +245,19 @@ class SummarizationJob(Job):
 
                 # Choose system message and user content based on level
                 if level == 0:
-                    system_message = (
-                        "You are an expert at summarizing meeting transcripts. "
-                        "Extract key topics, decisions, and action items concisely."
+                    system_message = LEVEL_0_SYSTEM_MESSAGE
+                    user_content = LEVEL_0_USER_CONTENT_TEMPLATE.format(
+                        chunk_number=i + 1,
+                        total_chunks=len(chunks),
+                        chunk_text=chunk,
                     )
-                    user_content = f"""
-Summarize this meeting transcript section (part {i+1} of {len(chunks)}).
-Provide a 200-500 word summary covering:
-- Main topics discussed
-- Key points and decisions for each topic discussed
-- Important action items
-- Notable speakers/perspectives
-
-Transcript:
-{chunk}
-"""
                 else:
-                    system_message = """
-You are an expert at summarizing summaries of meeting transcripts. Create a concise overview that preserves the most important information from multiple summaries.
-"""
-                    user_content = f"""
-Create a consolidated summary from this summary section (part {i+1} of {len(chunks)}).
-Provide a 200-500 word overview that combines and preserves the most important information:
-
-Summary section:
-{chunk}
-"""
+                    system_message = LEVEL_N_SYSTEM_MESSAGE
+                    user_content = LEVEL_N_USER_CONTENT_TEMPLATE.format(
+                        chunk_number=i + 1,
+                        total_chunks=len(chunks),
+                        chunk_text=chunk,
+                    )
 
                 # Call Ollama API
                 payload = {
