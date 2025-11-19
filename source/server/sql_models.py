@@ -46,6 +46,11 @@ class TranscodeStatus(enum.Enum):
     FAILED = "failed"
 
 
+class SubscriptionType(enum.Enum):
+    FREE = "free"
+    PAID = "paid"
+
+
 # -------------------------------------------------------------- #
 # Models
 # -------------------------------------------------------------- #
@@ -257,3 +262,25 @@ class ConversationsModel(Base):
     discord_guild_id = Column(String(20), nullable=False)
     discord_message_id = Column(String(20), nullable=False)
     requesting_user_id = Column(String(20), nullable=False)
+
+
+class SubscriptionsModel(Base):
+    """
+    Discord Server ID = Discord Guild (Server) ID (Primary Key)
+    Chroma Collection Name = Name of the Chroma collection for this guild
+    Joined Guild At = Timestamp when the guild was joined/registered
+    Activated Guild At = Timestamp when the subscription was activated (nullable)
+    Subscription Type = Type of subscription (FREE, PAID)
+    """
+
+    __tablename__ = "subscriptions"
+
+    discord_server_id = Column(String(20), primary_key=True, index=True)
+    chroma_collection_name = Column(String(256), nullable=False)
+    joined_guild_at = Column(DateTime, nullable=False)
+    activated_guild_at = Column(DateTime, nullable=True)
+    subscription_type = Column(
+        Enum(SubscriptionType, name="subscription_type_enum"),
+        nullable=False,
+        default=SubscriptionType.FREE.value,
+    )

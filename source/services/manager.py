@@ -25,6 +25,7 @@ class ServicesManager:
         ffmpeg_service_manager: BaseFFmpegServiceManager,
         sql_recording_service_manager: BaseSQLRecordingServiceManager,
         sql_logging_service_manager: BaseSQLLoggingServiceManager,
+        subscription_sql_manager: Any | None = None,
         discord_recorder_service_manager: BaseDiscordRecorderServiceManager | None = None,
         presence_manager_service: Any | None = None,
         transcription_job_manager: Any | None = None,
@@ -46,6 +47,7 @@ class ServicesManager:
         # DB interfaces
         self.sql_recording_service_manager = sql_recording_service_manager
         self.sql_logging_service_manager = sql_logging_service_manager
+        self.subscription_sql_manager = subscription_sql_manager
 
         # Discord recorder
         self.discord_recorder_service_manager = discord_recorder_service_manager
@@ -77,6 +79,10 @@ class ServicesManager:
         # DB interfaces
         await self.sql_recording_service_manager.on_start(self)
         await self.sql_logging_service_manager.on_start(self)
+
+        # Subscription SQL manager
+        if self.subscription_sql_manager:
+            await self.subscription_sql_manager.on_start(self)
 
         # Discord recorder
         await self.discord_recorder_service_manager.on_start(self)
@@ -184,6 +190,8 @@ class ServicesManager:
             await self.logging_service.info("Phase 7: Closing database connections...")
             await self.sql_recording_service_manager.on_close()
             await self.sql_logging_service_manager.on_close()
+            if self.subscription_sql_manager:
+                await self.subscription_sql_manager.on_close()
             await self.logging_service.info("✓ Database connections closed")
 
             # Phase 8: Disconnect from all servers (SQL, Vector DB, Whisper)
