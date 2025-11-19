@@ -48,6 +48,7 @@ def construct_services_manager(
     ffmpeg_service_manager = None
     sql_recording_service_manager = None
     sql_logging_service_manager = None
+    subscription_sql_manager = None
     discord_recorder_service_manager = None
     presence_manager_service = None
     transcription_job_manager = None
@@ -105,9 +106,13 @@ def construct_services_manager(
 
         from source.services.recording_sql_manager.manager import SQLRecordingManagerService
         from source.services.sql_logging_manager.manager import SQLLoggingManagerService
+        from source.services.subscription_sql_manager.manager import (
+            SubscriptionSQLManagerService,
+        )
 
         sql_recording_service_manager = SQLRecordingManagerService(context=context)
         sql_logging_service_manager = SQLLoggingManagerService(context=context)
+        subscription_sql_manager = SubscriptionSQLManagerService(context=context)
 
         # -------------------------------------------------------------- #
         # Discord Recorder Setup
@@ -169,6 +174,7 @@ def construct_services_manager(
         logging_service=logging_service,
         sql_recording_service_manager=sql_recording_service_manager,
         sql_logging_service_manager=sql_logging_service_manager,
+        subscription_sql_manager=subscription_sql_manager,
         discord_recorder_service_manager=discord_recorder_service_manager,
         presence_manager_service=presence_manager_service,
         transcription_job_manager=transcription_job_manager,
