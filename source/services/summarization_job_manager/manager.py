@@ -195,15 +195,8 @@ class SummarizationJob(Job):
             LEVEL_N_USER_CONTENT_TEMPLATE,
         )
 
-        # TODO: Once OllamaRequestManager is integrated into ServicesManager,
-        # use self.services.ollama_request_manager.query() instead of direct HTTP calls
-        import requests
-
         # Get Ollama configuration
-        OLLAMA_HOST = os.getenv("OLLAMA_HOST", "localhost")
-        OLLAMA_PORT = os.getenv("OLLAMA_PORT", "11434")
         OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
-        BASE_URL = f"http://{OLLAMA_HOST}:{OLLAMA_PORT}"
 
         summary_layers: dict[int, list[str]] = {}
         level = 0
@@ -259,28 +252,19 @@ class SummarizationJob(Job):
                         chunk_text=chunk,
                     )
 
-                # Call Ollama API
-                payload = {
-                    "model": OLLAMA_MODEL,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": system_message,
-                        },
-                        {
-                            "role": "user",
-                            "content": user_content,
-                        },
-                    ],
-                    "stream": False,
-                    "keep_alive": 10,  # Keep model in memory for 10 seconds
-                }
-
+                # Call Ollama via OllamaRequestManager
                 try:
-                    response = requests.post(f"{BASE_URL}/api/chat", json=payload, timeout=120)
-                    response.raise_for_status()
-                    result = response.json()
-                    summary = result["message"]["content"]
+                    result = await self.services.ollama_request_manager.query(
+                        model=OLLAMA_MODEL,
+                        messages=[
+                            {"role": "system", "content": system_message},
+                            {"role": "user", "content": user_content},
+                        ],
+                        keep_alive=10,  # Keep model in memory for 10 seconds
+                        timeout_ms=120000,  # 2 minutes timeout
+                    )
+
+                    summary = result.content
 
                     await self.services.logging_service.info(
                         f"Generated summary: {len(summary.split())} words"
