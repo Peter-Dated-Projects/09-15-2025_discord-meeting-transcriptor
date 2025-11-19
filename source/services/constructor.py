@@ -52,6 +52,7 @@ def construct_services_manager(
     presence_manager_service = None
     transcription_job_manager = None
     transcription_compilation_job_manager = None
+    summarization_job_manager = None
     gpu_resource_manager = None
 
     # create logger
@@ -142,6 +143,16 @@ def construct_services_manager(
         )
 
         # -------------------------------------------------------------- #
+        # Summarization Job Manager Setup
+        # -------------------------------------------------------------- #
+
+        from source.services.summarization_job_manager.manager import (
+            SummarizationJobManagerService,
+        )
+
+        summarization_job_manager = SummarizationJobManagerService(context=context)
+
+        # -------------------------------------------------------------- #
         # GPU Resource Manager Setup
         # -------------------------------------------------------------- #
 
@@ -173,5 +184,6 @@ def construct_services_manager(
         presence_manager_service=presence_manager_service,
         transcription_job_manager=transcription_job_manager,
         transcription_compilation_job_manager=transcription_compilation_job_manager,
+        summarization_job_manager=summarization_job_manager,
         gpu_resource_manager=gpu_resource_manager,
     )
