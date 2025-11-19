@@ -243,10 +243,9 @@ class ConversationsModel(Base):
     Created At = Timestamp when conversation was created
     Updated At = Timestamp when conversation was last updated
     Conversation File = Path to the JSON file containing conversation history
-    Discord Guild ID = Discord Guild (Server) ID
+    Discord Guild ID = Discord Guild (Server) ID of the conversation
     Discord Message ID = Discord Message ID of thread starter message
-    Requesting User ID = Discord User ID
-    Metadata = Additional metadata stored as JSONB (optional)
+    Requesting User ID = Discord User ID of the user who initiated the conversation
     """
 
     __tablename__ = "conversations"
@@ -258,4 +257,3 @@ class ConversationsModel(Base):
     discord_guild_id = Column(String(20), nullable=True)
     discord_message_id = Column(String(20), nullable=True)
     requesting_user_id = Column(String(20), nullable=True)
-    metadata = Column(JSONB, nullable=False, default=dict, server_default="{}")
