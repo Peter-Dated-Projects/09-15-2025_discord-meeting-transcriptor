@@ -397,16 +397,23 @@ class GPUResourceManager(Manager):
         # Use probability-based selection
         # Total probability allocated: 35% + 30% + 25% = 90%, leaving 10% for fallback
         rand_val = random.random()
-        
+
         if rand_val < self.TRANSCRIPTION_PROBABILITY:
             return GPUJobType.TRANSCRIPTION
         elif rand_val < self.TRANSCRIPTION_PROBABILITY + self.TEXT_EMBEDDING_PROBABILITY:
             return GPUJobType.TEXT_EMBEDDING
-        elif rand_val < self.TRANSCRIPTION_PROBABILITY + self.TEXT_EMBEDDING_PROBABILITY + self.SUMMARIZATION_PROBABILITY:
+        elif (
+            rand_val
+            < self.TRANSCRIPTION_PROBABILITY
+            + self.TEXT_EMBEDDING_PROBABILITY
+            + self.SUMMARIZATION_PROBABILITY
+        ):
             return GPUJobType.SUMMARIZATION
         else:
             # Fallback for remaining 10% - pick randomly from available types
-            return random.choice([GPUJobType.TRANSCRIPTION, GPUJobType.TEXT_EMBEDDING, GPUJobType.SUMMARIZATION])
+            return random.choice(
+                [GPUJobType.TRANSCRIPTION, GPUJobType.TEXT_EMBEDDING, GPUJobType.SUMMARIZATION]
+            )
 
     # -------------------------------------------------------------- #
     # Status and Monitoring
