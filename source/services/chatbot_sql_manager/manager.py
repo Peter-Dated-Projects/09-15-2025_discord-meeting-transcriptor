@@ -44,18 +44,18 @@ class ChatbotSQLManagerService(Manager):
     async def insert_conversation(
         self,
         conversation_file: str,
-        discord_guild_id: str | None = None,
-        discord_message_id: str | None = None,
-        requesting_user_id: str | None = None,
+        discord_guild_id: str,
+        discord_message_id: str,
+        requesting_user_id: str,
     ) -> str:
         """
         Insert a new conversation entry when a chat session is started.
 
         Args:
             conversation_file: Path to the JSON file containing conversation history
-            discord_guild_id: Discord Guild (Server) ID (optional)
-            discord_message_id: Discord Message ID of thread starter message (optional)
-            requesting_user_id: Discord User ID of the user who initiated the conversation (optional)
+            discord_guild_id: Discord Guild (Server) ID (required)
+            discord_message_id: Discord Message ID of thread starter message (required)
+            requesting_user_id: Discord User ID of the user who initiated the conversation (required)
 
         Returns:
             conversation_id: The generated ID for the conversation
@@ -65,17 +65,17 @@ class ChatbotSQLManagerService(Manager):
         if not conversation_file or len(conversation_file) == 0:
             raise ValueError("conversation_file cannot be empty")
 
-        if discord_guild_id is not None and len(discord_guild_id) < DISCORD_USER_ID_MIN_LENGTH:
+        if len(discord_guild_id) < DISCORD_USER_ID_MIN_LENGTH:
             raise ValueError(
                 f"discord_guild_id must be at least {DISCORD_USER_ID_MIN_LENGTH} characters long"
             )
 
-        if discord_message_id is not None and len(discord_message_id) < DISCORD_USER_ID_MIN_LENGTH:
+        if len(discord_message_id) < DISCORD_USER_ID_MIN_LENGTH:
             raise ValueError(
                 f"discord_message_id must be at least {DISCORD_USER_ID_MIN_LENGTH} characters long"
             )
 
-        if requesting_user_id is not None and len(requesting_user_id) < DISCORD_USER_ID_MIN_LENGTH:
+        if len(requesting_user_id) < DISCORD_USER_ID_MIN_LENGTH:
             raise ValueError(
                 f"requesting_user_id must be at least {DISCORD_USER_ID_MIN_LENGTH} characters long"
             )
