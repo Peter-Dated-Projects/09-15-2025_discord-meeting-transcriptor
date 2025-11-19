@@ -7,9 +7,10 @@ acquire exclusive GPU access with intelligent priority handling:
 
 1. Priority scheduling:
    - Chatbot requests have highest priority (always processed immediately)
-   - When no chatbot requests exist, uses round-robin between transcription and summarization
-   - 70/30 split favoring transcription over summarization
-   - Max 2 consecutive transcription operations before forcing summarization
+   - When no chatbot requests exist, uses round-robin between transcription, embedding, and summarization
+   - 35% transcription, 30% embedding, 25% summarization split
+   - Max 2 consecutive transcription operations before forcing switch
+   - Max 1 consecutive embedding operation before forcing switch
    - Max 1 consecutive summarization operation before switching
 
 2. GPU resource locking:
@@ -42,6 +43,7 @@ class GPUJobType(enum.Enum):
     """Type of GPU operation."""
 
     TRANSCRIPTION = "transcription"
+    TEXT_EMBEDDING = "text_embedding"
     SUMMARIZATION = "summarization"
     CHATBOT = "chatbot"
 
@@ -71,11 +73,13 @@ class GPUResourceManager(Manager):
 
         # Priority queues for pending lock requests
         self._transcription_queue: asyncio.Queue[asyncio.Event] = asyncio.Queue()
+        self._text_embedding_queue: asyncio.Queue[asyncio.Event] = asyncio.Queue()
         self._summarization_queue: asyncio.Queue[asyncio.Event] = asyncio.Queue()
         self._chatbot_queue: asyncio.Queue[asyncio.Event] = asyncio.Queue()
 
         # Scheduler state
         self._consecutive_transcription_count = 0
+        self._consecutive_text_embedding_count = 0
         self._consecutive_summarization_count = 0
         self._last_job_type: GPUJobType | None = None
         self._scheduler_running = False
@@ -83,11 +87,16 @@ class GPUResourceManager(Manager):
 
         # Scheduling parameters
         self.MAX_CONSECUTIVE_TRANSCRIPTION = 2
+        self.MAX_CONSECUTIVE_TEXT_EMBEDDING = 1
         self.MAX_CONSECUTIVE_SUMMARIZATION = 1
-        self.TRANSCRIPTION_PROBABILITY = 0.7  # 70% chance
+        self.TRANSCRIPTION_PROBABILITY = 0.35  # 35% chance
+        self.TEXT_EMBEDDING_PROBABILITY = 0.30  # 30% chance
+        self.SUMMARIZATION_PROBABILITY = 0.25  # 25% chance
+        # Remaining 10% for fallback logic
 
         # Statistics
         self._total_transcription_locks = 0
+        self._total_text_embedding_locks = 0
         self._total_summarization_locks = 0
         self._total_chatbot_locks = 0
 
@@ -123,7 +132,7 @@ class GPUResourceManager(Manager):
                 # Do GPU work
 
         Args:
-            job_type: Type of job requesting GPU ("transcription", "summarization", "chatbot")
+            job_type: Type of job requesting GPU ("transcription", "text_embedding", "summarization", "chatbot")
             job_id: Optional job identifier for logging
             metadata: Optional metadata about the job
 
@@ -136,7 +145,7 @@ class GPUResourceManager(Manager):
                 job_type = GPUJobType(job_type.lower())
             except ValueError:
                 raise ValueError(
-                    f"Invalid job_type: {job_type}. Must be one of: transcription, summarization, chatbot"
+                    f"Invalid job_type: {job_type}. Must be one of: transcription, text_embedding, summarization, chatbot"
                 )
 
         return _GPULockContext(self, job_type, job_id, metadata or {})
@@ -158,6 +167,8 @@ class GPUResourceManager(Manager):
             await self._chatbot_queue.put(ready_event)
         elif job_type == GPUJobType.TRANSCRIPTION:
             await self._transcription_queue.put(ready_event)
+        elif job_type == GPUJobType.TEXT_EMBEDDING:
+            await self._text_embedding_queue.put(ready_event)
         elif job_type == GPUJobType.SUMMARIZATION:
             await self._summarization_queue.put(ready_event)
 
@@ -175,6 +186,8 @@ class GPUResourceManager(Manager):
         # Update statistics
         if job_type == GPUJobType.TRANSCRIPTION:
             self._total_transcription_locks += 1
+        elif job_type == GPUJobType.TEXT_EMBEDDING:
+            self._total_text_embedding_locks += 1
         elif job_type == GPUJobType.SUMMARIZATION:
             self._total_summarization_locks += 1
         elif job_type == GPUJobType.CHATBOT:
@@ -210,6 +223,15 @@ class GPUResourceManager(Manager):
                 self._consecutive_transcription_count += 1
             else:
                 self._consecutive_transcription_count = 1
+            self._consecutive_text_embedding_count = 0
+            self._consecutive_summarization_count = 0
+
+        elif job_type == GPUJobType.TEXT_EMBEDDING:
+            if self._last_job_type == GPUJobType.TEXT_EMBEDDING:
+                self._consecutive_text_embedding_count += 1
+            else:
+                self._consecutive_text_embedding_count = 1
+            self._consecutive_transcription_count = 0
             self._consecutive_summarization_count = 0
 
         elif job_type == GPUJobType.SUMMARIZATION:
@@ -218,6 +240,7 @@ class GPUResourceManager(Manager):
             else:
                 self._consecutive_summarization_count = 1
             self._consecutive_transcription_count = 0
+            self._consecutive_text_embedding_count = 0
 
         elif job_type == GPUJobType.CHATBOT:
             # Chatbot doesn't affect consecutive counts
@@ -256,15 +279,18 @@ class GPUResourceManager(Manager):
 
         Priority order:
         1. Chatbot requests (always highest priority)
-        2. Round-robin between transcription and summarization
-           - 70/30 probability favoring transcription
+        2. Round-robin between transcription, text embedding, and summarization
+           - 35% probability for transcription
+           - 30% probability for text embedding
+           - 25% probability for summarization
            - Max 2 consecutive transcription operations
+           - Max 1 consecutive text embedding operation
            - Max 1 consecutive summarization operation
         """
         while self._scheduler_running:
             try:
                 # Wait a bit for the current lock holder to finish
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.5)
 
                 # Only schedule next if GPU is not currently locked
                 if self._gpu_lock.is_locked():
@@ -276,15 +302,32 @@ class GPUResourceManager(Manager):
                     ready_event.set()
                     continue
 
-                # If no chatbot requests, use round-robin for transcription/summarization
+                # If no chatbot requests, use round-robin for transcription/embedding/summarization
                 next_job_type = self._select_next_job_type()
 
                 if next_job_type == GPUJobType.TRANSCRIPTION:
                     if not self._transcription_queue.empty():
                         ready_event = await self._transcription_queue.get()
                         ready_event.set()
+                    elif not self._text_embedding_queue.empty():
+                        # Fall back to text embedding if no transcription requests
+                        ready_event = await self._text_embedding_queue.get()
+                        ready_event.set()
                     elif not self._summarization_queue.empty():
-                        # Fall back to summarization if no transcription requests
+                        # Fall back to summarization if no transcription or embedding requests
+                        ready_event = await self._summarization_queue.get()
+                        ready_event.set()
+
+                elif next_job_type == GPUJobType.TEXT_EMBEDDING:
+                    if not self._text_embedding_queue.empty():
+                        ready_event = await self._text_embedding_queue.get()
+                        ready_event.set()
+                    elif not self._transcription_queue.empty():
+                        # Fall back to transcription if no embedding requests
+                        ready_event = await self._transcription_queue.get()
+                        ready_event.set()
+                    elif not self._summarization_queue.empty():
+                        # Fall back to summarization if no embedding or transcription requests
                         ready_event = await self._summarization_queue.get()
                         ready_event.set()
 
@@ -292,8 +335,12 @@ class GPUResourceManager(Manager):
                     if not self._summarization_queue.empty():
                         ready_event = await self._summarization_queue.get()
                         ready_event.set()
+                    elif not self._text_embedding_queue.empty():
+                        # Fall back to text embedding if no summarization requests
+                        ready_event = await self._text_embedding_queue.get()
+                        ready_event.set()
                     elif not self._transcription_queue.empty():
-                        # Fall back to transcription if no summarization requests
+                        # Fall back to transcription if no summarization or embedding requests
                         ready_event = await self._transcription_queue.get()
                         ready_event.set()
 
@@ -311,28 +358,55 @@ class GPUResourceManager(Manager):
         Select the next job type to process based on round-robin rules.
 
         Rules:
-        - If we've done MAX_CONSECUTIVE_TRANSCRIPTION in a row, force summarization
-        - If we've done MAX_CONSECUTIVE_SUMMARIZATION in a row, force transcription
-        - Otherwise, use 70/30 probability (favor transcription)
+        - If we've done MAX_CONSECUTIVE_TRANSCRIPTION in a row, force switch to embedding or summarization
+        - If we've done MAX_CONSECUTIVE_TEXT_EMBEDDING in a row, force switch to transcription or summarization
+        - If we've done MAX_CONSECUTIVE_SUMMARIZATION in a row, force switch to transcription or embedding
+        - Otherwise, use probability-based selection (35% transcription, 30% embedding, 25% summarization)
         """
         # Check if we need to force a switch due to consecutive limits
         if (
             self._last_job_type == GPUJobType.TRANSCRIPTION
             and self._consecutive_transcription_count >= self.MAX_CONSECUTIVE_TRANSCRIPTION
         ):
-            return GPUJobType.SUMMARIZATION
+            # Switch away from transcription - prefer embedding over summarization
+            if random.random() < 0.55:  # 30/(30+25) ≈ 0.545
+                return GPUJobType.TEXT_EMBEDDING
+            else:
+                return GPUJobType.SUMMARIZATION
+
+        if (
+            self._last_job_type == GPUJobType.TEXT_EMBEDDING
+            and self._consecutive_text_embedding_count >= self.MAX_CONSECUTIVE_TEXT_EMBEDDING
+        ):
+            # Switch away from embedding - prefer transcription over summarization
+            if random.random() < 0.58:  # 35/(35+25) ≈ 0.583
+                return GPUJobType.TRANSCRIPTION
+            else:
+                return GPUJobType.SUMMARIZATION
 
         if (
             self._last_job_type == GPUJobType.SUMMARIZATION
             and self._consecutive_summarization_count >= self.MAX_CONSECUTIVE_SUMMARIZATION
         ):
-            return GPUJobType.TRANSCRIPTION
+            # Switch away from summarization - prefer transcription over embedding
+            if random.random() < 0.54:  # 35/(35+30) ≈ 0.538
+                return GPUJobType.TRANSCRIPTION
+            else:
+                return GPUJobType.TEXT_EMBEDDING
 
-        # Use probability-based selection (70% transcription, 30% summarization)
-        if random.random() < self.TRANSCRIPTION_PROBABILITY:
+        # Use probability-based selection
+        # Total probability allocated: 35% + 30% + 25% = 90%, leaving 10% for fallback
+        rand_val = random.random()
+        
+        if rand_val < self.TRANSCRIPTION_PROBABILITY:
             return GPUJobType.TRANSCRIPTION
-        else:
+        elif rand_val < self.TRANSCRIPTION_PROBABILITY + self.TEXT_EMBEDDING_PROBABILITY:
+            return GPUJobType.TEXT_EMBEDDING
+        elif rand_val < self.TRANSCRIPTION_PROBABILITY + self.TEXT_EMBEDDING_PROBABILITY + self.SUMMARIZATION_PROBABILITY:
             return GPUJobType.SUMMARIZATION
+        else:
+            # Fallback for remaining 10% - pick randomly from available types
+            return random.choice([GPUJobType.TRANSCRIPTION, GPUJobType.TEXT_EMBEDDING, GPUJobType.SUMMARIZATION])
 
     # -------------------------------------------------------------- #
     # Status and Monitoring
@@ -350,14 +424,17 @@ class GPUResourceManager(Manager):
             "gpu_lock": self._gpu_lock.get_status(),
             "queue_sizes": {
                 "transcription": self._transcription_queue.qsize(),
+                "text_embedding": self._text_embedding_queue.qsize(),
                 "summarization": self._summarization_queue.qsize(),
                 "chatbot": self._chatbot_queue.qsize(),
             },
             "stats": {
                 "total_transcription_locks": self._total_transcription_locks,
+                "total_text_embedding_locks": self._total_text_embedding_locks,
                 "total_summarization_locks": self._total_summarization_locks,
                 "total_chatbot_locks": self._total_chatbot_locks,
                 "consecutive_transcription": self._consecutive_transcription_count,
+                "consecutive_text_embedding": self._consecutive_text_embedding_count,
                 "consecutive_summarization": self._consecutive_summarization_count,
                 "last_job_type": (self._last_job_type.value if self._last_job_type else None),
             },
