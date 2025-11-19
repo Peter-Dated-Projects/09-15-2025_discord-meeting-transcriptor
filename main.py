@@ -134,7 +134,7 @@ async def _ensure_guild_subscription_and_collection(guilds: list[discord.Guild])
         guilds: List of Discord Guild objects to process
     """
     logger = bot.context.services_manager.logging_service
-    subscription_service = bot.context.services_manager.subscription_sql_manager_service
+    subscription_service = bot.context.services_manager.subscription_sql_manager
     vector_db_client = bot.context.server_manager.vector_db_client
 
     from source.server.sql_models import SubscriptionType
