@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 if TYPE_CHECKING:
     from source.context import Context
 
-from source.server.common import vector_db, whisper_server
+from source.server.common import chroma, whisper_server
 from source.server.dev.mysql import MySQLServer
 from source.server.server import ServerManager
 
@@ -39,7 +39,7 @@ def load_vectordb_client():
     port = int(os.getenv("CHROMADB_PORT", "8000"))
 
     # create VectorDB client
-    vector_db_client = vector_db.construct_vector_db_client(host=host, port=port)
+    vector_db_client = chroma.construct_vector_db_client(host=host, port=port)
     return vector_db_client
 
 
