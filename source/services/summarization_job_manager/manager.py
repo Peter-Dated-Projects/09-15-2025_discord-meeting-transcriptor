@@ -60,8 +60,7 @@ class SummarizationJob(Job):
         1. Load the compiled transcript
         2. Extract raw text from segments
         3. Perform recursive summarization using Ollama
-        4. Store summary layers and final summary
-        5. Update all individual transcription files with the summaries
+        4. Store summary layers and final summary in the compiled transcript
         """
         if not self.services:
             raise RuntimeError("ServicesManager not provided to SummarizationJob")
@@ -104,8 +103,8 @@ class SummarizationJob(Job):
 
             # GPU lock automatically released here
 
-            # Step 4: Update all individual transcription files with summaries
-            await self._update_transcription_files(summary_layers, final_summary)
+            # Step 4: Update the compiled transcript file with summaries
+            await self._update_compiled_transcript(summary_layers, final_summary)
 
             await self.services.logging_service.info(
                 f"Completed summarization for meeting {self.meeting_id}"
@@ -291,11 +290,11 @@ class SummarizationJob(Job):
 
         return summary_layers, final_summary
 
-    async def _update_transcription_files(
+    async def _update_compiled_transcript(
         self, summary_layers: dict[int, list[str]], final_summary: str
     ) -> None:
         """
-        Update all individual transcription files with summaries.
+        Update the compiled transcript file with summaries.
 
         Args:
             summary_layers: Dictionary of summary layers {level: [summaries]}
@@ -306,61 +305,49 @@ class SummarizationJob(Job):
         import os
 
         import aiofiles
-        from sqlalchemy import select
-
-        from source.server.sql_models import UserTranscriptsModel
 
         await self.services.logging_service.info(
-            f"Updating {len(self.transcript_ids)} transcription files with summaries"
+            f"Updating compiled transcript for meeting {self.meeting_id} with summaries"
         )
 
-        for transcript_id in self.transcript_ids:
-            try:
-                # Get transcript metadata from SQL
-                stmt = select(UserTranscriptsModel).where(UserTranscriptsModel.id == transcript_id)
-                result = await self.services.server.sql_client.execute(stmt)
+        try:
+            # Construct file path to compiled transcript
+            base_path = "assets/data/transcriptions"
+            compilations_path = os.path.join(base_path, "compilations", "storage")
+            filename = f"transcript_{self.meeting_id}.json"
+            file_path = os.path.join(compilations_path, filename)
 
-                if not result:
-                    await self.services.logging_service.warning(
-                        f"Transcription {transcript_id} not found in SQL, skipping..."
-                    )
-                    continue
-
-                transcript_model = result[0]
-                filename = transcript_model["transcript_filename"]
-                storage_path = self.services.transcription_file_service_manager.get_storage_path()
-                file_path = os.path.join(storage_path, filename)
-
-                # Load existing transcription data
-                loop = asyncio.get_event_loop()
-                if not await loop.run_in_executor(None, os.path.exists, file_path):
-                    await self.services.logging_service.warning(
-                        f"Transcription file not found: {file_path}, skipping..."
-                    )
-                    continue
-
-                async with aiofiles.open(file_path, mode="r", encoding="utf-8") as f:
-                    content = await f.read()
-                    transcription_data = json.loads(content)
-
-                # Update with summaries
-                transcription_data["summary_layers"] = summary_layers
-                transcription_data["summary"] = final_summary
-                transcription_data["summarized_at"] = get_current_timestamp_est().isoformat()
-
-                # Save updated transcription
-                async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:
-                    await f.write(json.dumps(transcription_data, indent=2, ensure_ascii=False))
-
-                await self.services.logging_service.info(
-                    f"Updated transcription {transcript_id} with summaries"
-                )
-
-            except Exception as e:
+            # Check if file exists
+            loop = asyncio.get_event_loop()
+            if not await loop.run_in_executor(None, os.path.exists, file_path):
                 await self.services.logging_service.error(
-                    f"Failed to update transcription {transcript_id}: {str(e)}"
+                    f"Compiled transcript file not found: {file_path}"
                 )
-                # Continue with other transcriptions
+                return
+
+            # Load existing compiled transcript
+            async with aiofiles.open(file_path, mode="r", encoding="utf-8") as f:
+                content = await f.read()
+                compiled_data = json.loads(content)
+
+            # Add summaries to compiled transcript
+            compiled_data["summary_layers"] = summary_layers
+            compiled_data["summary"] = final_summary
+            compiled_data["summarized_at"] = get_current_timestamp_est().isoformat()
+
+            # Save updated compiled transcript
+            async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:
+                await f.write(json.dumps(compiled_data, indent=2, ensure_ascii=False))
+
+            await self.services.logging_service.info(
+                f"Successfully updated compiled transcript {filename} with summaries"
+            )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to update compiled transcript for meeting {self.meeting_id}: {str(e)}"
+            )
+            raise
 
 
 class BaseSummarizationJobManagerService(Manager):
