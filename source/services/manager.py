@@ -30,7 +30,9 @@ class ServicesManager:
         presence_manager_service: Any | None = None,
         transcription_job_manager: Any | None = None,
         transcription_compilation_job_manager: Any | None = None,
+        summarization_job_manager: Any | None = None,
         gpu_resource_manager: Any | None = None,
+        ollama_request_manager: Any | None = None,
     ):
         self.context = context
         # Backward compatibility - keep server reference
@@ -63,6 +65,12 @@ class ServicesManager:
 
         # Transcription compilation job manager
         self.transcription_compilation_job_manager = transcription_compilation_job_manager
+
+        # Summarization job manager
+        self.summarization_job_manager = summarization_job_manager
+
+        # Ollama request manager
+        self.ollama_request_manager = ollama_request_manager
 
     async def initialize_all(self) -> None:
         """Initialize all service managers."""
@@ -102,6 +110,14 @@ class ServicesManager:
         # Transcription compilation job manager
         if self.transcription_compilation_job_manager:
             await self.transcription_compilation_job_manager.on_start(self)
+
+        # Summarization job manager
+        if self.summarization_job_manager:
+            await self.summarization_job_manager.on_start(self)
+
+        # Ollama request manager
+        if self.ollama_request_manager:
+            await self.ollama_request_manager.on_start(self)
 
     async def shutdown_all(self, timeout: float = 60.0) -> None:
         """
@@ -174,7 +190,25 @@ class ServicesManager:
                 )
                 await self.logging_service.info("✓ All compilation jobs completed")
 
-            # Phase 5: Stop FFmpeg conversions
+            # Phase 5.5: Wait for summarization jobs to complete
+            await self.logging_service.info(
+                "Phase 5.5: Waiting for summarization jobs to complete..."
+            )
+            if self.summarization_job_manager:
+                await asyncio.wait_for(
+                    self.summarization_job_manager.on_close(), timeout=timeout * 0.25
+                )
+                await self.logging_service.info("✓ All summarization jobs completed")
+
+            # Phase 5.6: Close Ollama request manager
+            await self.logging_service.info("Phase 5.6: Closing Ollama request manager...")
+            if self.ollama_request_manager:
+                await asyncio.wait_for(
+                    self.ollama_request_manager.on_close(), timeout=timeout * 0.05
+                )
+                await self.logging_service.info("✓ Ollama request manager closed")
+
+            # Phase 6: Stop FFmpeg conversions
             await self.logging_service.info("Phase 5: Stopping FFmpeg conversions...")
             await asyncio.wait_for(self.ffmpeg_service_manager.on_close(), timeout=timeout * 0.1)
             await self.logging_service.info("✓ FFmpeg conversions stopped")

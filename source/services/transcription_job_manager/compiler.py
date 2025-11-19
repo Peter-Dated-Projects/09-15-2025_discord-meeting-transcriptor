@@ -501,8 +501,29 @@ class TranscriptionCompilationJobManagerService(BaseTranscriptionCompilationJobM
         # Update SQL status
         await self._update_sql_job_status(job)
 
-        # Send DM notifications to all users who participated in the meeting
-        await self._send_compilation_notifications(job)
+        # Trigger summarization job if summarization job manager is available
+        if self.services.summarization_job_manager and job.transcript_ids:
+            try:
+                # We need to get the compiled_transcript_id from the compilation result
+                # For now, we'll construct it based on the meeting_id
+                compiled_transcript_id = f"compiled_{job.meeting_id}"
+
+                await self.services.summarization_job_manager.create_and_queue_summarization_job(
+                    meeting_id=job.meeting_id,
+                    compiled_transcript_id=compiled_transcript_id,
+                    transcript_ids=job.transcript_ids,
+                    user_ids=job.user_ids,
+                )
+            except Exception as e:
+                await self.services.logging_service.error(
+                    f"Failed to create summarization job for meeting {job.meeting_id}: {e}"
+                )
+        elif not job.transcript_ids:
+            await self.services.logging_service.warning(
+                f"No transcript IDs found for meeting {job.meeting_id}, skipping summarization job"
+            )
+
+        # Note: DM notifications are now sent after summarization completes
 
     async def _send_compilation_notifications(self, job: TranscriptionCompilationJob) -> None:
         """
