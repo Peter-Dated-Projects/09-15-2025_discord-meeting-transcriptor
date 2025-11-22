@@ -10,7 +10,7 @@ import os
 from typing import Any
 
 import chromadb
-from flask import Flask, render_template_string, request
+from flask import Flask, redirect, render_template_string, request, url_for
 
 app = Flask(__name__)
 
@@ -315,6 +315,37 @@ COLLECTION_TEMPLATE = """
             font-size: 0.9rem;
         }
         
+        .actions {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+        }
+        
         .search-box {
             margin-bottom: 20px;
         }
@@ -437,7 +468,75 @@ COLLECTION_TEMPLATE = """
             overflow-x: auto;
             font-size: 0.85rem;
         }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #333;
+        }
+        
+        .modal-body {
+            margin-bottom: 20px;
+            color: #6c757d;
+            line-height: 1.6;
+        }
+        
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
     </style>
+    <script>
+        function showDeleteModal() {
+            document.getElementById('deleteModal').classList.add('active');
+        }
+        
+        function hideDeleteModal() {
+            document.getElementById('deleteModal').classList.remove('active');
+        }
+        
+        function confirmDelete() {
+            // Submit the delete form
+            document.getElementById('deleteForm').submit();
+        }
+    </script>
 </head>
 <body>
     <div class="container">
@@ -464,25 +563,31 @@ COLLECTION_TEMPLATE = """
                     </div>
                 </div>
                 
+                <div class="actions">
+                    <button onclick="showDeleteModal()" class="btn btn-danger">
+                        🗑️ Delete All Documents
+                    </button>
+                </div>
+                
                 {% if documents %}
                     <div class="documents-list">
                         {% for doc in documents %}
                             <div class="document-card">
                                 <div class="document-header">
                                     <div class="document-id">ID: {{ doc.id }}</div>
-                                    {% if doc.distance %}
+                                    {% if doc.get('distance') is not none %}
                                         <div class="document-distance">Distance: {{ "%.4f"|format(doc.distance) }}</div>
                                     {% endif %}
                                 </div>
                                 
-                                {% if doc.document %}
+                                {% if doc.get('document') is not none %}
                                     <div class="document-content">
                                         <strong>Content:</strong><br>
                                         {{ doc.document[:500] }}{% if doc.document|length > 500 %}...{% endif %}
                                     </div>
                                 {% endif %}
                                 
-                                {% if doc.metadata %}
+                                {% if doc.get('metadata') is not none %}
                                     <div class="document-metadata">
                                         <div class="metadata-title">📋 Metadata</div>
                                         {% for key, value in doc.metadata.items() %}
@@ -494,7 +599,7 @@ COLLECTION_TEMPLATE = """
                                     </div>
                                 {% endif %}
                                 
-                                {% if doc.embedding %}
+                                {% if doc.get('embedding') is not none %}
                                     <details style="margin-top: 15px;">
                                         <summary style="cursor: pointer; color: #667eea; font-weight: 600;">
                                             View Embedding ({{ doc.embedding|length }} dimensions)
@@ -514,6 +619,24 @@ COLLECTION_TEMPLATE = """
             {% endif %}
         </div>
     </div>
+    
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-title">⚠️ Delete All Documents</div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete <strong>all {{ document_count }} documents</strong> from the collection <strong>{{ collection_name }}</strong>?</p>
+                <p style="color: #dc3545; font-weight: 600; margin-top: 10px;">This action cannot be undone!</p>
+            </div>
+            <div class="modal-actions">
+                <button onclick="hideDeleteModal()" class="btn btn-secondary">Cancel</button>
+                <button onclick="confirmDelete()" class="btn btn-danger">Delete All</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Hidden form for delete action -->
+    <form id="deleteForm" method="POST" action="/collection/{{ collection_name }}/delete" style="display: none;"></form>
 </body>
 </html>
 """
@@ -565,30 +688,46 @@ def view_collection(collection_name):
         client = get_client()
         collection = client.get_collection(name=collection_name)
 
-        # Get all documents
-        results = collection.get(include=["documents", "metadatas", "embeddings"])
+        # Get the total count first
+        total_count = collection.count()
+
+        # Get all documents by specifying the limit
+        # Note: collection.get() defaults to limit=100, so we need to specify the actual count
+        results = collection.get(
+            include=["documents", "metadatas", "embeddings"],
+            limit=total_count if total_count > 0 else None,
+        )
 
         documents = []
         metadata_fields = set()
 
-        if results["ids"]:
+        # Check if we have any IDs - handle both list and numpy array cases
+        if results.get("ids") is not None and len(results["ids"]) > 0:
             for i, doc_id in enumerate(results["ids"]):
                 doc_data: dict[str, Any] = {"id": doc_id}
 
-                if results.get("documents") and i < len(results["documents"]):
+                if results.get("documents") is not None and i < len(results["documents"]):
                     doc_data["document"] = results["documents"][i]
 
-                if results.get("metadatas") and i < len(results["metadatas"]):
+                if results.get("metadatas") is not None and i < len(results["metadatas"]):
                     metadata = results["metadatas"][i]
                     doc_data["metadata"] = metadata
                     if metadata:
                         metadata_fields.update(metadata.keys())
 
-                if results.get("embeddings") and i < len(results["embeddings"]):
-                    doc_data["embedding"] = results["embeddings"][i]
+                if results.get("embeddings") is not None and i < len(results["embeddings"]):
+                    embedding = results["embeddings"][i]
+                    # Convert numpy array to list to avoid "truth value of array" errors in templates
+                    if hasattr(embedding, "tolist"):
+                        embedding = embedding.tolist()
+                    doc_data["embedding"] = embedding
 
-                if results.get("distances") and i < len(results["distances"]):
-                    doc_data["distance"] = results["distances"][i]
+                if results.get("distances") is not None and i < len(results["distances"]):
+                    distance = results["distances"][i]
+                    # Convert numpy scalar to Python float if needed
+                    if hasattr(distance, "item"):
+                        distance = distance.item()
+                    doc_data["distance"] = distance
 
                 documents.append(doc_data)
 
@@ -608,6 +747,35 @@ def view_collection(collection_name):
             document_count=0,
             metadata_fields=[],
             error=str(e),
+        )
+
+
+@app.route("/collection/<collection_name>/delete", methods=["POST"])
+def delete_all_documents(collection_name):
+    """Delete all documents from a collection."""
+    try:
+        client = get_client()
+        collection = client.get_collection(name=collection_name)
+
+        # Get all document IDs
+        results = collection.get(include=[])
+        doc_ids = results["ids"]
+
+        if doc_ids:
+            # Delete all documents
+            collection.delete(ids=doc_ids)
+
+        # Redirect back to the collection page
+        return redirect(url_for("view_collection", collection_name=collection_name))
+    except Exception as e:
+        # If there's an error, redirect back with error
+        return render_template_string(
+            COLLECTION_TEMPLATE,
+            collection_name=collection_name,
+            documents=[],
+            document_count=0,
+            metadata_fields=[],
+            error=f"Failed to delete documents: {str(e)}",
         )
 
 
