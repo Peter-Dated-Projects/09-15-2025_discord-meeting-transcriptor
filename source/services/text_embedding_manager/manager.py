@@ -346,8 +346,11 @@ class TextEmbeddingJob(Job):
         """
         Generate embeddings for partitions with GPU lock.
 
+        Handles both transcript partitions (with 'contextualized_text') and 
+        summary partitions (with 'text').
+
         Args:
-            partitions: List of partition dicts with 'contextualized_text'
+            partitions: List of partition dicts with either 'contextualized_text' or 'text' field
 
         Returns:
             List of embedding vectors
@@ -378,8 +381,16 @@ class TextEmbeddingJob(Job):
 
                 await self.services.logging_service.info("Embedding model loaded successfully")
 
-                # Extract contextualized texts
-                texts = [p["contextualized_text"] for p in partitions]
+                # Extract text from partitions
+                # Handle both transcript format (contextualized_text) and summary format (text)
+                texts = []
+                for p in partitions:
+                    if "contextualized_text" in p:
+                        texts.append(p["contextualized_text"])
+                    elif "text" in p:
+                        texts.append(p["text"])
+                    else:
+                        raise ValueError(f"Partition missing text field: {p.keys()}")
 
                 # Generate embeddings in batches
                 embeddings = await asyncio.get_event_loop().run_in_executor(
