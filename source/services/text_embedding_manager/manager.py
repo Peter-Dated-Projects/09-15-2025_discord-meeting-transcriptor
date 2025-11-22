@@ -346,7 +346,7 @@ class TextEmbeddingJob(Job):
         """
         Generate embeddings for partitions with GPU lock.
 
-        Handles both transcript partitions (with 'contextualized_text') and 
+        Handles both transcript partitions (with 'contextualized_text') and
         summary partitions (with 'text').
 
         Args:
