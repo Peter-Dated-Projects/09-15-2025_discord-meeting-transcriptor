@@ -36,23 +36,44 @@ SQL_DATABASE_MODELS = [
 # -------------------------------------------------------------- #
 
 
-class RecordingFilesMapping(RootModel[dict[str, str]]):
+class RecordingFilesMapping(RootModel[dict]):
     """
-    Represents the structure: {user_id: recording_id}
-    where user_id is a Discord User ID (string) and recording_id is a Recording ID (string)
+    Represents the structure:
+    {
+        "users": [
+            {"user_id": "recording_id"}, ...
+        ]
+    }
+    where users is an array of objects mapping user_id to concatenated recording_id
+    The recording_id is the ID from the recordings table (after MP3 concatenation)
     """
 
-    root: dict[str, str]  # Maps user_id -> recording_id
+    root: dict  # New format with users array
 
     @field_validator("root")
-    def validate_format(cls, v: dict[str, str]) -> dict[str, str]:
+    def validate_format(cls, v: dict) -> dict:
         if not isinstance(v, dict):
             raise ValueError("Must be a dictionary")
-        for user_id, recording_id in v.items():
-            if not isinstance(user_id, str) or not isinstance(recording_id, str):
-                raise ValueError("Both keys and values must be strings (user_id and recording_id)")
-            if len(user_id) == 0 or len(recording_id) == 0:
-                raise ValueError("user_id and recording_id cannot be empty")
+
+        # Validate users array
+        if "users" not in v:
+            raise ValueError("Must contain 'users' key")
+        if not isinstance(v["users"], list):
+            raise ValueError("'users' value must be a list")
+
+        for user_entry in v["users"]:
+            if not isinstance(user_entry, dict):
+                raise ValueError("Each user entry must be a dictionary")
+            if len(user_entry) != 1:
+                raise ValueError("Each user entry must have exactly one key-value pair")
+
+            # Validate user_id: recording_id mapping
+            for user_id, recording_id in user_entry.items():
+                if not isinstance(user_id, str) or not isinstance(recording_id, str):
+                    raise ValueError("Both user_id and recording_id must be strings")
+                if len(user_id) == 0 or len(recording_id) == 0:
+                    raise ValueError("user_id and recording_id cannot be empty")
+
         return v
 
 

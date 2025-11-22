@@ -2066,7 +2066,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         user_id: int | str,
         recordings: list[dict],
         meeting_id: str,
-    ) -> bool:
+    ) -> str | None:
         """
         Process and concatenate all recordings for a specific user in a meeting.
 
@@ -2076,7 +2076,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             meeting_id: Meeting ID
 
         Returns:
-            True if processing succeeded, False otherwise
+            The recording_id of the created persistent recording, or None if failed
         """
         try:
             await self.services.logging_service.info(
@@ -2117,7 +2117,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Temp recordings exist ({len(recordings)} total) but MP3 transcoding may have failed. "
                     f"Check transcode_status in temp_recordings table."
                 )
-                return False
+                return None
 
             await self.services.logging_service.info(
                 f"Found {len(mp3_files)} MP3 files for user {user_id}"
@@ -2133,7 +2133,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                 await self.services.logging_service.error(
                     f"Failed to concatenate MP3 files for user {user_id} in meeting {meeting_id}"
                 )
-                return False
+                return None
 
             # Insert persistent recording into SQL
             # Note: We pass the full path so SHA256 and duration can be calculated,
@@ -2184,13 +2184,13 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             # Note: DM notification will be sent after compilation job completes
             # See TranscriptionCompilationJobManagerService._on_job_complete
 
-            return True
+            return recording_id
 
         except Exception as e:
             await self.services.logging_service.error(
                 f"Error processing recordings for user {user_id} in meeting {meeting_id}: {e}"
             )
-            return False
+            return None
 
     async def _process_recordings_post_stop(
         self,
@@ -2254,7 +2254,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                 f"Grouped recordings by user: {len(user_recordings)} users with recordings"
             )
 
-            # Process each user's recordings
+            # Process each user's recordings and collect recording_ids
+            user_recording_mapping = {}
             for rec_user_id, recordings in user_recordings.items():
                 # Check shutdown before each user processing
                 if self.context.is_shutting_down():
@@ -2263,15 +2264,34 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     )
                     return
 
-                await self._process_user_recordings(
+                recording_id = await self._process_user_recordings(
                     user_id=rec_user_id,
                     recordings=recordings,
                     meeting_id=meeting_id,
                 )
 
+                # Track the recording_id for this user
+                if recording_id:
+                    user_recording_mapping[str(rec_user_id)] = recording_id
+
             await self.services.logging_service.info(
                 f"Completed post-stop processing for meeting {meeting_id}"
             )
+
+            # Update meeting's recording_files field with the mappings
+            if user_recording_mapping and self.services.sql_recording_service_manager:
+                try:
+                    await self.services.sql_recording_service_manager.update_meeting_recording_files(
+                        meeting_id=meeting_id,
+                        user_recording_mapping=user_recording_mapping,
+                    )
+                    await self.services.logging_service.info(
+                        f"Updated meeting {meeting_id} recording_files with {len(user_recording_mapping)} user recordings"
+                    )
+                except Exception as e:
+                    await self.services.logging_service.error(
+                        f"Failed to update meeting {meeting_id} recording_files: {e}"
+                    )
 
             # Check shutdown before creating transcription job
             if self.context.is_shutting_down():
