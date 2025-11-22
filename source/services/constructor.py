@@ -54,6 +54,7 @@ def construct_services_manager(
     transcription_job_manager = None
     transcription_compilation_job_manager = None
     summarization_job_manager = None
+    text_embedding_job_manager = None
     gpu_resource_manager = None
     ollama_request_manager = None
 
@@ -159,6 +160,16 @@ def construct_services_manager(
         summarization_job_manager = SummarizationJobManagerService(context=context)
 
         # -------------------------------------------------------------- #
+        # Text Embedding Job Manager Setup
+        # -------------------------------------------------------------- #
+
+        from source.services.text_embedding_manager.manager import (
+            TextEmbeddingJobManagerService,
+        )
+
+        text_embedding_job_manager = TextEmbeddingJobManagerService(context=context)
+
+        # -------------------------------------------------------------- #
         # GPU Resource Manager Setup
         # -------------------------------------------------------------- #
 
@@ -200,6 +211,7 @@ def construct_services_manager(
         transcription_job_manager=transcription_job_manager,
         transcription_compilation_job_manager=transcription_compilation_job_manager,
         summarization_job_manager=summarization_job_manager,
+        text_embedding_job_manager=text_embedding_job_manager,
         gpu_resource_manager=gpu_resource_manager,
         ollama_request_manager=ollama_request_manager,
     )
