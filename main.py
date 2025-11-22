@@ -45,6 +45,7 @@ DEBUG_GUILD_IDS = [
     1233459903696208014,
     1266931275047108691,
     1235590570773057566,
+    1391829654847094975,  # homeless shelter
 ]  # Example: [123456789012345678]
 # Leave empty [] for global commands (takes up to 1 hour to register)
 # Or add your guild IDs for instant registration during development
