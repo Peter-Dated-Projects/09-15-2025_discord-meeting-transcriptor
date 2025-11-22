@@ -606,6 +606,7 @@ class BaseTextEmbeddingJobManagerService(Manager):
         meeting_id: str,
         guild_id: str,
         compiled_transcript_id: str,
+        user_ids: list[str],
     ) -> str:
         """Create and queue a text embedding job."""
         pass
