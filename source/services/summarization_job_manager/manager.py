@@ -622,141 +622,46 @@ class SummarizationJobManagerService(BaseSummarizationJobManagerService):
         # Update SQL status
         await self._update_sql_job_status(job)
 
-        # Send DM notifications to all users who participated in the meeting
-        await self._send_meeting_complete_notifications(job)
-
-    async def _send_meeting_complete_notifications(self, job: SummarizationJob) -> None:
-        """
-        Send DM notifications to all users who participated in the meeting.
-
-        Args:
-            job: The completed summarization job
-        """
-        try:
-            # Import required modules
-            import discord
-
-            from source.utils import BotUtils
-
-            # Get meeting data
-            meeting_data = await self.services.sql_recording_service_manager.get_meeting(
-                meeting_id=job.meeting_id
-            )
-
-            if not meeting_data:
-                await self.services.logging_service.warning(
-                    f"Could not find meeting data for {job.meeting_id}, skipping notifications"
-                )
-                return
-
-            # Get guild data
-            if not self.services.context.bot:
-                await self.services.logging_service.warning(
-                    "Bot instance not available, cannot send DM notifications"
-                )
-                return
-
+        # Trigger text embedding job if text_embedding_job_manager is available
+        if self.services.text_embedding_job_manager:
             try:
-                guild_data = await self.services.context.bot.fetch_guild(
-                    int(meeting_data["guild_id"])
+                # Get meeting data to retrieve guild_id
+                meeting_data = await self.services.sql_recording_service_manager.get_meeting(
+                    meeting_id=job.meeting_id
                 )
-            except (ValueError, discord.NotFound, discord.HTTPException) as e:
+
+                if not meeting_data:
+                    await self.services.logging_service.warning(
+                        f"Could not find meeting data for {job.meeting_id}, skipping text embedding job"
+                    )
+                    return
+
+                guild_id = meeting_data.get("guild_id")
+                if not guild_id:
+                    await self.services.logging_service.warning(
+                        f"No guild_id found for meeting {job.meeting_id}, skipping text embedding job"
+                    )
+                    return
+
+                # Create and queue text embedding job
+                await self.services.text_embedding_job_manager.create_and_queue_embedding_job(
+                    meeting_id=job.meeting_id,
+                    guild_id=str(guild_id),
+                    compiled_transcript_id=job.compiled_transcript_id,
+                    user_ids=job.user_ids,
+                )
+
+                await self.services.logging_service.info(
+                    f"Queued text embedding job for meeting {job.meeting_id}"
+                )
+
+            except Exception as e:
                 await self.services.logging_service.error(
-                    f"Failed to fetch guild data: {e}, skipping notifications"
+                    f"Failed to create text embedding job for meeting {job.meeting_id}: {e}"
                 )
-                return
-
-            # Prepare guild info
-            guild_name = (
-                guild_data.name
-                if hasattr(guild_data, "name")
-                else guild_data.get("name", "Unknown Guild")
-            )
-
-            guild_icon_url = None
-            if hasattr(guild_data, "icon") and guild_data.icon:
-                guild_icon_url = guild_data.icon.url
-            elif isinstance(guild_data, dict) and guild_data.get("icon"):
-                guild_icon_url = guild_data["icon"]
-
-            # Get meeting timestamp
-            created_at = meeting_data.get("started_at")
-            if created_at and hasattr(created_at, "timestamp"):
-                created_at_timestamp = int(created_at.timestamp())
-            elif created_at:
-                created_at_timestamp = int(created_at)
-            else:
-                import datetime
-
-                created_at_timestamp = int(datetime.datetime.now().timestamp())
-
-            # Get requested_by user info
-            requested_by_id = meeting_data.get("requested_by", "Unknown")
-            requested_by_user_name = None
-            footer_icon_url = None
-
-            try:
-                requested_user = await self.services.context.bot.fetch_user(int(requested_by_id))
-                if requested_user and requested_user.avatar:
-                    footer_icon_url = requested_user.avatar.url
-                    requested_by_user_name = requested_user.name
-            except (ValueError, discord.NotFound, discord.HTTPException):
-                pass
-
-            # Create embed for each user
-            for user_id in job.user_ids:
-                try:
-                    embed = discord.Embed(
-                        title=f"**Meeting Finished**: Meeting in `{guild_name}`",
-                        description=(
-                            "**✅ Your recording has been transcribed, compiled, and summarized!**\n\n"
-                            "The meeting transcription and AI-generated summary are now available."
-                        ),
-                        color=discord.Color.green(),
-                    )
-
-                    if guild_icon_url:
-                        embed.set_thumbnail(url=guild_icon_url)
-
-                    embed.add_field(
-                        name="Recording Date",
-                        value=f"<t:{created_at_timestamp}:F>",
-                        inline=False,
-                    )
-
-                    embed.add_field(
-                        name="Compilation",
-                        value=f"`transcript_{job.meeting_id}.json`",
-                        inline=False,
-                    )
-
-                    embed.set_footer(
-                        text=f"Requested by {requested_by_user_name or requested_by_id}",
-                        icon_url=footer_icon_url,
-                    )
-
-                    # Send DM
-                    success = await BotUtils.send_dm(
-                        self.services.context.bot, user_id, embed=embed
-                    )
-
-                    if success:
-                        await self.services.logging_service.info(
-                            f"Sent completion notification to user {user_id} for meeting {job.meeting_id}"
-                        )
-                    else:
-                        await self.services.logging_service.warning(
-                            f"Failed to send completion notification to user {user_id}"
-                        )
-
-                except Exception as e:
-                    await self.services.logging_service.error(
-                        f"Error sending notification to user {user_id}: {e}"
-                    )
-
-        except Exception as e:
-            await self.services.logging_service.error(
-                f"Error in _send_meeting_complete_notifications: {e}"
+        else:
+            await self.services.logging_service.warning(
+                "Text embedding job manager not available, skipping text embedding job"
             )
 
     async def _on_job_failed(self, job: SummarizationJob) -> None:

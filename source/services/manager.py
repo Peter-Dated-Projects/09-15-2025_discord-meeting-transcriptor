@@ -31,6 +31,7 @@ class ServicesManager:
         transcription_job_manager: Any | None = None,
         transcription_compilation_job_manager: Any | None = None,
         summarization_job_manager: Any | None = None,
+        text_embedding_job_manager: Any | None = None,
         gpu_resource_manager: Any | None = None,
         ollama_request_manager: Any | None = None,
     ):
@@ -68,6 +69,9 @@ class ServicesManager:
 
         # Summarization job manager
         self.summarization_job_manager = summarization_job_manager
+
+        # Text embedding job manager
+        self.text_embedding_job_manager = text_embedding_job_manager
 
         # Ollama request manager
         self.ollama_request_manager = ollama_request_manager
@@ -114,6 +118,10 @@ class ServicesManager:
         # Summarization job manager
         if self.summarization_job_manager:
             await self.summarization_job_manager.on_start(self)
+
+        # Text embedding job manager
+        if self.text_embedding_job_manager:
+            await self.text_embedding_job_manager.on_start(self)
 
         # Ollama request manager
         if self.ollama_request_manager:
@@ -200,8 +208,18 @@ class ServicesManager:
                 )
                 await self.logging_service.info("✓ All summarization jobs completed")
 
-            # Phase 5.6: Close Ollama request manager
-            await self.logging_service.info("Phase 5.6: Closing Ollama request manager...")
+            # Phase 5.6: Wait for text embedding jobs to complete
+            await self.logging_service.info(
+                "Phase 5.6: Waiting for text embedding jobs to complete..."
+            )
+            if self.text_embedding_job_manager:
+                await asyncio.wait_for(
+                    self.text_embedding_job_manager.on_close(), timeout=timeout * 0.25
+                )
+                await self.logging_service.info("✓ All text embedding jobs completed")
+
+            # Phase 5.7: Close Ollama request manager
+            await self.logging_service.info("Phase 5.7: Closing Ollama request manager...")
             if self.ollama_request_manager:
                 await asyncio.wait_for(
                     self.ollama_request_manager.on_close(), timeout=timeout * 0.05
@@ -573,4 +591,32 @@ class BaseDiscordRecorderServiceManager(Manager):
     @abstractmethod
     async def resume_session(self, channel_id: int) -> bool:
         """Resume a paused recording session."""
+        pass
+
+
+class BaseTextEmbeddingJobManagerService(Manager):
+    """Base class for text embedding job manager service."""
+
+    def __init__(self, context):
+        super().__init__(context)
+
+    @abstractmethod
+    async def create_and_queue_embedding_job(
+        self,
+        meeting_id: str,
+        guild_id: str,
+        compiled_transcript_id: str,
+        user_ids: list[str],
+    ) -> str:
+        """Create and queue a text embedding job."""
+        pass
+
+    @abstractmethod
+    async def get_job_status(self, job_id: str) -> dict:
+        """Get the status of a specific job."""
+        pass
+
+    @abstractmethod
+    async def get_queue_statistics(self) -> dict:
+        """Get statistics about the job queue."""
         pass

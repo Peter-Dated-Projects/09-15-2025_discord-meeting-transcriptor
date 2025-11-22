@@ -29,6 +29,7 @@ class JobsType(enum.Enum):
     TRANSCRIBING = "transcribing"
     COMPILING = "compiling"
     SUMMARIZING = "summarizing"
+    TEXT_EMBEDDING = "text_embedding"
     CLEANING = "cleaning"
 
 
