@@ -117,6 +117,50 @@ class ChromaDBClient(VectorDBDatabase):
             logger.error(f"Failed to create collection {name}: {e}")
             raise
 
+    def get_collection(self, name: str):
+        """
+        Get an existing collection.
+
+        Args:
+            name: Collection name
+
+        Returns:
+            Collection instance
+
+        Raises:
+            RuntimeError: If client is not connected or collection doesn't exist
+        """
+        if not self.client:
+            raise RuntimeError("ChromaDB client not connected")
+
+        try:
+            return self.client.get_collection(name=name)
+        except Exception as e:
+            logger.error(f"Failed to get collection {name}: {e}")
+            raise
+
+    def get_or_create_collection(self, name: str):
+        """
+        Get or create a collection.
+
+        Args:
+            name: Collection name
+
+        Returns:
+            Collection instance
+
+        Raises:
+            RuntimeError: If client is not connected
+        """
+        if not self.client:
+            raise RuntimeError("ChromaDB client not connected")
+
+        try:
+            return self.client.get_or_create_collection(name=name)
+        except Exception as e:
+            logger.error(f"Failed to get or create collection {name}: {e}")
+            raise
+
     async def create_tables(self) -> None:
         """Create collections in ChromaDB (no-op for vector DB)."""
         # Vector databases don't have traditional tables

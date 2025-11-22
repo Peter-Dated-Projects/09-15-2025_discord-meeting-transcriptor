@@ -476,9 +476,9 @@ class TextEmbeddingJobManagerService(BaseTextEmbeddingJobManagerService):
 
         # Create job queue with callbacks
         self._job_queue = JobQueue[TextEmbeddingJob](
-            on_job_start=self._on_job_start,
+            on_job_started=self._on_job_started,
             on_job_complete=self._on_job_complete,
-            on_job_error=self._on_job_error,
+            on_job_failed=self._on_job_failed,
         )
 
         await self.services.logging_service.info("TextEmbeddingJobManagerService initialized")
@@ -539,18 +539,8 @@ class TextEmbeddingJobManagerService(BaseTextEmbeddingJobManagerService):
         # Store job reference
         self._jobs[job_id] = job
 
-        # Log job creation to SQL
-        await self.services.sql_logging_service_manager.log_job(
-            job_id=job_id,
-            meeting_id=meeting_id,
-            job_type=JobsType.TEXT_EMBEDDING,
-            status=JobsStatus.PENDING,
-            details=f"Text embedding job created for meeting {meeting_id}",
-            metadata={
-                "guild_id": guild_id,
-                "compiled_transcript_id": compiled_transcript_id,
-            },
-        )
+        # Create SQL entry for the job
+        await self._create_sql_job_entry(job)
 
         # Add to queue
         await self._job_queue.add_job(job)
@@ -612,23 +602,83 @@ class TextEmbeddingJobManagerService(BaseTextEmbeddingJobManagerService):
         }
 
     # -------------------------------------------------------------- #
+    # Private Methods
+    # -------------------------------------------------------------- #
+
+    async def _create_sql_job_entry(self, job: TextEmbeddingJob) -> None:
+        """
+        Create a SQL database entry for the text embedding job.
+
+        Args:
+            job: The text embedding job to create an entry for
+        """
+        if not self.services.sql_recording_service_manager:
+            await self.services.logging_service.warning(
+                "SQL recording service not available, skipping job entry creation"
+            )
+            return
+
+        try:
+            await self.services.sql_recording_service_manager.create_job_status(
+                job_id=job.job_id,
+                job_type=JobsType.TEXT_EMBEDDING,
+                meeting_id=job.meeting_id,
+                created_at=job.created_at,
+                status=JobsStatus.PENDING,
+            )
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to create SQL entry for text embedding job {job.job_id}: {e}"
+            )
+
+    async def _update_sql_job_status(self, job: TextEmbeddingJob) -> None:
+        """
+        Update the SQL database entry for the text embedding job.
+
+        Args:
+            job: The text embedding job to update
+        """
+        if not self.services.sql_recording_service_manager:
+            return
+
+        try:
+            # Map Job status to SQL JobsStatus
+            from source.server.sql_models import JobsStatus as SQLJobStatus
+
+            status_map = {
+                "pending": SQLJobStatus.PENDING,
+                "in_progress": SQLJobStatus.IN_PROGRESS,
+                "completed": SQLJobStatus.COMPLETED,
+                "failed": SQLJobStatus.FAILED,
+                "cancelled": SQLJobStatus.SKIPPED,
+            }
+
+            sql_status = status_map.get(job.status.value, SQLJobStatus.PENDING)
+
+            await self.services.sql_recording_service_manager.update_job_status(
+                job_id=job.job_id,
+                status=sql_status,
+                started_at=job.started_at,
+                finished_at=job.finished_at,
+                error_log=job.error_message if job.error_message else None,
+            )
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to update SQL entry for text embedding job {job.job_id}: {e}"
+            )
+
+    # -------------------------------------------------------------- #
     # Job Callbacks
     # -------------------------------------------------------------- #
 
-    async def _on_job_start(self, job: TextEmbeddingJob) -> None:
+    async def _on_job_started(self, job: TextEmbeddingJob) -> None:
         """Called when a job starts processing."""
         await self.services.logging_service.info(
             f"Text embedding job {job.job_id} started for meeting {job.meeting_id}"
         )
 
         # Update SQL status
-        await self.services.sql_logging_service_manager.log_job(
-            job_id=job.job_id,
-            meeting_id=job.meeting_id,
-            job_type=JobsType.TEXT_EMBEDDING,
-            status=JobsStatus.IN_PROGRESS,
-            details=f"Text embedding job started for meeting {job.meeting_id}",
-        )
+        await self._update_sql_job_status(job)
 
     async def _on_job_complete(self, job: TextEmbeddingJob) -> None:
         """Called when a job completes successfully."""
@@ -637,13 +687,7 @@ class TextEmbeddingJobManagerService(BaseTextEmbeddingJobManagerService):
         )
 
         # Update SQL status
-        await self.services.sql_logging_service_manager.log_job(
-            job_id=job.job_id,
-            meeting_id=job.meeting_id,
-            job_type=JobsType.TEXT_EMBEDDING,
-            status=JobsStatus.COMPLETED,
-            details=f"Text embedding job completed for meeting {job.meeting_id}",
-        )
+        await self._update_sql_job_status(job)
 
         # Send DM notifications to all users who participated in the meeting
         await self._send_meeting_complete_notifications(job)
@@ -782,19 +826,13 @@ class TextEmbeddingJobManagerService(BaseTextEmbeddingJobManagerService):
                 f"Error in _send_meeting_complete_notifications: {e}"
             )
 
-    async def _on_job_error(self, job: TextEmbeddingJob, error: Exception) -> None:
+    async def _on_job_failed(self, job: TextEmbeddingJob) -> None:
         """Called when a job fails."""
-        error_msg = f"{type(error).__name__}: {str(error)}"
+        error_msg = job.error_message or "Unknown error"
 
         await self.services.logging_service.error(
             f"Text embedding job {job.job_id} failed for meeting {job.meeting_id}: {error_msg}"
         )
 
         # Update SQL status
-        await self.services.sql_logging_service_manager.log_job(
-            job_id=job.job_id,
-            meeting_id=job.meeting_id,
-            job_type=JobsType.TEXT_EMBEDDING,
-            status=JobsStatus.FAILED,
-            details=f"Text embedding job failed: {error_msg}",
-        )
+        await self._update_sql_job_status(job)
