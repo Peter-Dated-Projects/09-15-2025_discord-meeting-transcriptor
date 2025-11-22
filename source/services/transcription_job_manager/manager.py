@@ -33,6 +33,8 @@ class TranscriptionJob(Job):
         meeting_id: ID of the meeting to transcribe
         recording_ids: List of recording IDs to transcribe
         user_ids: List of user IDs associated with the recordings
+        transcript_ids: List of created transcript IDs
+        user_transcript_mapping: Dictionary mapping user_id to transcript_id
         services: Reference to ServicesManager for accessing services
     """
 
@@ -40,6 +42,9 @@ class TranscriptionJob(Job):
     recording_ids: list[str] = field(default_factory=list)
     user_ids: list[str] = field(default_factory=list)
     transcript_ids: list[str] = field(default_factory=list)  # Track created transcript IDs
+    user_transcript_mapping: dict[str, str] = field(
+        default_factory=dict
+    )  # user_id -> transcript_id
     services: ServicesManager = None  # type: ignore
 
     # -------------------------------------------------------------- #
@@ -172,6 +177,9 @@ class TranscriptionJob(Job):
 
                 # Track the transcript ID for compilation
                 self.transcript_ids.append(transcript_id)
+
+                # Track user_id -> transcript_id mapping for SQL update
+                self.user_transcript_mapping[user_id] = transcript_id
 
             # GPU lock automatically released here
 
@@ -444,6 +452,22 @@ class TranscriptionJobManagerService(BaseTranscriptionJobManagerService):
 
         # Update SQL status
         await self._update_sql_job_status(job)
+
+        # Update meeting's transcript_ids field with new format
+        if self.services.sql_recording_service_manager and job.user_transcript_mapping:
+            try:
+                await self.services.sql_recording_service_manager.update_meeting_transcript_ids(
+                    meeting_id=job.meeting_id,
+                    user_transcript_mapping=job.user_transcript_mapping,
+                    meeting_summary_path=None,  # Will be updated later after summarization
+                )
+                await self.services.logging_service.info(
+                    f"Updated meeting {job.meeting_id} transcript_ids with {len(job.user_transcript_mapping)} user transcripts"
+                )
+            except Exception as e:
+                await self.services.logging_service.error(
+                    f"Failed to update meeting {job.meeting_id} transcript_ids: {e}"
+                )
 
         # Update meeting status to COMPLETED
         if self.services.sql_recording_service_manager:

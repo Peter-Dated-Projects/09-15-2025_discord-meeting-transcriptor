@@ -48,6 +48,9 @@ from source.services.manager import BaseTextEmbeddingJobManagerService
 from source.services.text_embedding_manager.text_partitioner import (
     partition_transcript_segments,
 )
+from source.services.text_embedding_manager.summary_partitioner import (
+    partition_multi_level_summaries,
+)
 from source.utils import generate_16_char_uuid, get_current_timestamp_est
 
 # -------------------------------------------------------------- #
@@ -199,7 +202,10 @@ class TextEmbeddingJob(Job):
         1. Load the compiled transcript
         2. Partition segments with overlapping context
         3. Generate embeddings with GPU lock
-        4. Store embeddings in ChromaDB
+        4. Store embeddings in ChromaDB (embeddings collection)
+        5. Process summaries if available
+        6. Generate summary embeddings with GPU lock
+        7. Store summary embeddings in ChromaDB (summaries collection)
         """
         if not self.services:
             raise RuntimeError("ServicesManager not provided to TextEmbeddingJob")
@@ -237,12 +243,47 @@ class TextEmbeddingJob(Job):
                 f"Generated {len(embeddings)} embeddings for meeting {self.meeting_id}"
             )
 
-            # Step 4: Store embeddings in ChromaDB
+            # Step 4: Store embeddings in ChromaDB (embeddings collection)
             await self._store_embeddings(partitions, embeddings)
 
             await self.services.logging_service.info(
                 f"Successfully stored embeddings for meeting {self.meeting_id}"
             )
+
+            # Step 5: Process summaries if available
+            if "summary_layers" in compiled_transcript and "summary" in compiled_transcript:
+                await self.services.logging_service.info(
+                    f"Processing summaries for meeting {self.meeting_id}"
+                )
+
+                summary_partitions = await self._partition_summaries(compiled_transcript)
+
+                if summary_partitions:
+                    await self.services.logging_service.info(
+                        f"Created {len(summary_partitions)} summary partitions for embedding"
+                    )
+
+                    # Step 6: Generate summary embeddings with GPU lock
+                    summary_embeddings = await self._generate_embeddings(summary_partitions)
+
+                    await self.services.logging_service.info(
+                        f"Generated {len(summary_embeddings)} summary embeddings"
+                    )
+
+                    # Step 7: Store summary embeddings in ChromaDB (summaries collection)
+                    await self._store_summary_embeddings(summary_partitions, summary_embeddings)
+
+                    await self.services.logging_service.info(
+                        f"Successfully stored summary embeddings in summaries collection"
+                    )
+                else:
+                    await self.services.logging_service.warning(
+                        f"No summary partitions created for meeting {self.meeting_id}"
+                    )
+            else:
+                await self.services.logging_service.info(
+                    f"No summaries found in compiled transcript for meeting {self.meeting_id}"
+                )
 
         except Exception as e:
             error_msg = f"Failed to generate embeddings for meeting {self.meeting_id}: {type(e).__name__}: {str(e)}"
@@ -438,6 +479,136 @@ class TextEmbeddingJob(Job):
 
         await self.services.logging_service.info(
             f"Stored {len(ids)} embeddings in collection {collection_name}"
+        )
+
+    async def _partition_summaries(
+        self, compiled_transcript: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """
+        Partition summary layers and final summary for embedding.
+
+        Args:
+            compiled_transcript: The compiled transcript with summary_layers and summary
+
+        Returns:
+            List of summary partitions ready for embedding
+        """
+        summary_layers = compiled_transcript.get("summary_layers", {})
+        final_summary = compiled_transcript.get("summary", "")
+
+        if not summary_layers and not final_summary:
+            return []
+
+        # Use the summary partitioner to create partitions with proper metadata
+        partitions = partition_multi_level_summaries(
+            summary_layers=summary_layers,
+            final_summary=final_summary,
+            meeting_id=self.meeting_id,
+            guild_id=self.guild_id,
+            max_tokens=512,
+            overlap_percentage=0.15,
+            buffer_percentage=0.05,
+        )
+
+        return partitions
+
+    async def _store_summary_embeddings(
+        self,
+        partitions: list[dict[str, Any]],
+        embeddings: list[list[float]],
+    ) -> None:
+        """
+        Store summary embeddings in ChromaDB summaries collection.
+
+        Args:
+            partitions: List of summary partition dicts
+            embeddings: List of embedding vectors
+        """
+        if len(partitions) != len(embeddings):
+            raise ValueError(
+                f"Partition count ({len(partitions)}) does not match "
+                f"embedding count ({len(embeddings)})"
+            )
+
+        # Get ChromaDB client
+        vector_db_client = self.services.server.vector_db_client
+
+        # Use the summaries collection for all summary embeddings
+        collection_name = "summaries"
+
+        await self.services.logging_service.info(
+            f"Storing summary embeddings in collection: {collection_name}"
+        )
+
+        # Get collection (ChromaDB operations are synchronous)
+        loop = asyncio.get_event_loop()
+        collection = await loop.run_in_executor(
+            None,
+            lambda: vector_db_client.get_or_create_collection(collection_name),
+        )
+
+        # Prepare data for batch upsert
+        ids = []
+        documents = []
+        metadatas = []
+        embedding_vectors = []
+
+        for i, (partition, embedding) in enumerate(zip(partitions, embeddings)):
+            # Create unique ID based on whether it's a subsummary or final summary
+            partition_metadata = partition["metadata"]
+
+            if partition_metadata.get("is_subsummary", False):
+                # Subsummary: meeting_id_level{level}_summary{index}_segment{segment_index}
+                level = partition_metadata.get("summary_level", 0)
+                summary_index = partition_metadata.get("summary_index_in_level", 0)
+                segment_index = partition.get("segment_index", 0)
+                doc_id = (
+                    f"{self.meeting_id}_level{level}_summary{summary_index}_segment{segment_index}"
+                )
+            else:
+                # Final summary: meeting_id_final_segment{segment_index}
+                segment_index = partition.get("segment_index", 0)
+                doc_id = f"{self.meeting_id}_final_segment{segment_index}"
+
+            # Build metadata for ChromaDB
+            metadata = {
+                "meeting_id": self.meeting_id,
+                "guild_id": self.guild_id,
+                "is_subsummary": partition_metadata.get("is_subsummary", False),
+                "segment_index": partition.get("segment_index", 0),
+                "global_partition_index": partition.get("global_partition_index", 0),
+                "estimated_tokens": partition.get("estimated_tokens", 0),
+                "start_char": partition.get("start_char", 0),
+                "end_char": partition.get("end_char", 0),
+            }
+
+            # Add subsummary-specific metadata
+            if partition_metadata.get("is_subsummary", False):
+                metadata["summary_level"] = partition_metadata.get("summary_level", 0)
+                metadata["summary_index_in_level"] = partition_metadata.get(
+                    "summary_index_in_level", 0
+                )
+            else:
+                metadata["is_final_summary"] = partition_metadata.get("is_final_summary", False)
+
+            ids.append(doc_id)
+            documents.append(partition["text"])
+            metadatas.append(metadata)
+            embedding_vectors.append(embedding)
+
+        # Upsert to collection (handles both insert and update)
+        await loop.run_in_executor(
+            None,
+            lambda: collection.upsert(
+                ids=ids,
+                documents=documents,
+                metadatas=metadatas,
+                embeddings=embedding_vectors,
+            ),
+        )
+
+        await self.services.logging_service.info(
+            f"Stored {len(ids)} summary embeddings in collection {collection_name}"
         )
 
 
