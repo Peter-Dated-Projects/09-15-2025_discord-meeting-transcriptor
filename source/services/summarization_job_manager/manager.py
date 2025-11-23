@@ -343,6 +343,38 @@ class SummarizationJob(Job):
                 f"Successfully updated compiled transcript {filename} with summaries"
             )
 
+            # Update meeting's transcript_ids field with meeting_summary path
+            if self.services.sql_recording_service_manager:
+                try:
+                    # Get current meeting data to preserve user transcript mappings
+                    meeting_data = await self.services.sql_recording_service_manager.get_meeting(
+                        self.meeting_id
+                    )
+
+                    if meeting_data and meeting_data.get("transcript_ids"):
+                        transcript_ids_data = meeting_data["transcript_ids"]
+
+                        # Extract user mappings from current data
+                        users_array = transcript_ids_data.get("users", [])
+                        user_transcript_mapping = {}
+                        for user_entry in users_array:
+                            user_transcript_mapping.update(user_entry)
+
+                        # Update with meeting_summary path
+                        await self.services.sql_recording_service_manager.update_meeting_transcript_ids(
+                            meeting_id=self.meeting_id,
+                            user_transcript_mapping=user_transcript_mapping,
+                            meeting_summary_path=file_path,
+                        )
+
+                        await self.services.logging_service.info(
+                            f"Updated meeting {self.meeting_id} with meeting_summary path"
+                        )
+                except Exception as e:
+                    await self.services.logging_service.error(
+                        f"Failed to update meeting {self.meeting_id} with meeting_summary path: {e}"
+                    )
+
         except Exception as e:
             await self.services.logging_service.error(
                 f"Failed to update compiled transcript for meeting {self.meeting_id}: {str(e)}"

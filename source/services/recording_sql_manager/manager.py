@@ -459,6 +459,104 @@ class SQLRecordingManagerService(Manager):
             f"Updated meeting {meeting_id} with {len(participants_list)} participants: {participants_list}"
         )
 
+    async def update_meeting_transcript_ids(
+        self,
+        meeting_id: str,
+        user_transcript_mapping: dict[str, str],
+        meeting_summary_path: str | None = None,
+    ) -> None:
+        """
+        Update the transcript_ids field for a meeting with the new format.
+
+        New format:
+        {
+            "meeting_summary": "{meeting_summary_file_path}",
+            "users": [
+                {"user_id": "transcript_id"}, ...
+            ]
+        }
+
+        Args:
+            meeting_id: Meeting ID (16 chars)
+            user_transcript_mapping: Dictionary mapping user_id to transcript_id
+            meeting_summary_path: Optional path to the meeting summary file
+        """
+        # Validate input
+        if len(meeting_id) != MEETING_UUID_LENGTH:
+            raise ValueError(f"meeting_id must be {MEETING_UUID_LENGTH} characters long")
+
+        # Build the new format
+        users_array = [
+            {user_id: transcript_id} for user_id, transcript_id in user_transcript_mapping.items()
+        ]
+
+        transcript_ids_data = {
+            "meeting_summary": meeting_summary_path or "",
+            "users": users_array,
+        }
+
+        timestamp = get_current_timestamp_est()
+
+        # Build update query
+        stmt = (
+            update(MeetingModel)
+            .where(MeetingModel.id == meeting_id)
+            .values(transcript_ids=transcript_ids_data, updated_at=timestamp)
+        )
+
+        # Execute update
+        await self.server.sql_client.execute(stmt)
+        await self.services.logging_service.info(
+            f"Updated meeting {meeting_id} transcript_ids with {len(users_array)} user transcripts"
+        )
+
+    async def update_meeting_recording_files(
+        self,
+        meeting_id: str,
+        user_recording_mapping: dict[str, str],
+    ) -> None:
+        """
+        Update the recording_files field for a meeting with the new format.
+
+        New format:
+        {
+            "users": [
+                {"user_id": "recording_id"}, ...
+            ]
+        }
+
+        Args:
+            meeting_id: Meeting ID (16 chars)
+            user_recording_mapping: Dictionary mapping user_id to recording_id (from recordings table)
+        """
+        # Validate input
+        if len(meeting_id) != MEETING_UUID_LENGTH:
+            raise ValueError(f"meeting_id must be {MEETING_UUID_LENGTH} characters long")
+
+        # Build the new format
+        users_array = [
+            {user_id: recording_id} for user_id, recording_id in user_recording_mapping.items()
+        ]
+
+        recording_files_data = {
+            "users": users_array,
+        }
+
+        timestamp = get_current_timestamp_est()
+
+        # Build update query
+        stmt = (
+            update(MeetingModel)
+            .where(MeetingModel.id == meeting_id)
+            .values(recording_files=recording_files_data, updated_at=timestamp)
+        )
+
+        # Execute update
+        await self.server.sql_client.execute(stmt)
+        await self.services.logging_service.info(
+            f"Updated meeting {meeting_id} recording_files with {len(users_array)} user recordings"
+        )
+
     async def check_and_update_meeting_status(
         self, meeting_id: str, is_recording: bool
     ) -> MeetingStatus:
