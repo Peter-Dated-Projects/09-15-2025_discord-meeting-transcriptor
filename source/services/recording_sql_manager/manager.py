@@ -6,7 +6,6 @@ if TYPE_CHECKING:
     from source.context import Context
 
 from source.server.sql_models import (
-    CompiledTranscriptsModel,
     JobsStatus,
     JobsStatusModel,
     JobsType,
@@ -15,7 +14,6 @@ from source.server.sql_models import (
     RecordingModel,
     TempRecordingModel,
     TranscodeStatus,
-    UserTranscriptsModel,
 )
 from source.services.manager import Manager
 from source.utils import (
@@ -326,39 +324,6 @@ class SQLRecordingManagerService(Manager):
             return results[0]
         else:
             raise ValueError(f"Meeting with ID {meeting_id} not found")
-
-    async def get_meetings_by_guild(
-        self, guild_id: str, limit: int = 10, offset: int = 0
-    ) -> list[dict]:
-        """
-        Get all meetings for a specific guild, ordered by started_at descending.
-
-        Args:
-            guild_id: Discord Guild (Server) ID
-            limit: Maximum number of meetings to return (default: 10)
-            offset: Number of meetings to skip for pagination (default: 0)
-
-        Returns:
-            List of meeting details as dictionaries
-        """
-
-        # Validate input
-        if len(guild_id) < DISCORD_USER_ID_MIN_LENGTH:
-            raise ValueError(
-                f"guild_id must be at least {DISCORD_USER_ID_MIN_LENGTH} characters long"
-            )
-
-        # Build and execute query with ordering and pagination
-        query = (
-            select(MeetingModel)
-            .where(MeetingModel.guild_id == guild_id)
-            .order_by(MeetingModel.started_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        results = await self.server.sql_client.execute(query)
-
-        return results if results else []
 
     async def insert_meeting(
         self,
@@ -891,54 +856,6 @@ class SQLRecordingManagerService(Manager):
         results = await self.server.sql_client.execute(query)
 
         return results
-
-    # -------------------------------------------------------------- #
-    # Transcript Methods
-    # -------------------------------------------------------------- #
-
-    async def get_compiled_transcript_for_meeting(self, meeting_id: str) -> dict | None:
-        """
-        Get the compiled transcript for a meeting.
-
-        Args:
-            meeting_id: Meeting ID (16 chars)
-
-        Returns:
-            Compiled transcript details as a dictionary, or None if not found
-        """
-
-        # Validate input
-        if len(meeting_id) != MEETING_UUID_LENGTH:
-            raise ValueError(f"meeting_id must be {MEETING_UUID_LENGTH} characters long")
-
-        # Build and execute query
-        query = select(CompiledTranscriptsModel).where(
-            CompiledTranscriptsModel.meeting_id == meeting_id
-        )
-        results = await self.server.sql_client.execute(query)
-
-        return results[0] if results else None
-
-    async def get_user_transcripts_for_meeting(self, meeting_id: str) -> list[dict]:
-        """
-        Get all user transcripts for a meeting.
-
-        Args:
-            meeting_id: Meeting ID (16 chars)
-
-        Returns:
-            List of user transcript dictionaries
-        """
-
-        # Validate input
-        if len(meeting_id) != MEETING_UUID_LENGTH:
-            raise ValueError(f"meeting_id must be {MEETING_UUID_LENGTH} characters long")
-
-        # Build and execute query
-        query = select(UserTranscriptsModel).where(UserTranscriptsModel.meeting_id == meeting_id)
-        results = await self.server.sql_client.execute(query)
-
-        return results if results else []
 
     # -------------------------------------------------------------- #
     # Job Status Methods
