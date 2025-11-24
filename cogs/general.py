@@ -1092,6 +1092,377 @@ class General(commands.Cog):
             await ctx.followup.send(embed=embed, ephemeral=True)
 
 
+    @commands.slash_command(
+        name="process_step",
+        description="Check and process the next incomplete job for a meeting"
+    )
+    async def process_step(
+        self,
+        ctx: discord.ApplicationContext,
+        meeting_id: str = discord.Option(description="The meeting ID to process"),
+    ):
+        """
+        Check a meeting's processing status and start the next incomplete job.
+        
+        Job pipeline:
+        1. Recording (temp recordings exist)
+        2. Transcoding (temp recordings → MP3)
+        3. Concatenation (MP3 files → persistent recordings)
+        4. Transcription (persistent recordings → transcripts)
+        5. Compilation (individual transcripts → compiled transcript)
+        6. Summarization (compiled transcript → summary layers)
+        7. Embeddings (summaries → vector embeddings)
+        """
+        # Log command invocation
+        await self.services.logging_service.info(
+            f"User {ctx.author.id} ({ctx.author.name}) requested process_step for meeting {meeting_id}"
+        )
+
+        # Defer response since this might take a moment
+        await ctx.defer()
+
+        try:
+            # Validate meeting ID format
+            if len(meeting_id) != 16:
+                raise ValueError("Meeting ID must be 16 characters long")
+
+            # ============================================
+            # 1. Get meeting information
+            # ============================================
+            try:
+                meeting = await self.services.sql_recording_service_manager.get_meeting(meeting_id)
+            except ValueError:
+                embed = discord.Embed(
+                    title="❌ Meeting Not Found",
+                    description=f"No meeting found with ID `{meeting_id}`",
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+                return
+
+            # ============================================
+            # 2. Check each job stage and find first incomplete
+            # ============================================
+            job_to_start = None
+            job_reason = ""
+
+            # Stage 1: Check if recording exists (temp recordings)
+            temp_recordings = await self.services.sql_recording_service_manager.get_temp_recordings_for_meeting(meeting_id)
+            if not temp_recordings:
+                job_to_start = "recording"
+                job_reason = "No temp recordings found. Meeting may not have been recorded yet."
+            
+            # Stage 2: Check if transcoding is complete
+            elif temp_recordings:
+                from source.server.sql_models import TranscodeStatus
+                
+                # Check if any transcodes are pending or in progress
+                pending_transcodes = [
+                    rec for rec in temp_recordings 
+                    if rec.get("transcode_status") in [
+                        TranscodeStatus.QUEUED.value,
+                        TranscodeStatus.IN_PROGRESS.value
+                    ]
+                ]
+                
+                if pending_transcodes:
+                    job_to_start = "transcoding"
+                    job_reason = f"Found {len(pending_transcodes)} temp recordings still being transcoded (queued or in progress)."
+                
+                # Check if any transcodes failed
+                failed_transcodes = [
+                    rec for rec in temp_recordings
+                    if rec.get("transcode_status") == TranscodeStatus.FAILED.value
+                ]
+                
+                if failed_transcodes and not job_to_start:
+                    job_to_start = "transcoding_failed"
+                    job_reason = f"Found {len(failed_transcodes)} failed transcode jobs. Manual intervention may be required."
+
+            # Stage 3: Check if concatenation is complete (persistent recordings exist)
+            if not job_to_start:
+                persistent_recordings = await self.services.sql_recording_service_manager.get_persistent_recordings_for_meeting(meeting_id)
+                
+                if not persistent_recordings:
+                    job_to_start = "concatenation"
+                    job_reason = "Transcoding complete but no persistent recordings found. Need to concatenate temp recordings."
+            
+            # Stage 4: Check if transcription is complete
+            if not job_to_start:
+                user_transcripts = await self.services.sql_recording_service_manager.get_user_transcripts_for_meeting(meeting_id)
+                
+                if not user_transcripts:
+                    job_to_start = "transcription"
+                    job_reason = "Persistent recordings exist but no transcripts found. Need to transcribe recordings."
+            
+            # Stage 5: Check if compilation is complete
+            if not job_to_start:
+                compiled_transcript = await self.services.sql_recording_service_manager.get_compiled_transcript_for_meeting(meeting_id)
+                
+                if not compiled_transcript:
+                    job_to_start = "compilation"
+                    job_reason = "Individual transcripts exist but no compiled transcript found. Need to compile transcripts."
+            
+            # Stage 6: Check if summarization is complete
+            if not job_to_start and compiled_transcript:
+                # Load the compiled transcript file to check for summaries
+                import os
+                import json
+                import aiofiles
+                
+                transcript_filename = compiled_transcript.get("filename")
+                if transcript_filename:
+                    storage_path = self.services.transcription_file_service_manager.get_compiled_storage_path()
+                    transcript_file = os.path.join(storage_path, transcript_filename)
+                    
+                    if os.path.exists(transcript_file):
+                        try:
+                            async with aiofiles.open(transcript_file, "r", encoding="utf-8") as f:
+                                transcript_content = await f.read()
+                                transcript_data = json.loads(transcript_content)
+                                
+                                # Check if summary exists and is not empty
+                                if not transcript_data.get("summary") or not transcript_data.get("summary_layers"):
+                                    job_to_start = "summarization"
+                                    job_reason = "Compiled transcript exists but no summary found. Need to generate summaries."
+                        except (json.JSONDecodeError, Exception) as e:
+                            await self.services.logging_service.warning(
+                                f"[PROCESS_STEP] Error reading compiled transcript for meeting {meeting_id}: {str(e)}"
+                            )
+            
+            # Stage 7: Check if embeddings are complete
+            if not job_to_start:
+                jobs = await self.services.sql_recording_service_manager.get_jobs_for_meeting(meeting_id)
+                from source.server.sql_models import JobsType, JobsStatus
+                
+                # Find text embedding job
+                embedding_jobs = [
+                    job for job in jobs
+                    if job.get("type") == JobsType.TEXT_EMBEDDING.value
+                ]
+                
+                # Check if there's a completed embedding job
+                completed_embedding = any(
+                    job.get("status") == JobsStatus.COMPLETED.value
+                    for job in embedding_jobs
+                )
+                
+                if not completed_embedding:
+                    job_to_start = "embeddings"
+                    job_reason = "Summarization complete but no embeddings found. Need to generate embeddings."
+
+            # ============================================
+            # 3. Start the identified job or report completion
+            # ============================================
+            if not job_to_start:
+                # All jobs complete!
+                embed = discord.Embed(
+                    title="✅ All Jobs Complete",
+                    description=f"Meeting `{meeting_id}` has completed all processing stages.",
+                    color=discord.Color.green(),
+                )
+                embed.add_field(
+                    name="Status",
+                    value="All stages from recording through embeddings are complete.",
+                    inline=False
+                )
+                embed.set_footer(
+                    text=f"Requested by {ctx.author.name}",
+                    icon_url=ctx.author.avatar.url if ctx.author.avatar else None,
+                )
+                await ctx.followup.send(embed=embed)
+                return
+
+            # Send initial status embed
+            status_embed = discord.Embed(
+                title="🔍 Job Analysis",
+                description=f"Meeting `{meeting_id}` is missing the following job:",
+                color=discord.Color.blue(),
+            )
+            status_embed.add_field(name="Missing Job", value=f"**{job_to_start}**", inline=False)
+            status_embed.add_field(name="Reason", value=job_reason, inline=False)
+            await ctx.followup.send(embed=status_embed)
+
+            # ============================================
+            # 4. Execute the missing job
+            # ============================================
+            progress_embed = discord.Embed(
+                title="⚙️ Starting Job",
+                description=f"Initiating **{job_to_start}** job...",
+                color=discord.Color.orange(),
+            )
+            await ctx.followup.send(embed=progress_embed)
+
+            # Execute based on job type
+            if job_to_start == "recording":
+                error_embed = discord.Embed(
+                    title="❌ Cannot Start Recording",
+                    description="Recording must be started manually using voice commands.",
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=error_embed)
+            
+            elif job_to_start == "transcoding":
+                error_embed = discord.Embed(
+                    title="⏳ Transcoding In Progress",
+                    description="Transcoding jobs are already queued/in progress. Please wait for completion.",
+                    color=discord.Color.orange(),
+                )
+                await ctx.followup.send(embed=error_embed)
+            
+            elif job_to_start == "transcoding_failed":
+                error_embed = discord.Embed(
+                    title="❌ Transcoding Failed",
+                    description="Some transcoding jobs have failed. Manual intervention required to diagnose the issue.",
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=error_embed)
+            
+            elif job_to_start == "concatenation":
+                # Trigger post-stop processing (which handles concatenation)
+                await self.services.logging_service.info(
+                    f"[PROCESS_STEP] Starting concatenation for meeting {meeting_id}"
+                )
+                
+                # Call the discord recorder manager to process recordings
+                await self.services.discord_recorder_service_manager._process_recordings_post_stop(meeting_id)
+                
+                success_embed = discord.Embed(
+                    title="✅ Concatenation Started",
+                    description="Concatenation job has been initiated.",
+                    color=discord.Color.green(),
+                )
+                await ctx.followup.send(embed=success_embed)
+            
+            elif job_to_start == "transcription":
+                # Trigger transcription job creation
+                await self.services.logging_service.info(
+                    f"[PROCESS_STEP] Starting transcription for meeting {meeting_id}"
+                )
+                
+                await self.services.sql_recording_service_manager.create_transcription_job_for_completed_meeting(meeting_id)
+                
+                success_embed = discord.Embed(
+                    title="✅ Transcription Started",
+                    description="Transcription job has been queued.",
+                    color=discord.Color.green(),
+                )
+                await ctx.followup.send(embed=success_embed)
+            
+            elif job_to_start == "compilation":
+                # Get user transcripts and create compilation job
+                await self.services.logging_service.info(
+                    f"[PROCESS_STEP] Starting compilation for meeting {meeting_id}"
+                )
+                
+                user_transcripts = await self.services.sql_recording_service_manager.get_user_transcripts_for_meeting(meeting_id)
+                transcript_ids = [t["id"] for t in user_transcripts]
+                
+                if transcript_ids:
+                    # Create compilation job using the correct service name
+                    job_id = await self.services.transcription_compilation_job_manager.create_and_queue_compilation_job(
+                        meeting_id=meeting_id,
+                        transcript_ids=transcript_ids,
+                    )
+                    
+                    success_embed = discord.Embed(
+                        title="✅ Compilation Started",
+                        description=f"Compilation job `{job_id}` has been queued with {len(transcript_ids)} transcripts.",
+                        color=discord.Color.green(),
+                    )
+                    await ctx.followup.send(embed=success_embed)
+                else:
+                    error_embed = discord.Embed(
+                        title="❌ No Transcripts Found",
+                        description="Cannot start compilation without transcripts.",
+                        color=discord.Color.red(),
+                    )
+                    await ctx.followup.send(embed=error_embed)
+            
+            elif job_to_start == "summarization":
+                # Get compiled transcript and user transcripts for summarization
+                await self.services.logging_service.info(
+                    f"[PROCESS_STEP] Starting summarization for meeting {meeting_id}"
+                )
+                
+                compiled_transcript = await self.services.sql_recording_service_manager.get_compiled_transcript_for_meeting(meeting_id)
+                user_transcripts = await self.services.sql_recording_service_manager.get_user_transcripts_for_meeting(meeting_id)
+                
+                compiled_transcript_id = compiled_transcript["id"]
+                transcript_ids = [t["id"] for t in user_transcripts]
+                user_ids = list(set(t["user_id"] for t in user_transcripts))
+                
+                # Create summarization job
+                job_id = await self.services.summarization_job_manager.create_and_queue_summarization_job(
+                    meeting_id=meeting_id,
+                    compiled_transcript_id=compiled_transcript_id,
+                    transcript_ids=transcript_ids,
+                    user_ids=user_ids,
+                )
+                
+                success_embed = discord.Embed(
+                    title="✅ Summarization Started",
+                    description=f"Summarization job `{job_id}` has been queued.",
+                    color=discord.Color.green(),
+                )
+                await ctx.followup.send(embed=success_embed)
+            
+            elif job_to_start == "embeddings":
+                # Get compiled transcript for embeddings
+                await self.services.logging_service.info(
+                    f"[PROCESS_STEP] Starting embeddings generation for meeting {meeting_id}"
+                )
+                
+                compiled_transcript = await self.services.sql_recording_service_manager.get_compiled_transcript_for_meeting(meeting_id)
+                user_transcripts = await self.services.sql_recording_service_manager.get_user_transcripts_for_meeting(meeting_id)
+                
+                compiled_transcript_id = compiled_transcript["id"]
+                guild_id = meeting["guild_id"]
+                user_ids = list(set(t["user_id"] for t in user_transcripts))
+                
+                # Create embedding job using the correct service name
+                job_id = await self.services.text_embedding_job_manager.create_and_queue_embedding_job(
+                    meeting_id=meeting_id,
+                    guild_id=guild_id,
+                    compiled_transcript_id=compiled_transcript_id,
+                    user_ids=user_ids,
+                )
+                
+                success_embed = discord.Embed(
+                    title="✅ Embeddings Started",
+                    description=f"Text embedding job `{job_id}` has been queued.",
+                    color=discord.Color.green(),
+                )
+                await ctx.followup.send(embed=success_embed)
+
+        except ValueError as e:
+            # Meeting not found or invalid ID
+            await self.services.logging_service.warning(
+                f"[PROCESS_STEP] Error for meeting {meeting_id} - requested by user {ctx.author.id}: {str(e)}"
+            )
+            embed = discord.Embed(
+                title="❌ Error",
+                description=str(e),
+                color=discord.Color.red(),
+            )
+            await ctx.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            # Other errors
+            await self.services.logging_service.error(
+                f"[PROCESS_STEP] Unexpected error in /process_step command for meeting {meeting_id} by user {ctx.author.id}: {str(e)}"
+            )
+            import traceback
+            await self.services.logging_service.error(
+                f"[PROCESS_STEP] Traceback: {traceback.format_exc()}"
+            )
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"An error occurred while processing the meeting: {str(e)}",
+                color=discord.Color.red(),
+            )
+            await ctx.followup.send(embed=embed, ephemeral=True)
+
+
 def setup(context: Context):
     general = General(context)
     context.bot.add_cog(general)
