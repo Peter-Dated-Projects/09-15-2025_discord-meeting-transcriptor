@@ -508,7 +508,7 @@ class General(commands.Cog):
                 await self.services.logging_service.error(
                     f"Unexpected error fetching compiled transcript for meeting {meeting_id}: {str(e)}"
                 )
-                embed.add_field(
+                embed.add_field(    
                     name="📋 Meeting Summary",
                     value="*Unable to retrieve summary information.*",
                     inline=False,
