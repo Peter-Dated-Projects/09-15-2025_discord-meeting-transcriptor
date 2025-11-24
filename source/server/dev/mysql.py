@@ -384,12 +384,23 @@ class MySQLServer(SQLDatabase):
                         # Store them separately so we can build the param tuple correctly
                         processed_params[f"_expanded_{param_name}"] = param_value
 
-                # Now build the parameter tuple with expanded values
+                # Replace %(name)s with %s for regular parameters
+                param_pattern = re.compile(r"%\(([^)]+)\)s")
+                param_matches = param_pattern.findall(query)
+                query = param_pattern.sub("%s", query)
+
+                # Now build the parameter tuple with both regular and expanded values
+                # Need to maintain the order they appear in the query
                 param_values = []
-                for param_name in postcompile_matches:
-                    expanded_key = f"_expanded_{param_name}"
-                    if expanded_key in processed_params:
-                        param_values.extend(processed_params[expanded_key])
+                for param_name in param_matches:
+                    if param_name in postcompile_matches:
+                        # This is an expanded IN clause parameter
+                        expanded_key = f"_expanded_{param_name}"
+                        if expanded_key in processed_params:
+                            param_values.extend(processed_params[expanded_key])
+                    else:
+                        # Regular parameter
+                        param_values.append(processed_params.get(param_name))
                 param_values = tuple(param_values)
             else:
                 # SQLAlchemy's pymysql dialect uses %(param_name)s format
