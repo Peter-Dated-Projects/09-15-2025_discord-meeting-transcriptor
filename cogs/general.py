@@ -581,6 +581,516 @@ class General(commands.Cog):
             )
             await ctx.followup.send(embed=embed, ephemeral=True)
 
+    @commands.slash_command(
+        name="deepinfo",
+        description="Deep dive into a meeting's processing stages with full verification",
+    )
+    async def deepinfo(
+        self,
+        ctx: discord.ApplicationContext,
+        meeting_id: str = discord.Option(description="The meeting ID to get deep information about"),
+    ):
+        """Display comprehensive information about a meeting including all processing stages."""
+        # Log command invocation
+        await self.services.logging_service.info(
+            f"User {ctx.author.id} ({ctx.author.name}) requested deepinfo for meeting {meeting_id} in guild {ctx.guild_id}"
+        )
+
+        # Defer response since this will take some time
+        await ctx.defer()
+
+        try:
+            # ============================================
+            # 1. Get basic meeting details (same as /info)
+            # ============================================
+            await self.services.logging_service.info(
+                f"[DEEPINFO] Fetching meeting details from database for meeting {meeting_id}"
+            )
+            meeting = await self.services.sql_recording_service_manager.get_meeting(meeting_id)
+
+            await self.services.logging_service.info(
+                f"[DEEPINFO] Successfully retrieved meeting {meeting_id} - Status: {meeting.get('status')}"
+            )
+
+            # Create embed with meeting information
+            embed = discord.Embed(
+                title=f"🔍 Deep Meeting Analysis",
+                description=f"Comprehensive processing information for meeting `{meeting_id}`",
+                color=discord.Color.blue(),
+            )
+
+            # Meeting ID and Status
+            status = meeting.get("status", "Unknown")
+            status_emoji = {
+                "SCHEDULED": "⏰",
+                "RECORDING": "🔴",
+                "PROCESSING": "⚙️",
+                "CLEANING": "🧹",
+                "COMPLETED": "✅",
+                "TRANSCRIBING": "📝",
+            }.get(status, "❓")
+
+            embed.add_field(
+                name="Meeting ID",
+                value=f"`{meeting['id']}`",
+                inline=True,
+            )
+            embed.add_field(
+                name="Status",
+                value=f"{status_emoji} {status}",
+                inline=True,
+            )
+            embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
+
+            # Dates
+            started_at = meeting.get("started_at")
+            ended_at = meeting.get("ended_at")
+
+            if isinstance(started_at, datetime):
+                start_str = discord.utils.format_dt(started_at, style="F")
+            else:
+                start_str = str(started_at) if started_at else "N/A"
+
+            if isinstance(ended_at, datetime):
+                end_str = discord.utils.format_dt(ended_at, style="F")
+            else:
+                end_str = str(ended_at) if ended_at else "N/A"
+
+            embed.add_field(
+                name="🗓️ Started At",
+                value=start_str,
+                inline=False,
+            )
+            embed.add_field(
+                name="🏁 Ended At",
+                value=end_str,
+                inline=False,
+            )
+
+            # Requested by
+            requested_by = meeting.get("requested_by")
+            if requested_by:
+                embed.add_field(
+                    name="👤 Requested By",
+                    value=f"<@{requested_by}>",
+                    inline=False,
+                )
+
+            # Participants
+            participants = meeting.get("participants", {})
+            participant_list = []
+
+            if isinstance(participants, dict):
+                for user_ids in participants.values():
+                    if isinstance(user_ids, list):
+                        participant_list.extend(user_ids)
+                    elif isinstance(user_ids, str):
+                        participant_list.append(user_ids)
+
+            if participant_list:
+                mentions = ", ".join([f"<@{uid}>" for uid in set(participant_list)])
+                embed.add_field(
+                    name="👥 Participants",
+                    value=mentions,
+                    inline=False,
+                )
+
+            # Add footer note about thread
+            embed.set_footer(text="📋 Detailed analysis will be posted in the thread below...")
+
+            # Send initial embed
+            webhook_message = await ctx.followup.send(embed=embed)
+            
+            # Fetch the actual message from the channel to get guild info
+            # WebhookMessage doesn't have guild info, so we need to fetch it
+            initial_message = await ctx.channel.fetch_message(webhook_message.id)
+            
+            # Create a thread for detailed analysis
+            thread = await initial_message.create_thread(
+                name=f"Deep Analysis: {meeting_id}",
+                auto_archive_duration=1440  # 24 hours
+            )
+            
+            await self.services.logging_service.info(
+                f"[DEEPINFO] Created thread {thread.id} for meeting {meeting_id} analysis"
+            )
+
+            # ============================================
+            # 2. Verify and display recording data
+            # ============================================
+            await self.services.logging_service.info(
+                f"[DEEPINFO] Fetching recording data for meeting {meeting_id}"
+            )
+
+            # Get temp recordings
+            temp_recordings = await self.services.sql_recording_service_manager.get_temp_recordings_for_meeting(
+                meeting_id
+            )
+
+            # Get persistent recordings
+            persistent_recordings = await self.services.sql_recording_service_manager.get_persistent_recordings_for_meeting(
+                meeting_id
+            )
+
+            # Create recordings embed
+            recordings_embed = discord.Embed(
+                title="🎙️ Recording Data Verification",
+                description=f"Recording stages for meeting `{meeting_id}`",
+                color=discord.Color.green(),
+            )
+
+            # Temp recordings info
+            if temp_recordings:
+                temp_info = f"**Count:** {len(temp_recordings)} temporary recording(s)\n"
+                temp_info += "**Details:**\n"
+
+                # Group by user
+                temp_by_user = {}
+                for rec in temp_recordings:
+                    user_id = rec.get("user_id")
+                    if user_id not in temp_by_user:
+                        temp_by_user[user_id] = []
+                    temp_by_user[user_id].append(rec)
+
+                for user_id, recs in temp_by_user.items():
+                    temp_info += f"  • <@{user_id}>: {len(recs)} chunk(s)\n"
+                    for rec in recs[:3]:  # Show first 3 chunks
+                        temp_info += f"    - ID: `{rec.get('id')}`, Status: `{rec.get('transcode_status')}`\n"
+                    if len(recs) > 3:
+                        temp_info += f"    - ... and {len(recs) - 3} more\n"
+
+                recordings_embed.add_field(
+                    name="📦 Temporary Recordings",
+                    value=temp_info[:1024],  # Discord field limit
+                    inline=False,
+                )
+            else:
+                recordings_embed.add_field(
+                    name="📦 Temporary Recordings",
+                    value="*No temporary recordings found (may have been cleaned up)*",
+                    inline=False,
+                )
+
+            # Persistent recordings info
+            if persistent_recordings:
+                persist_info = f"**Count:** {len(persistent_recordings)} persistent recording(s)\n"
+                persist_info += "**Details:**\n"
+
+                for rec in persistent_recordings:
+                    user_id = rec.get("user_id")
+                    duration_ms = rec.get("duration_in_ms", 0)
+                    duration_sec = duration_ms / 1000 if duration_ms else 0
+                    persist_info += f"  • <@{user_id}>:\n"
+                    persist_info += f"    - ID: `{rec.get('id')}`\n"
+                    persist_info += f"    - Duration: {duration_sec:.2f}s\n"
+                    persist_info += f"    - Filename: `{rec.get('filename', 'N/A')}`\n"
+                    persist_info += f"    - SHA256: `{rec.get('sha256', 'N/A')[:16]}...`\n"
+
+                recordings_embed.add_field(
+                    name="💾 Persistent Recordings",
+                    value=persist_info[:1024],  # Discord field limit
+                    inline=False,
+                )
+            else:
+                recordings_embed.add_field(
+                    name="💾 Persistent Recordings",
+                    value="*No persistent recordings found*",
+                    inline=False,
+                )
+
+            await thread.send(embed=recordings_embed)
+
+            # ============================================
+            # 3. Verify and display transcription data
+            # ============================================
+            await self.services.logging_service.info(
+                f"[DEEPINFO] Fetching transcription data for meeting {meeting_id}"
+            )
+
+            # Get user transcripts
+            user_transcripts = await self.services.transcription_file_service_manager.get_transcriptions_by_meeting(
+                meeting_id
+            )
+
+            # Create transcripts embed
+            transcripts_embed = discord.Embed(
+                title="📝 Transcription Data Verification",
+                description=f"Transcription stages for meeting `{meeting_id}`",
+                color=discord.Color.purple(),
+            )
+
+            if user_transcripts:
+                trans_info = f"**Count:** {len(user_transcripts)} user transcript(s)\n"
+                trans_info += "**Details:**\n"
+
+                for trans in user_transcripts:
+                    user_id = trans.get("user_id")
+                    trans_info += f"  • <@{user_id}>:\n"
+                    trans_info += f"    - ID: `{trans.get('id')}`\n"
+                    trans_info += f"    - Filename: `{trans.get('filename', 'N/A')}`\n"
+                    trans_info += f"    - SHA256: `{trans.get('sha256', 'N/A')[:16]}...`\n"
+                    trans_info += f"    - Created: {trans.get('created_at', 'N/A')}\n"
+
+                transcripts_embed.add_field(
+                    name="📄 User Transcripts",
+                    value=trans_info[:1024],  # Discord field limit
+                    inline=False,
+                )
+            else:
+                transcripts_embed.add_field(
+                    name="📄 User Transcripts",
+                    value="*No user transcripts found (transcription may not have started)*",
+                    inline=False,
+                )
+
+            # Get compiled transcript
+            compiled = await self.services.sql_recording_service_manager.get_compiled_transcript_for_meeting(
+                meeting_id
+            )
+
+            if compiled:
+                compiled_info = f"**ID:** `{compiled.get('id')}`\n"
+                compiled_info += f"**Filename:** `{compiled.get('transcript_filename', 'N/A')}`\n"
+                compiled_info += f"**SHA256:** `{compiled.get('sha256', 'N/A')[:16]}...`\n"
+                compiled_info += f"**Created:** {compiled.get('created_at', 'N/A')}\n"
+
+                transcripts_embed.add_field(
+                    name="📚 Compiled Transcript",
+                    value=compiled_info,
+                    inline=False,
+                )
+            else:
+                transcripts_embed.add_field(
+                    name="📚 Compiled Transcript",
+                    value="*No compiled transcript found (compilation may not have started)*",
+                    inline=False,
+                )
+
+            await thread.send(embed=transcripts_embed)
+
+            # ============================================
+            # 4. Display all summary layers
+            # ============================================
+            await self.services.logging_service.info(
+                f"[DEEPINFO] Fetching summary data for meeting {meeting_id}"
+            )
+
+            if compiled:
+                import json
+                import os
+                import aiofiles
+
+                # Get the transcript file path
+                transcript_file = compiled.get("transcript_filename")
+
+                # Check if it's a relative path and build full path
+                if transcript_file and not os.path.isabs(transcript_file):
+                    base_path = self.services.transcription_file_service_manager.transcription_storage_path
+                    transcript_file = os.path.join(
+                        base_path, "compilations", "storage", os.path.basename(transcript_file)
+                    )
+
+                if transcript_file and os.path.exists(transcript_file):
+                    try:
+                        # Read the compiled transcript file
+                        async with aiofiles.open(transcript_file, mode="r", encoding="utf-8") as f:
+                            content = await f.read()
+                            transcript_data = json.loads(content)
+
+                        # Create summary embed
+                        summary_embed = discord.Embed(
+                            title="📋 Summary Layers",
+                            description=f"All summary stages for meeting `{meeting_id}`",
+                            color=discord.Color.gold(),
+                        )
+
+                        # Check for main summary
+                        main_summary = transcript_data.get("summary")
+                        if main_summary:
+                            summary_preview = main_summary[:500] + "..." if len(main_summary) > 500 else main_summary
+                            summary_embed.add_field(
+                                name="✨ Main Summary",
+                                value=f"**Length:** {len(main_summary)} characters\n**Preview:**\n{summary_preview}",
+                                inline=False,
+                            )
+                        else:
+                            summary_embed.add_field(
+                                name="✨ Main Summary",
+                                value="*Not yet generated*",
+                                inline=False,
+                            )
+
+                        # Check for summary layers (if they exist)
+                        summary_layers = transcript_data.get("summary_layers", {})
+                        if summary_layers:
+                            layers_info = f"**Found {len(summary_layers)} layer(s):**\n"
+                            for layer_name, layer_content in summary_layers.items():
+                                if isinstance(layer_content, str):
+                                    layers_info += f"  • `{layer_name}`: {len(layer_content)} chars\n"
+                                elif isinstance(layer_content, dict):
+                                    layers_info += f"  • `{layer_name}`: {len(str(layer_content))} chars (structured)\n"
+
+                            summary_embed.add_field(
+                                name="🔄 Summary Layers",
+                                value=layers_info[:1024],
+                                inline=False,
+                            )
+                        else:
+                            summary_embed.add_field(
+                                name="🔄 Summary Layers",
+                                value="*No additional summary layers found*",
+                                inline=False,
+                            )
+
+                        # Check for other relevant fields
+                        other_fields = []
+                        if "metadata" in transcript_data:
+                            other_fields.append("metadata")
+                        if "speakers" in transcript_data:
+                            other_fields.append("speakers")
+                        if "segments" in transcript_data:
+                            segments = transcript_data["segments"]
+                            if isinstance(segments, list):
+                                other_fields.append(f"segments ({len(segments)})")
+
+                        if other_fields:
+                            summary_embed.add_field(
+                                name="📊 Additional Data",
+                                value=", ".join([f"`{field}`" for field in other_fields]),
+                                inline=False,
+                            )
+
+                        await thread.send(embed=summary_embed)
+
+                        # Send full summary in separate messages if requested
+                        if main_summary:
+                            await self.services.logging_service.info(
+                                f"[DEEPINFO] Sending full summary for meeting {meeting_id}"
+                            )
+
+                            # Split summary into chunks of 1900 chars
+                            chunk_size = 1900
+                            summary_chunks = [
+                                main_summary[i:i + chunk_size]
+                                for i in range(0, len(main_summary), chunk_size)
+                            ]
+
+                            # Send each chunk
+                            for idx, chunk in enumerate(summary_chunks, start=1):
+                                chunk_embed = discord.Embed(
+                                    title=f"📋 Full Summary - Part {idx}/{len(summary_chunks)}",
+                                    description=chunk,
+                                    color=discord.Color.blue(),
+                                )
+                                chunk_embed.set_footer(text=f"Meeting ID: {meeting_id}")
+                                await thread.send(embed=chunk_embed)
+
+                            # Send summary layers if they exist
+                            if summary_layers:
+                                for layer_name, layer_content in summary_layers.items():
+                                    if isinstance(layer_content, str) and layer_content:
+                                        layer_chunks = [
+                                            layer_content[i:i + chunk_size]
+                                            for i in range(0, len(layer_content), chunk_size)
+                                        ]
+
+                                        for idx, chunk in enumerate(layer_chunks, start=1):
+                                            layer_embed = discord.Embed(
+                                                title=f"📋 {layer_name} - Part {idx}/{len(layer_chunks)}",
+                                                description=chunk,
+                                                color=discord.Color.teal(),
+                                            )
+                                            layer_embed.set_footer(text=f"Meeting ID: {meeting_id}")
+                                            await thread.send(embed=layer_embed)
+
+                    except json.JSONDecodeError as e:
+                        await self.services.logging_service.warning(
+                            f"[DEEPINFO] Failed to parse compiled transcript JSON for meeting {meeting_id}: {str(e)}"
+                        )
+                        error_embed = discord.Embed(
+                            title="❌ Summary Error",
+                            description="Compiled transcript file is malformed.",
+                            color=discord.Color.red(),
+                        )
+                        await thread.send(embed=error_embed)
+                    except Exception as e:
+                        await self.services.logging_service.error(
+                            f"[DEEPINFO] Error reading compiled transcript file for meeting {meeting_id}: {str(e)}"
+                        )
+                        error_embed = discord.Embed(
+                            title="❌ Summary Error",
+                            description="Error reading compiled transcript file.",
+                            color=discord.Color.red(),
+                        )
+                        await thread.send(embed=error_embed)
+                else:
+                    # File not found
+                    await self.services.logging_service.warning(
+                        f"[DEEPINFO] Compiled transcript file not found for meeting {meeting_id}: {transcript_file}"
+                    )
+                    error_embed = discord.Embed(
+                        title="⚠️ Summary Not Available",
+                        description="Compiled transcript file not found on disk.",
+                        color=discord.Color.orange(),
+                    )
+                    await thread.send(embed=error_embed)
+            else:
+                # No compiled transcript
+                await self.services.logging_service.info(
+                    f"[DEEPINFO] No compiled transcript found for meeting {meeting_id}"
+                )
+                error_embed = discord.Embed(
+                    title="⚠️ Summary Not Available",
+                    description="Compiled transcript not yet available. Transcription may still be in progress.",
+                    color=discord.Color.orange(),
+                )
+                await thread.send(embed=error_embed)
+
+            # ============================================
+            # 5. Final completion message
+            # ============================================
+            await self.services.logging_service.info(
+                f"[DEEPINFO] Successfully completed deep analysis for meeting {meeting_id}"
+            )
+
+            final_embed = discord.Embed(
+                title="✅ Deep Analysis Complete",
+                description=f"All processing stages for meeting `{meeting_id}` have been analyzed.",
+                color=discord.Color.green(),
+            )
+            final_embed.set_footer(
+                text=f"Requested by {ctx.author.name}",
+                icon_url=ctx.author.avatar.url if ctx.author.avatar else None,
+            )
+            await thread.send(embed=final_embed)
+
+        except ValueError as e:
+            # Meeting not found or invalid ID
+            await self.services.logging_service.warning(
+                f"[DEEPINFO] Meeting {meeting_id} not found or invalid ID - requested by user {ctx.author.id}: {str(e)}"
+            )
+            embed = discord.Embed(
+                title="❌ Error",
+                description=str(e),
+                color=discord.Color.red(),
+            )
+            await ctx.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            # Other errors
+            await self.services.logging_service.error(
+                f"[DEEPINFO] Unexpected error in /deepinfo command for meeting {meeting_id} by user {ctx.author.id}: {str(e)}"
+            )
+            import traceback
+            await self.services.logging_service.error(
+                f"[DEEPINFO] Traceback: {traceback.format_exc()}"
+            )
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"An error occurred while fetching meeting information: {str(e)}",
+                color=discord.Color.red(),
+            )
+            await ctx.followup.send(embed=embed, ephemeral=True)
+
 
 def setup(context: Context):
     general = General(context)
