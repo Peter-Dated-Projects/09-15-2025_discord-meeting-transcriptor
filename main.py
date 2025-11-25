@@ -58,6 +58,74 @@ intents.message_content = True  # Required for reading message content and detec
 bot = discord.Bot(intents=intents, debug_guilds=DEBUG_GUILD_IDS)
 
 
+# -------------------------------------------------------------- #
+# Event Handler System
+# -------------------------------------------------------------- #
+#
+# This implements a filter-based event handling architecture where:
+# 1. Each cog can register event handlers with filters
+# 2. Filters determine if a handler should process an event
+# 3. By default, handlers are "pass-through" - they allow subsequent handlers to run
+# 4. Handlers can return False or be configured with pass_through=False to stop propagation
+#
+# Benefits:
+# - Separation of concerns: each cog handles its own filtering logic
+# - Composable: multiple handlers can process the same event
+# - Flexible: handlers can be chained, ordered, or isolated as needed
+# - Maintainable: adding new handlers doesn't require modifying main.py
+#
+
+
+class MessageEventHandler:
+    """Handler for message events with a filter-based architecture.
+
+    Handlers are registered with filters that determine if they should process
+    a message. By default, handlers pass through (allow subsequent handlers to run).
+    """
+
+    def __init__(self):
+        self.handlers = []
+
+    def register_handler(self, filter_func, handler_func, pass_through: bool = True):
+        """Register a message event handler with a filter.
+
+        Args:
+            filter_func: Async function that takes a message and returns bool
+                        (True if handler should process the message)
+            handler_func: Async function that processes the message
+            pass_through: If True, continue to next handler after this one.
+                         If False, stop propagation after this handler.
+        """
+        self.handlers.append(
+            {"filter": filter_func, "handler": handler_func, "pass_through": pass_through}
+        )
+
+    async def process_message(self, message: discord.Message):
+        """Process a message through all registered handlers.
+
+        Args:
+            message: The Discord message to process
+        """
+        for handler_info in self.handlers:
+            try:
+                # Check if the filter passes
+                if await handler_info["filter"](message):
+                    # Execute the handler
+                    result = await handler_info["handler"](message)
+
+                    # Check if we should continue to next handler
+                    # If handler returns False or pass_through is False, stop
+                    if not handler_info["pass_through"] or result is False:
+                        break
+            except Exception as e:
+                # Log error but continue to next handler
+                logging.error(f"Error in message handler: {e}", exc_info=True)
+
+
+# Create global message event handler
+message_event_handler = MessageEventHandler()
+
+
 async def load_cogs(context: Context):
     """Load all cog extensions with context.
 
@@ -74,8 +142,23 @@ async def load_cogs(context: Context):
     setup_voice(context)
     await context.services_manager.logging_service.info("✓ Loaded cogs.voice")
 
-    setup_chat(context)
+    # Load chat cog and register its message handler
+    chat_cog = setup_chat(context)
+    message_event_handler.register_handler(
+        filter_func=chat_cog.filter_message,
+        handler_func=chat_cog.handle_message,
+        pass_through=True,  # Allow other handlers to process after this one
+    )
     await context.services_manager.logging_service.info("✓ Loaded cogs.chat")
+    await context.services_manager.logging_service.info("✓ Registered chat message handler")
+
+    # Example: To add more message handlers from other cogs:
+    # other_cog = setup_other(context)
+    # message_event_handler.register_handler(
+    #     filter_func=other_cog.filter_message,
+    #     handler_func=other_cog.handle_message,
+    #     pass_through=True  # or False to stop propagation
+    # )
 
 
 # -------------------------------------------------------------- #
@@ -130,6 +213,23 @@ async def murder(ctx: discord.ApplicationContext):
 # -------------------------------------------------------------- #
 # Events
 # -------------------------------------------------------------- #
+
+
+@bot.event
+async def on_message(message: discord.Message):
+    """Global message event handler that routes messages through registered handlers.
+
+    This handler runs all messages through the MessageEventHandler system,
+    which applies filters and passes messages to appropriate cog handlers.
+
+    Args:
+        message: The Discord message object
+    """
+    # Process the message through the handler chain
+    await message_event_handler.process_message(message)
+
+    # Allow other bot commands to still work
+    await bot.process_commands(message)
 
 
 async def _ensure_guild_subscription_and_collection(guilds: list[discord.Guild]) -> None:
