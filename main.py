@@ -52,6 +52,7 @@ DEBUG_GUILD_IDS = [
 
 intents = discord.Intents.default()
 intents.voice_states = True
+intents.message_content = True  # Required for reading message content and detecting mentions
 
 # If DEBUG_GUILD_IDS is not empty, commands will register instantly in those guilds
 bot = discord.Bot(intents=intents, debug_guilds=DEBUG_GUILD_IDS)
@@ -65,12 +66,16 @@ async def load_cogs(context: Context):
     """
     from cogs.general import setup as setup_general
     from cogs.voice import setup as setup_voice
+    from cogs.chat import setup as setup_chat
 
     setup_general(context)
     await context.services_manager.logging_service.info("✓ Loaded cogs.general")
 
     setup_voice(context)
     await context.services_manager.logging_service.info("✓ Loaded cogs.voice")
+
+    setup_chat(context)
+    await context.services_manager.logging_service.info("✓ Loaded cogs.chat")
 
 
 # -------------------------------------------------------------- #
