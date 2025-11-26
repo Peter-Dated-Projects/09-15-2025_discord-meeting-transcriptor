@@ -60,6 +60,8 @@ def construct_services_manager(
     text_embedding_job_manager = None
     gpu_resource_manager = None
     ollama_request_manager = None
+    conversation_manager = None
+    chat_job_manager = None
 
     # create logger
     logging_service = AsyncLoggingService(
@@ -202,6 +204,26 @@ def construct_services_manager(
 
         ollama_request_manager = OllamaRequestManager(context=context)
 
+        # -------------------------------------------------------------- #
+        # Conversation Manager Setup
+        # -------------------------------------------------------------- #
+
+        from source.services.conversation_manager.in_memory_cache import (
+            InMemoryConversationManager,
+        )
+
+        conversation_manager = InMemoryConversationManager(
+            conversation_file_manager=conversation_file_service_manager
+        )
+
+        # -------------------------------------------------------------- #
+        # Chat Job Manager Setup
+        # -------------------------------------------------------------- #
+
+        from source.services.chat_job_manager.manager import ChatJobManagerService
+
+        chat_job_manager = ChatJobManagerService(context=context)
+
     # TODO: https://www.notion.so/DISC-19-create-ffmpeg-service-29c5eca3b9df805a949fdcd5850eaf5a?source=copy_link
     # # create ffmpeg service manager
     # if service_type == ServerManagerType.DEVELOPMENT:
@@ -234,4 +256,6 @@ def construct_services_manager(
         text_embedding_job_manager=text_embedding_job_manager,
         gpu_resource_manager=gpu_resource_manager,
         ollama_request_manager=ollama_request_manager,
+        conversation_manager=conversation_manager,
+        chat_job_manager=chat_job_manager,
     )

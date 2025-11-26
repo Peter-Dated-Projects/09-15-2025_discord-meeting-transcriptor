@@ -33,6 +33,19 @@ class MessageType(Enum):
 
 
 # -------------------------------------------------------------- #
+# Conversation Status Enum
+# -------------------------------------------------------------- #
+
+
+class ConversationStatus(Enum):
+    """Enum representing the status of a conversation."""
+
+    IDLE = "idle"
+    THINKING = "thinking"
+    PROCESSING_QUEUE = "processing_queue"
+
+
+# -------------------------------------------------------------- #
 # Message Object
 # -------------------------------------------------------------- #
 
@@ -120,6 +133,7 @@ class Conversation:
         history: List of messages in the conversation
         filename: Designated filename for saving the conversation
         conversation_file_manager: Reference to the file manager service
+        status: Current status of the conversation (idle, thinking, processing_queue)
     """
 
     thread_id: str
@@ -133,6 +147,7 @@ class Conversation:
     participants: List[str] = field(default_factory=list)
     history: List[Message] = field(default_factory=list)
     filename: str = ""
+    status: ConversationStatus = ConversationStatus.IDLE
 
     def __post_init__(self):
         """Initialize computed fields after dataclass initialization."""
