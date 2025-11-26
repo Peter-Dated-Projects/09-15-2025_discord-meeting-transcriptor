@@ -1,10 +1,17 @@
 import logging
 from typing import Optional
+from datetime import datetime
 
 import discord
 from discord.ext import commands
 
 from source.context import Context
+from source.services.conversation_manager.in_memory_cache import (
+    Conversation,
+    ConversationStatus,
+    Message,
+    MessageType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +71,11 @@ class Chat(commands.Cog):
         """Handle messages where the bot is mentioned.
 
         When the bot is pinged in a guild, this handler:
-        1. Grabs information about the guild, message context, etc.
-        2. Creates a thread from the message
-        3. Sends "Echo is thinking…" in the thread
+        1. Creates a thread from the message
+        2. Sends "Echo is thinking..." in italics in the thread
+        3. Creates a new conversation in memory and saves to disk
+        4. Creates SQL entries for conversation and conversation_store
+        5. Dispatches a chat job to process the message
 
         Args:
             message: The Discord message object
@@ -77,12 +86,12 @@ class Chat(commands.Cog):
 
         try:
             # Gather message and guild information
-            guild_id = message.guild.id
+            guild_id = str(message.guild.id)
             guild_name = message.guild.name
             channel_id = message.channel.id
             channel_name = message.channel.name if hasattr(message.channel, "name") else "Unknown"
             message_id = message.id
-            author_id = message.author.id
+            author_id = str(message.author.id)
             author_name = str(message.author)
             message_content = message.content
 
@@ -102,22 +111,116 @@ class Chat(commands.Cog):
             # Check if message is already in a thread
             if isinstance(message.channel, discord.Thread):
                 thread = message.channel
+                thread_id = str(thread.id)
                 await self.services.logging_service.info(
-                    f"Message already in thread: {thread.name} ({thread.id})"
+                    f"Message already in thread: {thread.name} ({thread_id})"
                 )
+
+                # Check if we have an active conversation for this thread
+                conversation = self.services.conversation_manager.get_conversation(thread_id)
+
+                if conversation:
+                    # Check conversation status
+                    if conversation.status == ConversationStatus.IDLE:
+                        # Create new chat job
+                        conversation_id = await self._get_conversation_id_from_thread(thread_id)
+                        if conversation_id:
+                            job_id = await self.services.chat_job_manager.create_and_queue_chat_job(
+                                thread_id=thread_id,
+                                conversation_id=conversation_id,
+                                message=message_content,
+                                user_id=author_id,
+                            )
+                            await self.services.logging_service.info(
+                                f"Created chat job {job_id} for existing thread {thread_id}"
+                            )
+                    else:
+                        # AI is thinking or processing queue - add to message queue
+                        queued = await self.services.chat_job_manager.queue_user_message(
+                            thread_id=thread_id, message=message_content, user_id=author_id
+                        )
+                        if queued:
+                            await self.services.logging_service.info(
+                                f"Queued message from {author_id} in thread {thread_id}"
+                            )
+                        else:
+                            await self.services.logging_service.warning(
+                                f"Failed to queue message - no active job for thread {thread_id}"
+                            )
+
+                    return True
+
             else:
                 # Create a new thread from the message
                 thread = await message.create_thread(
                     name=thread_name, auto_archive_duration=60  # Archive after 1 hour of inactivity
                 )
+                thread_id = str(thread.id)
                 await self.services.logging_service.info(
-                    f"Created thread: {thread.name} ({thread.id})"
+                    f"Created thread: {thread.name} ({thread_id})"
                 )
 
-            # Send "Echo is thinking…" message in the thread
-            await thread.send("Echo is thinking…")
+            # Send "Echo is thinking..." message in the thread (italicized)
+            await thread.send("*Echo is thinking...*")
+            await self.services.logging_service.info(f"Sent thinking message in thread {thread_id}")
 
-            await self.services.logging_service.info(f"Sent thinking message in thread {thread.id}")
+            # Create a new Conversation object
+            conversation = self.services.conversation_manager.create_conversation(
+                thread_id=thread_id,
+                guild_id=guild_id,
+                guild_name=guild_name,
+                requester=author_id,
+            )
+
+            await self.services.logging_service.info(
+                f"Created conversation in memory for thread {thread_id}"
+            )
+
+            # Save conversation to disk
+            save_success = await conversation.save_conversation()
+            if save_success:
+                await self.services.logging_service.info(
+                    f"Saved conversation to disk: {conversation.filename}"
+                )
+            else:
+                await self.services.logging_service.error(
+                    f"Failed to save conversation to disk for thread {thread_id}"
+                )
+
+            # Create SQL entry in conversations table
+            conversation_id = await self.services.conversations_sql_manager.insert_conversation(
+                discord_thread_id=thread_id,
+                discord_requester_id=author_id,
+                discord_guild_id=guild_id,
+                chat_meta={"thread_name": thread_name, "guild_name": guild_name},
+            )
+
+            await self.services.logging_service.info(
+                f"Created conversation SQL entry: {conversation_id}"
+            )
+
+            # Create SQL entry in conversations_store table
+            store_id = (
+                await self.services.conversations_store_sql_manager.insert_conversation_store(
+                    session_id=conversation_id, filename=conversation.filename
+                )
+            )
+
+            await self.services.logging_service.info(
+                f"Created conversation store SQL entry: {store_id}"
+            )
+
+            # Create and queue chat job
+            job_id = await self.services.chat_job_manager.create_and_queue_chat_job(
+                thread_id=thread_id,
+                conversation_id=conversation_id,
+                message=message_content,
+                user_id=author_id,
+            )
+
+            await self.services.logging_service.info(
+                f"Created and queued chat job {job_id} for thread {thread_id}"
+            )
 
             # Return True to allow pass-through to next handler
             return True
@@ -140,6 +243,31 @@ class Chat(commands.Cog):
             )
             # Return True to allow other handlers to attempt processing
             return True
+
+    async def _get_conversation_id_from_thread(self, thread_id: str) -> str | None:
+        """
+        Get conversation ID from thread ID by querying SQL.
+
+        Args:
+            thread_id: Discord thread ID
+
+        Returns:
+            Conversation ID or None if not found
+        """
+        try:
+            conversation = (
+                await self.services.conversations_sql_manager.retrieve_conversation_by_thread_id(
+                    thread_id
+                )
+            )
+            if conversation:
+                return conversation.get("id")
+            return None
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to get conversation ID for thread {thread_id}: {e}"
+            )
+            return None
 
 
 def setup(context: Context):
