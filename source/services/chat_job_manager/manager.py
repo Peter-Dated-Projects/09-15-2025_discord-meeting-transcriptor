@@ -333,7 +333,9 @@ class ChatJob(Job):
                 if msg.requester:
                     role = "user"
                     # Add user attribution to the message content
-                    user_display = user_display_names.get(msg.requester, f"User {msg.requester}")
+                    user_display = user_display_names.get(
+                        msg.requester, f"User {msg.requester} <@{msg.requester}>"
+                    )
                     content = f"{user_display}: {msg.message_content}"
                 else:
                     role = "assistant"
@@ -457,13 +459,13 @@ class ChatJob(Job):
 
     async def _get_user_display_names(self, user_ids: list[str]) -> dict[str, str]:
         """
-        Get display names for Discord user IDs.
+        Get display names with mentions for Discord user IDs.
 
         Args:
             user_ids: List of Discord user IDs
 
         Returns:
-            Dictionary mapping user_id to display name
+            Dictionary mapping user_id to "DisplayName <@user_id>"
         """
         user_names = {}
 
@@ -472,26 +474,26 @@ class ChatJob(Job):
             thread = await self._get_discord_thread()
 
             if not thread or not thread.guild:
-                # Fallback to user IDs if we can't get the thread/guild
-                return {user_id: f"User {user_id}" for user_id in user_ids}
+                # Fallback to user IDs with mention if we can't get the thread/guild
+                return {user_id: f"User {user_id} <@{user_id}>" for user_id in user_ids}
 
             # Fetch member objects for each user
             for user_id in user_ids:
                 try:
                     member = await thread.guild.fetch_member(int(user_id))
-                    # Use display name (nickname if set, otherwise username)
-                    user_names[user_id] = member.display_name
+                    # Use display name (nickname if set, otherwise username) with mention
+                    user_names[user_id] = f"{member.display_name} <@{user_id}>"
                 except Exception as e:
-                    # If we can't fetch a member, use a fallback
+                    # If we can't fetch a member, use a fallback with mention
                     await self.services.logging_service.debug(
                         f"Could not fetch member {user_id}: {e}"
                     )
-                    user_names[user_id] = f"User {user_id}"
+                    user_names[user_id] = f"User {user_id} <@{user_id}>"
 
         except Exception as e:
             await self.services.logging_service.error(f"Failed to get user display names: {e}")
-            # Fallback to user IDs
-            user_names = {user_id: f"User {user_id}" for user_id in user_ids}
+            # Fallback to user IDs with mention
+            user_names = {user_id: f"User {user_id} <@{user_id}>" for user_id in user_ids}
 
         return user_names
 

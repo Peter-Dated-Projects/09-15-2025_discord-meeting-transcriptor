@@ -70,12 +70,10 @@ class Chat(commands.Cog):
             if self.services.conversation_manager.is_known_thread(thread_id):
                 # Try to load the conversation into memory
                 try:
-                    conversation = (
-                        await self.services.conversation_manager.load_conversation_from_storage(
-                            thread_id=thread_id,
-                            conversations_sql_manager=self.services.conversations_sql_manager,
-                            conversation_file_manager=self.services.conversation_file_manager,
-                        )
+                    conversation = await self.services.conversation_manager.load_conversation_from_storage(
+                        thread_id=thread_id,
+                        conversations_sql_manager=self.services.conversations_sql_manager,
+                        conversation_file_manager=self.services.conversation_file_service_manager,
                     )
                     if conversation:
                         await self.services.logging_service.info(
@@ -221,12 +219,10 @@ class Chat(commands.Cog):
                     )
 
                     try:
-                        conversation = (
-                            await self.services.conversation_manager.load_conversation_from_storage(
-                                thread_id=thread_id,
-                                conversations_sql_manager=self.services.conversations_sql_manager,
-                                conversation_file_manager=self.services.conversation_file_manager,
-                            )
+                        conversation = await self.services.conversation_manager.load_conversation_from_storage(
+                            thread_id=thread_id,
+                            conversations_sql_manager=self.services.conversations_sql_manager,
+                            conversation_file_manager=self.services.conversation_file_service_manager,
                         )
 
                         if conversation:
