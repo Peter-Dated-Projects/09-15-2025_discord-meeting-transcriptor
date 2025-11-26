@@ -39,6 +39,7 @@ async def main():
     transcription_storage_path = os.getenv(
         "TRANSCRIPTION_STORAGE_PATH", "assets/data/transcriptions"
     )
+    conversation_storage_path = os.path.join(storage_path, "conversations")
 
     services_manager = construct_services_manager(
         ServerManagerType.DEVELOPMENT,
@@ -46,6 +47,7 @@ async def main():
         storage_path=storage_path,
         recording_storage_path=recording_storage_path,
         transcription_storage_path=transcription_storage_path,
+        conversation_storage_path=conversation_storage_path,
     )
     await services_manager.initialize_all()
     print("✓ Initialized all services")

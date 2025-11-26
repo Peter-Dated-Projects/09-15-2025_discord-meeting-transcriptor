@@ -214,6 +214,30 @@ def test_environment(request: pytest.FixtureRequest) -> str:
         return "local"
 
 
+@pytest.fixture(scope="session")
+def shared_test_log_file(tmp_path_factory) -> str:
+    """
+    Create a single shared log file for all tests in the session.
+
+    This prevents creating a new timestamped log file for each test,
+    consolidating all test logs into one file for easier debugging.
+
+    Returns:
+        str: Path to the shared log file
+    """
+    import tempfile
+    from datetime import datetime
+
+    # Create a logs directory in the test temp directory
+    logs_dir = tmp_path_factory.mktemp("logs")
+
+    # Create a single log file with timestamp in the name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = logs_dir / f"test_run_{timestamp}.log"
+
+    return str(log_file)
+
+
 # ============================================================================
 # Async Fixtures
 # ============================================================================
@@ -590,7 +614,7 @@ async def server_manager(_test_environment: str):
 
 
 @pytest.fixture
-async def services_manager(server_manager, tmp_path):
+async def services_manager(server_manager, tmp_path, shared_test_log_file):
     """
     Create and initialize a services manager with temporary storage.
 
@@ -601,6 +625,7 @@ async def services_manager(server_manager, tmp_path):
     Args:
         server_manager: Connected server manager from server_manager fixture
         tmp_path: Pytest's built-in temporary directory fixture
+        shared_test_log_file: Session-scoped shared log file path
 
     Yields:
         ServicesManager: Initialized services manager instance
@@ -612,6 +637,7 @@ async def services_manager(server_manager, tmp_path):
     storage_path = str(tmp_path / "data")
     recording_storage_path = str(tmp_path / "data" / "recordings")
     transcription_storage_path = str(tmp_path / "data" / "transcriptions")
+    conversation_storage_path = str(tmp_path / "data" / "conversations")
 
     # Determine server type from server_manager
     # This is a bit of a hack, but it works for both dev and prod
@@ -630,6 +656,9 @@ async def services_manager(server_manager, tmp_path):
         storage_path=storage_path,
         recording_storage_path=recording_storage_path,
         transcription_storage_path=transcription_storage_path,
+        conversation_storage_path=conversation_storage_path,
+        log_file=shared_test_log_file,  # Use shared log file
+        use_timestamp_logs=False,  # Don't create timestamp-based logs
     )
 
     await services.initialize_all()

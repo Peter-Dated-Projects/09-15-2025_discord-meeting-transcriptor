@@ -25,6 +25,7 @@ def construct_services_manager(
     storage_path: str,
     recording_storage_path: str,
     transcription_storage_path: str,
+    conversation_storage_path: str,
     default_logging_path: str = "logs",
     log_file: str | None = None,
     use_timestamp_logs: bool = True,
@@ -37,6 +38,7 @@ def construct_services_manager(
         storage_path: Path for general file storage
         recording_storage_path: Path for recording file storage
         transcription_storage_path: Path for transcription JSON file storage
+        conversation_storage_path: Path for conversation JSON file storage
         default_logging_path: Directory to store log files (default: "logs")
         log_file: Specific log file name (optional, overrides use_timestamp_logs)
         use_timestamp_logs: If True and log_file is None, creates timestamped log files (default: True)
@@ -45,6 +47,7 @@ def construct_services_manager(
     file_service_manager = None
     recording_file_service_manager = None
     transcription_file_service_manager = None
+    conversation_file_service_manager = None
     ffmpeg_service_manager = None
     sql_recording_service_manager = None
     sql_logging_service_manager = None
@@ -84,6 +87,9 @@ def construct_services_manager(
         from source.services.transcription_file_manager.manager import (
             TranscriptionFileManagerService,
         )
+        from source.services.conversation_file_manager.manager import (
+            ConversationFileManagerService,
+        )
 
         file_service_manager = FileManagerService(context=context, storage_path=storage_path)
         recording_file_service_manager = RecordingFileManagerService(
@@ -91,6 +97,9 @@ def construct_services_manager(
         )
         transcription_file_service_manager = TranscriptionFileManagerService(
             context=context, transcription_storage_path=transcription_storage_path
+        )
+        conversation_file_service_manager = ConversationFileManagerService(
+            context=context, conversation_storage_path=conversation_storage_path
         )
 
         # Decide ffmpeg binary path based on environment and platform
@@ -213,6 +222,7 @@ def construct_services_manager(
         logging_service=logging_service,
         sql_recording_service_manager=sql_recording_service_manager,
         sql_logging_service_manager=sql_logging_service_manager,
+        conversation_file_service_manager=conversation_file_service_manager,
         subscription_sql_manager=subscription_sql_manager,
         conversations_sql_manager=conversations_sql_manager,
         conversations_store_sql_manager=conversations_store_sql_manager,

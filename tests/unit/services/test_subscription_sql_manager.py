@@ -28,7 +28,7 @@ class TestSubscriptionSQLManagerService:
     """Test Subscription SQL Manager Service CRUD operations."""
 
     @pytest.fixture
-    async def services_and_db(self, tmp_path):
+    async def services_and_db(self, tmp_path, shared_test_log_file):
         """Setup services and database for testing."""
         from source.context import Context
 
@@ -44,6 +44,7 @@ class TestSubscriptionSQLManagerService:
         storage_path = os.path.join(str(tmp_path), "data")
         recording_storage_path = os.path.join(storage_path, "recordings")
         transcription_storage_path = os.path.join(storage_path, "transcriptions")
+        conversation_storage_path = os.path.join(storage_path, "conversations")
 
         services_manager = construct_services_manager(
             ServerManagerType.DEVELOPMENT,
@@ -51,6 +52,9 @@ class TestSubscriptionSQLManagerService:
             storage_path=storage_path,
             recording_storage_path=recording_storage_path,
             transcription_storage_path=transcription_storage_path,
+            conversation_storage_path=conversation_storage_path,
+            log_file=shared_test_log_file,
+            use_timestamp_logs=False,
         )
         await services_manager.initialize_all()
 
