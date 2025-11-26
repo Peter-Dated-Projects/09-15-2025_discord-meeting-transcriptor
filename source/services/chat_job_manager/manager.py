@@ -13,6 +13,7 @@ with the bot. It uses an event-based job queue that:
 from __future__ import annotations
 
 import asyncio
+import os
 from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -35,6 +36,9 @@ from datetime import datetime
 
 # Maximum number of user messages to batch together
 MAX_MESSAGE_BATCH_SIZE = 5
+
+# Get chat model from environment variable
+OLLAMA_CHAT_MODEL = os.getenv("OLLAMA_CHAT_MODEL", "gemma3:12b")
 
 
 @dataclass
@@ -355,6 +359,9 @@ class ChatJob(Job):
         """
         Call the LLM with messages and return response.
 
+        Uses the OLLAMA_CHAT_MODEL environment variable to determine which model to use.
+        Sets keep_alive to 1 minute to keep the model in memory briefly after chat requests.
+
         Args:
             messages: List of message dicts for LLM
 
@@ -362,10 +369,11 @@ class ChatJob(Job):
             Response dict from Ollama
         """
         response = await self.services.ollama_request_manager.query(
-            model=None,  # Use default model
+            model=OLLAMA_CHAT_MODEL,
             messages=messages,
             temperature=0.7,
             stream=False,
+            keep_alive="1m",  # Keep model in memory for 1 minute after request
         )
 
         return response
