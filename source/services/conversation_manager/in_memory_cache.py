@@ -60,6 +60,7 @@ class Message:
         message_content: The actual content of the message
         tools: List of tool calls (only for tool_call type)
         requester: Discord user ID of the requester (only for user messages)
+        attachments: List of attachment metadata (URLs, images, files)
     """
 
     created_at: datetime
@@ -67,6 +68,7 @@ class Message:
     message_content: str
     tools: Optional[List[Dict[str, Any]]] = None
     requester: Optional[str] = None
+    attachments: Optional[List[Dict[str, Any]]] = None
 
     def to_json(self) -> Dict[str, Any]:
         """Convert the message to JSON-serializable format.
@@ -89,6 +91,10 @@ class Message:
         if self.requester:
             json_data["meta"]["requester"] = self.requester
 
+        # Add attachments to meta if present
+        if self.attachments:
+            json_data["meta"]["attachments"] = self.attachments
+
         return json_data
 
     @classmethod
@@ -109,6 +115,7 @@ class Message:
             message_content=data["message_content"],
             tools=meta.get("tools"),
             requester=meta.get("requester"),
+            attachments=meta.get("attachments"),
         )
 
 

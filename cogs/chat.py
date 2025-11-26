@@ -12,6 +12,9 @@ from source.services.conversation_manager.in_memory_cache import (
     Message,
     MessageType,
 )
+from source.services.chat_job_manager.attachment_utils import (
+    extract_attachments_from_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +134,9 @@ class Chat(commands.Cog):
             author_name = str(message.author)
             message_content = message.content
 
+            # Extract attachments from the message
+            attachments = await extract_attachments_from_message(message)
+
             # Check if message is in a thread with an active conversation
             if isinstance(message.channel, discord.Thread):
                 thread = message.channel
@@ -159,6 +165,7 @@ class Chat(commands.Cog):
                                 conversation_id=conversation_id,
                                 message=message_content,
                                 user_id=author_id,
+                                attachments=attachments if attachments else None,
                             )
                             await self.services.logging_service.info(
                                 f"Created chat job {job_id} for existing thread {thread_id}"
@@ -170,7 +177,10 @@ class Chat(commands.Cog):
                     else:
                         # AI is thinking or processing queue - add to message queue
                         queued = await self.services.chat_job_manager.queue_user_message(
-                            thread_id=thread_id, message=message_content, user_id=author_id
+                            thread_id=thread_id,
+                            message=message_content,
+                            user_id=author_id,
+                            attachments=attachments if attachments else None,
                         )
                         if queued:
                             await self.services.logging_service.info(
@@ -236,6 +246,7 @@ class Chat(commands.Cog):
                                 conversation_id=existing_conversation_id,
                                 message=message_content,
                                 user_id=author_id,
+                                attachments=attachments if attachments else None,
                             )
 
                             await self.services.logging_service.info(
@@ -322,6 +333,7 @@ class Chat(commands.Cog):
                 conversation_id=conversation_id,
                 message=message_content,
                 user_id=author_id,
+                attachments=attachments if attachments else None,
             )
 
             await self.services.logging_service.info(
