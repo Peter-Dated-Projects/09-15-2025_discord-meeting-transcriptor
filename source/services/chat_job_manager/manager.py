@@ -207,9 +207,6 @@ class ChatJob(Job):
         # Parse and send AI response
         await self._parse_and_send_response(response, conversation)
 
-        # Clean up downloaded attachments
-        await self._cleanup_downloaded_attachments()
-
         # Save conversation (AI response added)
         await conversation.save_conversation()
 
@@ -303,9 +300,6 @@ class ChatJob(Job):
 
         # Parse and send AI response
         await self._parse_and_send_response(response, conversation)
-
-        # Clean up downloaded attachments
-        await self._cleanup_downloaded_attachments()
 
         # Save conversation (AI response added)
         await conversation.save_conversation()
@@ -732,58 +726,22 @@ class ChatJob(Job):
 
     async def _cleanup_downloaded_attachments(self) -> None:
         """
-        Clean up downloaded attachment files from temporary storage.
+        Clear the tracking list of downloaded attachments.
+        Note: Files are persisted in temp storage and not deleted.
+        They will be cleaned up on service restart.
         """
         if not self._downloaded_attachments:
             await self.services.logging_service.debug(
-                f"[ATTACHMENTS] No attachments to clean up for thread {self.thread_id}"
+                f"[ATTACHMENTS] No attachments to clear from tracking for thread {self.thread_id}"
             )
             return
 
-        from source.services.chat_job_manager.attachment_utils import (
-            cleanup_attachment_files,
-        )
-
+        count = len(self._downloaded_attachments)
         await self.services.logging_service.debug(
-            f"[ATTACHMENTS] Starting cleanup for thread {self.thread_id}"
+            f"[ATTACHMENTS] Clearing {count} attachments from tracking for thread {self.thread_id} (files persisted)"
         )
 
-        # Create logger wrapper (reuse from download method)
-        class LoggerWrapper:
-            def __init__(self, logging_service, thread_id):
-                self.logging_service = logging_service
-                self.thread_id = thread_id
-
-            def debug(self, msg):
-                import asyncio
-
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.create_task(self.logging_service.debug(msg))
-                except:
-                    pass
-
-            def warning(self, msg):
-                import asyncio
-
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.create_task(self.logging_service.warning(msg))
-                except:
-                    pass
-
-        logger = LoggerWrapper(self.services.logging_service, self.thread_id)
-
-        deleted_count = await cleanup_attachment_files(self._downloaded_attachments, logger)
-
-        if deleted_count > 0:
-            await self.services.logging_service.info(
-                f"[ATTACHMENTS] Cleaned up {deleted_count} attachment files for thread {self.thread_id}"
-            )
-
-        # Clear the tracking list
+        # Clear the tracking list only - files remain in temp storage
         self._downloaded_attachments.clear()
 
 
