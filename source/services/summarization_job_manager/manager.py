@@ -13,6 +13,7 @@ transcription compilation tasks are completed. It uses an event-based job queue 
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -61,6 +62,7 @@ class SummarizationJob(Job):
         2. Extract raw text from segments
         3. Perform recursive summarization using Ollama
         4. Store summary layers and final summary in the compiled transcript
+        5. Update all individual user transcripts with the summaries
         """
         if not self.services:
             raise RuntimeError("ServicesManager not provided to SummarizationJob")
@@ -70,7 +72,7 @@ class SummarizationJob(Job):
         )
 
         try:
-            # Step 1: Retrieve the compiled transcript
+            # Step 1: Retrieve the compiled transcript using transcription_file_manager
             compiled_transcript = await self._load_compiled_transcript()
             if not compiled_transcript:
                 await self.services.logging_service.warning(
@@ -106,6 +108,9 @@ class SummarizationJob(Job):
             # Step 4: Update the compiled transcript file with summaries
             await self._update_compiled_transcript(summary_layers, final_summary)
 
+            # Step 5: Update all individual user transcripts with summaries
+            await self._update_individual_transcripts(summary_layers, final_summary)
+
             await self.services.logging_service.info(
                 f"Completed summarization for meeting {self.meeting_id}"
             )
@@ -122,35 +127,22 @@ class SummarizationJob(Job):
 
     async def _load_compiled_transcript(self) -> dict | None:
         """
-        Load the compiled transcript from storage.
+        Load the compiled transcript from storage using transcription_file_manager.
 
         Returns:
             The compiled transcript data or None if not found
         """
-        import asyncio
-        import json
-        import os
+        try:
+            compiled_transcript = await self.services.transcription_file_service_manager.retrieve_compiled_transcription(
+                self.meeting_id
+            )
+            return compiled_transcript
 
-        import aiofiles
-
-        # Construct file path
-        base_path = "assets/data/transcriptions"
-        compilations_path = os.path.join(base_path, "compilations", "storage")
-        filename = f"transcript_{self.meeting_id}.json"
-        file_path = os.path.join(compilations_path, filename)
-
-        # Check if file exists
-        loop = asyncio.get_event_loop()
-        if not await loop.run_in_executor(None, os.path.exists, file_path):
+        except Exception as e:
             await self.services.logging_service.error(
-                f"Compiled transcript file not found: {file_path}"
+                f"Failed to load compiled transcript for meeting {self.meeting_id}: {str(e)}"
             )
             return None
-
-        # Load the file
-        async with aiofiles.open(file_path, mode="r", encoding="utf-8") as f:
-            content = await f.read()
-            return json.loads(content)
 
     def _extract_raw_text(self, compiled_transcript: dict) -> str:
         """
@@ -294,54 +286,37 @@ class SummarizationJob(Job):
         self, summary_layers: dict[int, list[str]], final_summary: str
     ) -> None:
         """
-        Update the compiled transcript file with summaries.
+        Update the compiled transcript file with summaries using transcription_file_manager.
 
         Args:
             summary_layers: Dictionary of summary layers {level: [summaries]}
             final_summary: The final consolidated summary
         """
-        import asyncio
-        import json
-        import os
-
-        import aiofiles
-
         await self.services.logging_service.info(
             f"Updating compiled transcript for meeting {self.meeting_id} with summaries"
         )
 
         try:
-            # Construct file path to compiled transcript
-            base_path = "assets/data/transcriptions"
-            compilations_path = os.path.join(base_path, "compilations", "storage")
-            filename = f"transcript_{self.meeting_id}.json"
-            file_path = os.path.join(compilations_path, filename)
+            # Use transcription_file_manager to update compiled transcript
+            success = await self.services.transcription_file_service_manager.update_compiled_transcription_with_summary(
+                meeting_id=self.meeting_id,
+                summary=final_summary,
+                summary_layers=summary_layers,
+            )
 
-            # Check if file exists
-            loop = asyncio.get_event_loop()
-            if not await loop.run_in_executor(None, os.path.exists, file_path):
-                await self.services.logging_service.error(
-                    f"Compiled transcript file not found: {file_path}"
-                )
-                return
-
-            # Load existing compiled transcript
-            async with aiofiles.open(file_path, mode="r", encoding="utf-8") as f:
-                content = await f.read()
-                compiled_data = json.loads(content)
-
-            # Add summaries to compiled transcript
-            compiled_data["summary_layers"] = summary_layers
-            compiled_data["summary"] = final_summary
-            compiled_data["summarized_at"] = get_current_timestamp_est().isoformat()
-
-            # Save updated compiled transcript
-            async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:
-                await f.write(json.dumps(compiled_data, indent=2, ensure_ascii=False))
+            if not success:
+                raise RuntimeError("Failed to update compiled transcript")
 
             await self.services.logging_service.info(
-                f"Successfully updated compiled transcript {filename} with summaries"
+                f"Successfully updated compiled transcript for meeting {self.meeting_id}"
             )
+
+            # Get the file path for SQL update
+            filename = f"transcript_{self.meeting_id}.json"
+            compilations_storage_path = (
+                self.services.transcription_file_service_manager.compilations_storage_path
+            )
+            file_path = os.path.join(compilations_storage_path, filename)
 
             # Update meeting's transcript_ids field with meeting_summary path
             if self.services.sql_recording_service_manager:
@@ -378,6 +353,51 @@ class SummarizationJob(Job):
         except Exception as e:
             await self.services.logging_service.error(
                 f"Failed to update compiled transcript for meeting {self.meeting_id}: {str(e)}"
+            )
+            raise
+
+    async def _update_individual_transcripts(
+        self, summary_layers: dict[int, list[str]], final_summary: str
+    ) -> None:
+        """
+        Update all individual user transcripts with summary data.
+
+        This method uses transcription_file_manager's bulk update functionality
+        to add summary and summary_layers to each user's transcript.
+
+        Args:
+            summary_layers: Dictionary of summary layers {level: [summaries]}
+            final_summary: The final consolidated summary
+        """
+        await self.services.logging_service.info(
+            f"Updating {len(self.transcript_ids)} individual transcripts with summary data"
+        )
+
+        try:
+            # Use transcription_file_manager's bulk update method
+            results = await self.services.transcription_file_service_manager.bulk_update_transcriptions_with_summary(
+                transcript_ids=self.transcript_ids,
+                summary=final_summary,
+                summary_layers=summary_layers,
+            )
+
+            # Log results
+            success_count = sum(1 for success in results.values() if success)
+            failure_count = len(results) - success_count
+
+            if failure_count > 0:
+                failed_ids = [tid for tid, success in results.items() if not success]
+                await self.services.logging_service.warning(
+                    f"Failed to update {failure_count} transcripts: {failed_ids}"
+                )
+
+            await self.services.logging_service.info(
+                f"Updated {success_count}/{len(self.transcript_ids)} individual transcripts"
+            )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to update individual transcripts for meeting {self.meeting_id}: {str(e)}"
             )
             raise
 
