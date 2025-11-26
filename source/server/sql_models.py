@@ -145,6 +145,28 @@ class JobsStatusModel(Base):
     error_log = Column(String(16), nullable=True)
 
 
+class JobsModel(Base):
+    """
+    Generic jobs table for non-meeting related jobs (e.g., chat, background tasks).
+    
+    ID = Job ID (16 char UUID)
+    Created At = Timestamp when job was created
+    Updated At = Timestamp when job was last updated
+    Status = Current status of the job (pending, in_progress, completed, failed, skipped)
+    Type = Job Type (chatbot, etc)
+    Meta = JSON metadata for the job (flexible storage for job-specific data)
+    """
+
+    __tablename__ = "jobs"
+
+    id = Column(String(16), primary_key=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(Enum(JobsStatus, name="jobs_status_enum"), nullable=False)
+    type = Column(Enum(JobsType, name="jobs_type_enum"), nullable=False)
+    meta = Column(JSON, nullable=False, default=dict)
+
+
 class UserTranscriptsModel(Base):
     """
     ID = Transcript ID

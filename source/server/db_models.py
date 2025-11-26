@@ -5,12 +5,14 @@ from source.server.sql_models import (
     GuildAdminWhitelistModel,
     JobsStatusErrorLogModel,
     JobsStatusModel,
+    JobsModel,
     MeetingModel,
     RecordingModel,
     TempRecordingModel,
     UserTranscriptsModel,
     ConversationsModel,
     SubscriptionsModel,
+    ConversationsStoreModel,
 )
 
 # -------------------------------------------------------------- #
@@ -21,6 +23,7 @@ SQL_DATABASE_MODELS = [
     MeetingModel,
     RecordingModel,
     JobsStatusModel,
+    JobsModel,
     UserTranscriptsModel,
     CompiledTranscriptsModel,
     GuildAdminWhitelistModel,
@@ -28,6 +31,7 @@ SQL_DATABASE_MODELS = [
     TempRecordingModel,
     ConversationsModel,
     SubscriptionsModel,
+    ConversationsStoreModel,
 ]
 
 
