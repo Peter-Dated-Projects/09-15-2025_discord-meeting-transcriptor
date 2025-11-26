@@ -107,6 +107,12 @@ def construct_services_manager(
         # DB Interfaces Setup
         # -------------------------------------------------------------- #
 
+        from source.services.conversations_sql_manager.manager import (
+            ConversationsSQLManagerService,
+        )
+        from source.services.conversations_store_sql_manager.manager import (
+            ConversationsStoreSQLManagerService,
+        )
         from source.services.recording_sql_manager.manager import SQLRecordingManagerService
         from source.services.sql_logging_manager.manager import SQLLoggingManagerService
         from source.services.subscription_sql_manager.manager import (
@@ -116,6 +122,8 @@ def construct_services_manager(
         sql_recording_service_manager = SQLRecordingManagerService(context=context)
         sql_logging_service_manager = SQLLoggingManagerService(context=context)
         subscription_sql_manager = SubscriptionSQLManagerService(context=context)
+        conversations_sql_manager = ConversationsSQLManagerService(context=context)
+        conversations_store_sql_manager = ConversationsStoreSQLManagerService(context=context)
 
         # -------------------------------------------------------------- #
         # Discord Recorder Setup
@@ -206,6 +214,8 @@ def construct_services_manager(
         sql_recording_service_manager=sql_recording_service_manager,
         sql_logging_service_manager=sql_logging_service_manager,
         subscription_sql_manager=subscription_sql_manager,
+        conversations_sql_manager=conversations_sql_manager,
+        conversations_store_sql_manager=conversations_store_sql_manager,
         discord_recorder_service_manager=discord_recorder_service_manager,
         presence_manager_service=presence_manager_service,
         transcription_job_manager=transcription_job_manager,
