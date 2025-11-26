@@ -147,7 +147,10 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
         """Delete a file from persistent storage."""
         persistent_file_path = os.path.join(self.storage_path, filename)
         try:
-            await self.services.file_service_manager.delete_file(persistent_file_path)
+            # Use asyncio executor for file deletion
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, os.remove, persistent_file_path)
+
             await self.services.logging_service.info(
                 f"Deleted persistent recording file: {filename}"
             )
@@ -163,7 +166,10 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
         """Delete a file from temporary storage."""
         temp_file_path = os.path.join(self.temp_path, filename)
         try:
-            await self.services.file_service_manager.delete_file(temp_file_path)
+            # Use asyncio executor for file deletion
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, os.remove, temp_file_path)
+
             await self.services.logging_service.info(
                 f"Deleted temporary recording file: {filename}"
             )
