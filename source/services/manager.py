@@ -26,6 +26,8 @@ class ServicesManager:
         sql_recording_service_manager: BaseSQLRecordingServiceManager,
         sql_logging_service_manager: BaseSQLLoggingServiceManager,
         subscription_sql_manager: Any | None = None,
+        conversations_sql_manager: Any | None = None,
+        conversations_store_sql_manager: Any | None = None,
         discord_recorder_service_manager: BaseDiscordRecorderServiceManager | None = None,
         presence_manager_service: Any | None = None,
         transcription_job_manager: Any | None = None,
@@ -51,6 +53,8 @@ class ServicesManager:
         self.sql_recording_service_manager = sql_recording_service_manager
         self.sql_logging_service_manager = sql_logging_service_manager
         self.subscription_sql_manager = subscription_sql_manager
+        self.conversations_sql_manager = conversations_sql_manager
+        self.conversations_store_sql_manager = conversations_store_sql_manager
 
         # Discord recorder
         self.discord_recorder_service_manager = discord_recorder_service_manager
@@ -95,6 +99,14 @@ class ServicesManager:
         # Subscription SQL manager
         if self.subscription_sql_manager:
             await self.subscription_sql_manager.on_start(self)
+
+        # Conversations SQL manager
+        if self.conversations_sql_manager:
+            await self.conversations_sql_manager.on_start(self)
+
+        # Conversations Store SQL manager
+        if self.conversations_store_sql_manager:
+            await self.conversations_store_sql_manager.on_start(self)
 
         # Discord recorder
         await self.discord_recorder_service_manager.on_start(self)

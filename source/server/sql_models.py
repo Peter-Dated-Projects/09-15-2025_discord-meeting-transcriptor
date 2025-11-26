@@ -246,13 +246,13 @@ class TempRecordingModel(Base):
 
 class ConversationsModel(Base):
     """
-    ID = Conversation ID
+    ID = Conversation ID (16 char UUID)
     Created At = Timestamp when conversation was created
     Updated At = Timestamp when conversation was last updated
-    Conversation File = Path to the JSON file containing conversation history
+    Discord Thread ID = Discord Thread ID where the chat is located
+    Chat Meta = JSON metadata for the conversation (stored as empty JSON by default)
+    Discord Requester ID = Discord User ID of the user who initiated the conversation
     Discord Guild ID = Discord Guild (Server) ID of the conversation
-    Discord Message ID = Discord Message ID of thread starter message
-    Requesting User ID = Discord User ID of the user who initiated the conversation
     """
 
     __tablename__ = "conversations"
@@ -260,10 +260,28 @@ class ConversationsModel(Base):
     id = Column(String(16), primary_key=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)
-    conversation_file = Column(String(512), nullable=False)
-    discord_guild_id = Column(String(20), nullable=False)
-    discord_message_id = Column(String(20), nullable=False)
-    requesting_user_id = Column(String(20), nullable=False)
+    discord_thread_id = Column(String(20), nullable=False, index=True)
+    chat_meta = Column(JSON, nullable=False, default=dict)
+    discord_requester_id = Column(String(20), nullable=False, index=True)
+    discord_guild_id = Column(String(20), nullable=False, index=True)
+
+
+class ConversationsStoreModel(Base):
+    """
+    ID = Conversations Store ID (16 char UUID)
+    Created At = Timestamp when store entry was created
+    Updated At = Timestamp when store entry was last updated
+    Session ID = Foreign Key to conversations table
+    Filename = Path/filename where chat is persisted on disk
+    """
+
+    __tablename__ = "conversations_store"
+
+    id = Column(String(16), primary_key=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+    session_id = Column(String(16), ForeignKey("conversations.id"), nullable=False, index=True)
+    filename = Column(String(512), nullable=False, index=True)
 
 
 class SubscriptionsModel(Base):
