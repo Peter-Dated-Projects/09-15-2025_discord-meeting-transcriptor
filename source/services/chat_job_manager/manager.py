@@ -33,6 +33,9 @@ from source.services.manager import Manager
 from source.utils import generate_16_char_uuid, get_current_timestamp_est
 from datetime import datetime
 
+# Maximum number of user messages to batch together
+MAX_MESSAGE_BATCH_SIZE = 5
+
 
 @dataclass
 class QueuedUserMessage:
@@ -99,7 +102,7 @@ class ChatJob(Job):
         await self.services.logging_service.info(f"Starting chat job for thread {self.thread_id}")
 
         try:
-            # Process initial message
+            # Process initial message (user attribution will be added when building LLM messages)
             await self._process_user_message(self.initial_message, self.initial_user_id)
 
             # Process queue until empty
@@ -130,7 +133,7 @@ class ChatJob(Job):
         Process a user message and generate AI response.
 
         Args:
-            message_content: The user's message content
+            message_content: The user's message content (may be pre-formatted with user labels)
             user_id: Discord user ID of the message sender
         """
         # Get conversation from in-memory cache
@@ -158,7 +161,7 @@ class ChatJob(Job):
         await self._set_conversation_status(ConversationStatus.THINKING)
 
         # Build message history for LLM
-        messages = self._build_llm_messages(conversation)
+        messages = await self._build_llm_messages(conversation)
 
         # Generate AI response WITH GPU LOCK
         try:
@@ -197,13 +200,13 @@ class ChatJob(Job):
 
     async def _process_message_queue(self) -> None:
         """
-        Process queued messages by concatenating sequential messages from same user.
+        Process queued messages by batching up to MAX_MESSAGE_BATCH_SIZE messages.
 
         This will:
-        1. Group consecutive messages from the same user
-        2. Concatenate them into single message
-        3. Process the concatenated message
-        4. Save individual messages to conversation
+        1. Collect up to 5 messages from any users
+        2. Save individual messages to conversation history (without formatting)
+        3. Build formatted prompt with user identification for LLM
+        4. Generate and send AI response
         """
         if len(self.message_queue) == 0:
             return
@@ -211,18 +214,10 @@ class ChatJob(Job):
         # Update status to processing queue
         await self._set_conversation_status(ConversationStatus.PROCESSING_QUEUE)
 
-        # Get first message
-        first_msg = self.message_queue.popleft()
-        current_user = first_msg.user_id
-        messages_to_process = [first_msg]
-
-        # Collect all consecutive messages from same user
-        while len(self.message_queue) > 0:
-            next_msg = self.message_queue[0]
-            if next_msg.user_id == current_user:
-                messages_to_process.append(self.message_queue.popleft())
-            else:
-                break
+        # Collect up to MAX_MESSAGE_BATCH_SIZE messages from the queue
+        messages_to_process = []
+        while len(self.message_queue) > 0 and len(messages_to_process) < MAX_MESSAGE_BATCH_SIZE:
+            messages_to_process.append(self.message_queue.popleft())
 
         # Get conversation
         conversation = self.services.conversation_manager.get_conversation(self.thread_id)
@@ -233,7 +228,7 @@ class ChatJob(Job):
             )
             return
 
-        # Add all individual messages to conversation
+        # Add all individual messages to conversation (original content, no formatting)
         for msg in messages_to_process:
             user_message = Message(
                 created_at=msg.timestamp,
@@ -243,28 +238,69 @@ class ChatJob(Job):
             )
             conversation.add_message(user_message)
 
-        # Concatenate message contents for LLM
-        concatenated_content = "\n\n".join([msg.content for msg in messages_to_process])
-
         # Save conversation (queued messages added)
         await conversation.save_conversation()
 
-        # Process the concatenated message
-        await self._process_user_message(concatenated_content, current_user)
+        # Update conversation status to thinking
+        await self._set_conversation_status(ConversationStatus.THINKING)
+
+        await self.services.logging_service.info(
+            f"Processing batch of {len(messages_to_process)} messages in thread {self.thread_id}"
+        )
+
+        # Build message history for LLM (with user attribution)
+        messages = await self._build_llm_messages(conversation)
+
+        # Generate AI response WITH GPU LOCK
+        try:
+            async with self.services.gpu_resource_manager.acquire_lock(
+                job_type="chatbot",
+                job_id=self.job_id,
+                metadata={
+                    "thread_id": self.thread_id,
+                    "conversation_id": self.conversation_id,
+                    "user_id": messages_to_process[-1].user_id,
+                },
+            ):
+                # GPU is now locked - perform LLM inference
+                response = await self._call_llm(messages)
+
+                await self.services.logging_service.info(
+                    f"Generated AI response for thread {self.thread_id}"
+                )
+
+            # GPU lock automatically released here
+
+        except Exception as e:
+            await self.services.logging_service.error(f"Failed to generate AI response: {str(e)}")
+            raise
+
+        # Parse and send AI response
+        await self._parse_and_send_response(response, conversation)
+
+        # Save conversation (AI response added)
+        await conversation.save_conversation()
+
+        # Update conversation timestamp in SQL
+        await self.services.conversations_sql_manager.update_conversation_timestamp(
+            self.conversation_id
+        )
 
     # -------------------------------------------------------------- #
     # LLM Interaction Methods
     # -------------------------------------------------------------- #
 
-    def _build_llm_messages(self, conversation: Conversation) -> list[dict[str, str]]:
+    async def _build_llm_messages(self, conversation: Conversation) -> list[dict[str, str]]:
         """
         Build message history for LLM from conversation.
+
+        Adds user attribution to all user messages to clearly identify speakers.
 
         Args:
             conversation: The conversation object
 
         Returns:
-            List of message dicts for LLM
+            List of message dicts for LLM with user attribution
         """
         messages = []
 
@@ -274,20 +310,36 @@ class ChatJob(Job):
             "You have access to conversation history and should provide "
             "thoughtful, contextual responses. You currently have no tools available. "
             "When thinking through complex requests, share your thought process. "
-            "Be concise yet thorough in your responses."
+            "Be concise yet thorough in your responses. "
+            "In group conversations, users are identified by their display names before their messages."
         )
         messages.append({"role": "system", "content": system_prompt})
 
-        # Add conversation history
+        # Collect all unique user IDs from conversation history
+        user_ids = set()
+        for msg in conversation.history:
+            if msg.message_type == MessageType.CHAT and msg.requester:
+                user_ids.add(msg.requester)
+
+        # Get display names for all users (batch fetch)
+        user_display_names = {}
+        if user_ids:
+            user_display_names = await self._get_user_display_names(list(user_ids))
+
+        # Add conversation history with user attribution
         for msg in conversation.history:
             if msg.message_type == MessageType.CHAT:
                 # Determine role based on requester
                 if msg.requester:
                     role = "user"
+                    # Add user attribution to the message content
+                    user_display = user_display_names.get(msg.requester, f"User {msg.requester}")
+                    content = f"{user_display}: {msg.message_content}"
                 else:
                     role = "assistant"
+                    content = msg.message_content
 
-                messages.append({"role": role, "content": msg.message_content})
+                messages.append({"role": role, "content": content})
 
             elif msg.message_type == MessageType.THINKING:
                 # Thinking messages are assistant's internal thoughts
@@ -402,6 +454,46 @@ class ChatJob(Job):
         #     pass
 
         return thinking_content, chat_content
+
+    async def _get_user_display_names(self, user_ids: list[str]) -> dict[str, str]:
+        """
+        Get display names for Discord user IDs.
+
+        Args:
+            user_ids: List of Discord user IDs
+
+        Returns:
+            Dictionary mapping user_id to display name
+        """
+        user_names = {}
+
+        try:
+            # Get Discord thread to access guild
+            thread = await self._get_discord_thread()
+
+            if not thread or not thread.guild:
+                # Fallback to user IDs if we can't get the thread/guild
+                return {user_id: f"User {user_id}" for user_id in user_ids}
+
+            # Fetch member objects for each user
+            for user_id in user_ids:
+                try:
+                    member = await thread.guild.fetch_member(int(user_id))
+                    # Use display name (nickname if set, otherwise username)
+                    user_names[user_id] = member.display_name
+                except Exception as e:
+                    # If we can't fetch a member, use a fallback
+                    await self.services.logging_service.debug(
+                        f"Could not fetch member {user_id}: {e}"
+                    )
+                    user_names[user_id] = f"User {user_id}"
+
+        except Exception as e:
+            await self.services.logging_service.error(f"Failed to get user display names: {e}")
+            # Fallback to user IDs
+            user_names = {user_id: f"User {user_id}" for user_id in user_ids}
+
+        return user_names
 
     async def _get_discord_thread(self):
         """
