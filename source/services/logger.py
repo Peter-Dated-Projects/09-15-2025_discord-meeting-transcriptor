@@ -208,13 +208,14 @@ class AsyncLoggingService(Manager):
 
     async def error(self, message: str, exc_info: bool = False) -> None:
         """Log an error message.
-        
+
         Args:
             message: The error message to log
             exc_info: If True, include exception information in the log
         """
         if exc_info:
             import traceback
+
             # Append the exception traceback to the message
             message = f"{message}\n{traceback.format_exc()}"
         await self.log(message, "ERROR")

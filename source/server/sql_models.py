@@ -148,7 +148,7 @@ class JobsStatusModel(Base):
 class JobsModel(Base):
     """
     Generic jobs table for non-meeting related jobs (e.g., chat, background tasks).
-    
+
     ID = Job ID (16 char UUID)
     Created At = Timestamp when job was created
     Updated At = Timestamp when job was last updated
