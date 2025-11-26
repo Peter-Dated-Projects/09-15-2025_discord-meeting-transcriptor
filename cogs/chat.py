@@ -207,11 +207,58 @@ class Chat(commands.Cog):
             thread_name = f"Chat with {message.author.name}"
 
             if isinstance(message.channel, discord.Thread):
-                # Already in a thread but no active conversation
+                # Already in a thread - check if conversation exists in SQL
                 thread = message.channel
                 thread_id = str(thread.id)
+
+                # Check if this thread already has a SQL entry (regardless of user)
+                existing_conversation_id = await self._get_conversation_id_from_thread(thread_id)
+
+                if existing_conversation_id:
+                    # Thread already has a conversation - load it into memory
+                    await self.services.logging_service.info(
+                        f"Thread {thread_id} already has conversation {existing_conversation_id}, loading into memory"
+                    )
+
+                    try:
+                        conversation = (
+                            await self.services.conversation_manager.load_conversation_from_storage(
+                                thread_id=thread_id,
+                                conversations_sql_manager=self.services.conversations_sql_manager,
+                                conversation_file_manager=self.services.conversation_file_manager,
+                            )
+                        )
+
+                        if conversation:
+                            await self.services.logging_service.info(
+                                f"Loaded existing conversation for thread {thread_id} from storage"
+                            )
+
+                            # Create and queue chat job with existing conversation
+                            job_id = await self.services.chat_job_manager.create_and_queue_chat_job(
+                                thread_id=thread_id,
+                                conversation_id=existing_conversation_id,
+                                message=message_content,
+                                user_id=author_id,
+                            )
+
+                            await self.services.logging_service.info(
+                                f"Created and queued chat job {job_id} for existing conversation in thread {thread_id}"
+                            )
+
+                            return True
+                        else:
+                            await self.services.logging_service.warning(
+                                f"Failed to load conversation for thread {thread_id}, creating new one"
+                            )
+                    except Exception as e:
+                        await self.services.logging_service.error(
+                            f"Error loading conversation for thread {thread_id}: {e}, creating new one"
+                        )
+
+                # No existing conversation in SQL for this thread
                 await self.services.logging_service.info(
-                    f"Creating conversation in existing thread: {thread.name} ({thread_id})"
+                    f"Creating new conversation in existing thread: {thread.name} ({thread_id})"
                 )
             else:
                 # Create a new thread from the message
