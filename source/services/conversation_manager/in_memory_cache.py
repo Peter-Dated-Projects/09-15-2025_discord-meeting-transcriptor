@@ -277,6 +277,7 @@ class InMemoryConversationManager:
         IDLE_TIME: Time in seconds after which a conversation is removed from memory
         conversations: Dictionary mapping thread IDs to Conversation objects
         cleanup_tasks: Dictionary mapping thread IDs to cleanup task handles
+        known_thread_ids: Set of all thread IDs that exist in SQL (for fast lookup)
     """
 
     # 5 minutes in seconds
@@ -294,6 +295,7 @@ class InMemoryConversationManager:
         self.conversations: Dict[str, Conversation] = {}
         self.cleanup_tasks: Dict[str, asyncio.Task] = {}
         self.conversation_file_manager = conversation_file_manager
+        self.known_thread_ids: set[str] = set()
 
     def create_conversation(
         self,
@@ -331,6 +333,9 @@ class InMemoryConversationManager:
         # Store in memory
         self.conversations[thread_id] = conversation
 
+        # Add to known thread IDs cache
+        self.known_thread_ids.add(thread_id)
+
         # Schedule cleanup
         self._schedule_cleanup(thread_id)
 
@@ -346,6 +351,17 @@ class InMemoryConversationManager:
             Conversation object if found, None otherwise
         """
         return self.conversations.get(thread_id)
+
+    def is_conversation_thread(self, thread_id: str) -> bool:
+        """Check if a given thread ID corresponds to an active conversation.
+
+        Args:
+            thread_id: Discord thread ID
+
+        Returns:
+            True if the thread has an active conversation, False otherwise
+        """
+        return thread_id in self.conversations
 
     def add_message_to_conversation(
         self, thread_id: str, message: Message
@@ -437,6 +453,144 @@ class InMemoryConversationManager:
             results[thread_id] = success
 
         return results
+
+    def is_known_thread(self, thread_id: str) -> bool:
+        """Check if a thread ID exists in the SQL cache.
+
+        This is a fast O(1) lookup to determine if a thread exists in SQL
+        without querying the database.
+
+        Args:
+            thread_id: Discord thread ID
+
+        Returns:
+            True if the thread is known to exist in SQL, False otherwise
+        """
+        return thread_id in self.known_thread_ids
+
+    async def refresh_thread_id_cache(self, conversations_sql_manager) -> int:
+        """Refresh the cache of known thread IDs from SQL.
+
+        Args:
+            conversations_sql_manager: Reference to ConversationsSQLManagerService
+
+        Returns:
+            Number of thread IDs loaded into cache
+        """
+        try:
+            # Get all thread IDs from SQL
+            thread_ids = await conversations_sql_manager.get_all_thread_ids()
+
+            # Update the cache
+            self.known_thread_ids = set(thread_ids)
+
+            return len(self.known_thread_ids)
+        except Exception as e:
+            # Log error but don't fail - return 0 to indicate no threads loaded
+            return 0
+
+    async def load_conversation_from_storage(
+        self,
+        thread_id: str,
+        conversations_sql_manager,
+        conversation_file_manager,
+    ) -> Optional[Conversation]:
+        """Load a conversation from SQL and file storage into memory.
+
+        This method:
+        1. Retrieves conversation metadata from SQL
+        2. Loads conversation data from file storage
+        3. Creates a Conversation object and adds it to memory
+        4. Schedules cleanup for the conversation
+
+        Args:
+            thread_id: Discord thread ID
+            conversations_sql_manager: Reference to ConversationsSQLManagerService
+            conversation_file_manager: Reference to ConversationFileManagerService
+
+        Returns:
+            Conversation object if successfully loaded, None otherwise
+        """
+        try:
+            # Check if already in memory
+            if thread_id in self.conversations:
+                return self.conversations[thread_id]
+
+            # Get conversation metadata from SQL
+            sql_conversation = await conversations_sql_manager.retrieve_conversation_by_thread_id(
+                thread_id
+            )
+
+            if not sql_conversation:
+                return None
+
+            # Get the conversation file data
+            # Note: We need the conversation store to get the filename
+            # For now, we'll reconstruct the filename from the metadata
+            guild_id = sql_conversation.get("discord_guild_id")
+            requester_id = sql_conversation.get("discord_requester_id")
+            created_at_str = sql_conversation.get("created_at")
+
+            if not guild_id or not requester_id:
+                return None
+
+            # Parse the created_at timestamp
+            if isinstance(created_at_str, str):
+                created_at = datetime.fromisoformat(created_at_str)
+            elif isinstance(created_at_str, datetime):
+                created_at = created_at_str
+            else:
+                created_at = datetime.now()
+
+            # Build expected filename
+            date_str = created_at.strftime("%Y-%m-%d")
+            filename = f"{date_str}_conversation-with-{requester_id}-in-{guild_id}.json"
+
+            # Try to load the conversation file
+            # Note: We need to read the file directly since conversation_file_manager
+            # might not have a method to load by filename
+            import json
+            import os
+
+            file_path = os.path.join(conversation_file_manager.conversation_storage_path, filename)
+
+            if not os.path.exists(file_path):
+                # File doesn't exist, create a minimal conversation from SQL data
+                conversation = Conversation(
+                    thread_id=thread_id,
+                    created_at=created_at,
+                    guild_id=guild_id,
+                    guild_name=sql_conversation.get("chat_meta", {}).get("guild_name", "Unknown"),
+                    requester=requester_id,
+                    conversation_file_manager=conversation_file_manager,
+                )
+            else:
+                # Load conversation from file
+                loop = asyncio.get_event_loop()
+                with open(file_path, "r", encoding="utf-8") as f:
+                    conversation_data = json.load(f)
+
+                # Create Conversation object from JSON
+                conversation = Conversation.from_json(
+                    data=conversation_data,
+                    thread_id=thread_id,
+                    conversation_file_manager=conversation_file_manager,
+                )
+
+            # Add to memory
+            self.conversations[thread_id] = conversation
+
+            # Add to known thread IDs cache
+            self.known_thread_ids.add(thread_id)
+
+            # Schedule cleanup
+            self._schedule_cleanup(thread_id)
+
+            return conversation
+
+        except Exception as e:
+            # Log error and return None
+            return None
 
     async def shutdown(self) -> None:
         """Gracefully shutdown the manager by cancelling all cleanup tasks."""

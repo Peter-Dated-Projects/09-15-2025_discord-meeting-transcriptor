@@ -83,6 +83,7 @@ await manager.shutdown()
 |--------|---------|
 | `create_conversation()` | Create new conversation in memory |
 | `get_conversation()` | Retrieve by thread_id |
+| `is_conversation_thread()` | Check if thread has active conversation |
 | `add_message_to_conversation()` | Add message & reset timer |
 | `remove_conversation()` | Manual removal |
 | `get_all_conversations()` | Get all active |
@@ -240,6 +241,32 @@ async def on_message(message):
         
         # ... process and respond ...
 ```
+
+### Thread-based Message Filtering
+```python
+# Filter messages to check if they're in conversation threads
+@bot.event
+async def on_message(message):
+    # Ignore bot messages
+    if message.author.bot:
+        return
+    
+    # Check if message is in a thread with active conversation
+    if isinstance(message.channel, discord.Thread):
+        thread_id = str(message.channel.id)
+        if manager.is_conversation_thread(thread_id):
+            # Message is in an active conversation thread
+            # Handle it even without bot mention
+            await handle_conversation_message(message, thread_id)
+            return
+    
+    # Otherwise, check for bot mention to start new conversation
+    if bot.user in message.mentions:
+        await start_new_conversation(message)
+```
+
+This pattern allows conversations to continue naturally in threads without requiring
+users to mention the bot in every message.
 
 ## 🎨 Message Type Patterns
 

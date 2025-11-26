@@ -256,6 +256,52 @@ class ConversationsSQLManagerService(Manager):
         )
         return results if isinstance(results, list) else []
 
+    async def get_all_thread_ids(self) -> list[str]:
+        """
+        Retrieve all Discord thread IDs from the conversations table.
+
+        This is optimized to return only the thread IDs for efficient caching.
+
+        Returns:
+            List of Discord thread IDs
+
+        Raises:
+            Exception: If query fails
+        """
+        try:
+            # Build select query for just the thread_id column
+            query = select(ConversationsModel.discord_thread_id)
+
+            # Execute query
+            results = await self.server.sql_client.execute(query)
+
+            # Extract thread IDs from results
+            thread_ids = []
+            if results:
+                # Results should be a list of Row objects or dicts
+                for row in results:
+                    if isinstance(row, dict):
+                        thread_ids.append(row.get("discord_thread_id"))
+                    else:
+                        # If it's a Row object with attributes
+                        thread_ids.append(
+                            row.discord_thread_id
+                            if hasattr(row, "discord_thread_id")
+                            else str(row[0])
+                        )
+
+            await self.services.logging_service.debug(
+                f"Retrieved {len(thread_ids)} thread IDs from conversations table"
+            )
+            return thread_ids
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to retrieve thread IDs: {e}", exc_info=True
+            )
+            # Return empty list on error rather than failing
+            return []
+
     async def retrieve_conversations_by_time_range(
         self,
         start_time: datetime | None = None,

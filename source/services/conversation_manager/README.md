@@ -159,6 +159,24 @@ if conversation:
     print(f"Last updated: {conversation.updated_at}")
 ```
 
+### Checking if a Thread has an Active Conversation
+
+```python
+# Check if a Discord thread has an active conversation
+thread_id = str(message.channel.id)
+if conversation_manager.is_conversation_thread(thread_id):
+    print(f"Thread {thread_id} has an active conversation")
+    # Handle message in existing conversation
+else:
+    print(f"Thread {thread_id} does not have an active conversation")
+    # Create new conversation or ignore message
+```
+
+This is useful for:
+- Filtering messages in Discord event handlers
+- Determining if a message should be processed as part of an ongoing conversation
+- Checking conversation state before performing actions
+
 ### Saving a Conversation to Disk
 
 ```python
