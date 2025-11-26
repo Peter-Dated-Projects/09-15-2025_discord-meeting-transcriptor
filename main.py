@@ -228,9 +228,6 @@ async def on_message(message: discord.Message):
     # Process the message through the handler chain
     await message_event_handler.process_message(message)
 
-    # Allow other bot commands to still work
-    await bot.process_commands(message)
-
 
 async def _ensure_guild_subscription_and_collection(guilds: list[discord.Guild]) -> None:
     """

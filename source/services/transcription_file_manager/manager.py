@@ -6,8 +6,6 @@ import os
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-import aiofiles
-
 if TYPE_CHECKING:
     from source.context import Context
 
@@ -104,15 +102,16 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
 
         # Build filename
         filename = self._build_transcript_filename(meeting_id, user_id, transcript_id)
-        file_path = os.path.join(self.storage_path, filename)
+        # Build absolute path to ensure file_manager doesn't double-join
+        file_path = os.path.abspath(os.path.join(self.storage_path, filename))
 
         try:
-            # Save JSON file
-            loop = asyncio.get_event_loop()
+            # Convert to JSON bytes
+            json_content = json.dumps(transcript_data, indent=2, ensure_ascii=False)
+            data_bytes = json_content.encode("utf-8")
 
-            # Write the JSON file asynchronously
-            async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:
-                await f.write(json.dumps(transcript_data, indent=2, ensure_ascii=False))
+            # Use file_manager's atomic save operation
+            await self.services.file_service_manager.save_file(file_path, data_bytes)
 
             await self.services.logging_service.info(f"Saved transcription JSON file: {filename}")
 
@@ -143,6 +142,7 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
                 f"Failed to save transcription {transcript_id}: {str(e)}"
             )
             # Clean up file if SQL insert failed
+            loop = asyncio.get_event_loop()
             if await loop.run_in_executor(None, os.path.exists, file_path):
                 await loop.run_in_executor(None, os.remove, file_path)
             raise RuntimeError(f"Failed to save transcription: {str(e)}") from e
@@ -174,17 +174,13 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             transcript_model = result[0]
             filename = transcript_model["transcript_filename"]
 
-            # Read the JSON file
-            file_path = os.path.join(self.storage_path, filename)
+            # Read the JSON file using file_manager
+            # Build absolute path to ensure file_manager doesn't double-join
+            file_path = os.path.abspath(os.path.join(self.storage_path, filename))
 
-            loop = asyncio.get_event_loop()
-            if not await loop.run_in_executor(None, os.path.exists, file_path):
-                await self.services.logging_service.error(f"Transcript file not found: {filename}")
-                return None
-
-            async with aiofiles.open(file_path, encoding="utf-8") as f:
-                content = await f.read()
-                transcript_data = json.loads(content)
+            # Use file_manager's read operation (accepts absolute paths)
+            data_bytes = await self.services.file_service_manager.read_file(file_path)
+            transcript_data = json.loads(data_bytes.decode("utf-8"))
 
             await self.services.logging_service.info(f"Retrieved transcription: {transcript_id}")
 
@@ -234,13 +230,14 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             )
 
             # Delete the JSON file
-            file_path = os.path.join(self.storage_path, filename)
+            # Build absolute path to ensure file_manager doesn't double-join
+            file_path = os.path.abspath(os.path.join(self.storage_path, filename))
 
-            loop = asyncio.get_event_loop()
-            if await loop.run_in_executor(None, os.path.exists, file_path):
-                await loop.run_in_executor(None, os.remove, file_path)
+            # Use file_manager's delete operation (will check existence internally)
+            try:
+                await self.services.file_service_manager.delete_file(file_path)
                 await self.services.logging_service.info(f"Deleted transcription file: {filename}")
-            else:
+            except FileNotFoundError:
                 await self.services.logging_service.warning(
                     f"Transcription file not found (already deleted?): {filename}"
                 )
@@ -381,20 +378,15 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
 
             transcript_model = result[0]
             filename = transcript_model["transcript_filename"]
-            file_path = os.path.join(self.storage_path, filename)
+            # Build absolute path to ensure file_manager doesn't double-join
+            file_path = os.path.abspath(os.path.join(self.storage_path, filename))
 
-            # Check if file exists
-            loop = asyncio.get_event_loop()
-            if not await loop.run_in_executor(None, os.path.exists, file_path):
-                await self.services.logging_service.error(f"Transcript file not found: {filename}")
-                return False
-
-            # Convert transcript data to JSON and write atomically
+            # Convert transcript data to JSON bytes
             json_content = json.dumps(transcript_data, indent=2, ensure_ascii=False)
+            data_bytes = json_content.encode("utf-8")
 
-            # Write file atomically using aiofiles
-            async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:
-                await f.write(json_content)
+            # Use file_manager's update operation (accepts absolute paths)
+            await self.services.file_service_manager.update_file(file_path, data_bytes)
 
             await self.services.logging_service.info(
                 f"Updated transcription file: {filename} ({len(json_content)} bytes)"
@@ -541,7 +533,8 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             raise ValueError("Compiled transcript data cannot be empty")
 
         filename = self._build_compiled_transcript_filename(meeting_id)
-        file_path = os.path.join(self.compilations_storage_path, filename)
+        # Build absolute path to ensure file_manager doesn't double-join
+        file_path = os.path.abspath(os.path.join(self.compilations_storage_path, filename))
 
         try:
             # Convert to JSON bytes
@@ -553,18 +546,15 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             if not await loop.run_in_executor(None, os.path.exists, self.compilations_storage_path):
                 await loop.run_in_executor(None, os.makedirs, self.compilations_storage_path)
 
-            # Check if file already exists
-            if await loop.run_in_executor(None, os.path.exists, file_path):
+            # Check if file already exists - if so, use update instead of save
+            if await self.services.file_service_manager.file_exists(file_path):
                 await self.services.logging_service.warning(
                     f"Compiled transcript already exists, will update: {filename}"
                 )
-                # Use update instead of save
-                async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:
-                    await f.write(json_content)
+                await self.services.file_service_manager.update_file(file_path, data_bytes)
             else:
-                # Save new file
-                async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:
-                    await f.write(json_content)
+                # Save new file using file_manager
+                await self.services.file_service_manager.save_file(file_path, data_bytes)
 
             await self.services.logging_service.info(
                 f"Saved compiled transcription: {filename} ({len(data_bytes)} bytes)"
@@ -592,7 +582,8 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             RuntimeError: If file read fails
         """
         filename = self._build_compiled_transcript_filename(meeting_id)
-        file_path = os.path.join(self.compilations_storage_path, filename)
+        # Build absolute path to ensure file_manager doesn't double-join
+        file_path = os.path.abspath(os.path.join(self.compilations_storage_path, filename))
 
         try:
             loop = asyncio.get_event_loop()
@@ -602,10 +593,9 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
                 )
                 return None
 
-            # Read the JSON file
-            async with aiofiles.open(file_path, encoding="utf-8") as f:
-                content = await f.read()
-                compiled_data = json.loads(content)
+            # Read the JSON file using file_manager
+            data_bytes = await self.services.file_service_manager.read_file(file_path)
+            compiled_data = json.loads(data_bytes.decode("utf-8"))
 
             await self.services.logging_service.info(
                 f"Retrieved compiled transcription for meeting: {meeting_id}"
@@ -642,7 +632,8 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             RuntimeError: If update fails
         """
         filename = self._build_compiled_transcript_filename(meeting_id)
-        file_path = os.path.join(self.compilations_storage_path, filename)
+        # Build absolute path to ensure file_manager doesn't double-join
+        file_path = os.path.abspath(os.path.join(self.compilations_storage_path, filename))
 
         try:
             # Check if file exists
@@ -657,9 +648,8 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             json_content = json.dumps(compiled_data, indent=2, ensure_ascii=False)
             data_bytes = json_content.encode("utf-8")
 
-            # Write atomically
-            async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:
-                await f.write(json_content)
+            # Use file_manager's update operation
+            await self.services.file_service_manager.update_file(file_path, data_bytes)
 
             await self.services.logging_service.info(
                 f"Updated compiled transcription: {filename} ({len(data_bytes)} bytes)"
@@ -736,22 +726,22 @@ class TranscriptionFileManagerService(BaseTranscriptionFileServiceManager):
             RuntimeError: If deletion fails
         """
         filename = self._build_compiled_transcript_filename(meeting_id)
-        file_path = os.path.join(self.compilations_storage_path, filename)
+        # Build absolute path to ensure file_manager doesn't double-join
+        file_path = os.path.abspath(os.path.join(self.compilations_storage_path, filename))
 
         try:
-            loop = asyncio.get_event_loop()
-            if not await loop.run_in_executor(None, os.path.exists, file_path):
+            # Use file_manager's delete operation
+            try:
+                await self.services.file_service_manager.delete_file(file_path)
+                await self.services.logging_service.info(
+                    f"Deleted compiled transcription: {filename}"
+                )
+                return True
+            except FileNotFoundError:
                 await self.services.logging_service.warning(
                     f"Compiled transcript not found: {filename}"
                 )
                 return False
-
-            # Delete the file
-            await loop.run_in_executor(None, os.remove, file_path)
-
-            await self.services.logging_service.info(f"Deleted compiled transcription: {filename}")
-
-            return True
 
         except Exception as e:
             await self.services.logging_service.error(

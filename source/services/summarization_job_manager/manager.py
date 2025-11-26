@@ -133,10 +133,8 @@ class SummarizationJob(Job):
             The compiled transcript data or None if not found
         """
         try:
-            compiled_transcript = (
-                await self.services.transcription_file_manager.retrieve_compiled_transcription(
-                    self.meeting_id
-                )
+            compiled_transcript = await self.services.transcription_file_service_manager.retrieve_compiled_transcription(
+                self.meeting_id
             )
             return compiled_transcript
 
@@ -300,7 +298,7 @@ class SummarizationJob(Job):
 
         try:
             # Use transcription_file_manager to update compiled transcript
-            success = await self.services.transcription_file_manager.update_compiled_transcription_with_summary(
+            success = await self.services.transcription_file_service_manager.update_compiled_transcription_with_summary(
                 meeting_id=self.meeting_id,
                 summary=final_summary,
                 summary_layers=summary_layers,
@@ -316,7 +314,7 @@ class SummarizationJob(Job):
             # Get the file path for SQL update
             filename = f"transcript_{self.meeting_id}.json"
             compilations_storage_path = (
-                self.services.transcription_file_manager.compilations_storage_path
+                self.services.transcription_file_service_manager.compilations_storage_path
             )
             file_path = os.path.join(compilations_storage_path, filename)
 
@@ -377,7 +375,7 @@ class SummarizationJob(Job):
 
         try:
             # Use transcription_file_manager's bulk update method
-            results = await self.services.transcription_file_manager.bulk_update_transcriptions_with_summary(
+            results = await self.services.transcription_file_service_manager.bulk_update_transcriptions_with_summary(
                 transcript_ids=self.transcript_ids,
                 summary=final_summary,
                 summary_layers=summary_layers,

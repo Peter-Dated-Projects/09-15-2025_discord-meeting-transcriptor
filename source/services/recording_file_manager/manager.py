@@ -89,24 +89,13 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
         return os.path.basename(temporary_path)
 
     async def save_to_temp_file(self, filename: str, data: bytes) -> str:
-        """Save data to a temporary file."""
+        """Save data to a temporary file using file_manager's atomic operations."""
         try:
-            temp_path = os.path.join(self.temp_path, filename)
+            # Build absolute path to ensure file_manager doesn't double-join
+            temp_path = os.path.abspath(os.path.join(self.temp_path, filename))
 
-            # Write file directly using aiofiles (bypass file_service_manager which has wrong base path)
-            loop = asyncio.get_event_loop()
-
-            # Ensure parent directory exists (shouldn't be needed but defensive)
-            parent_dir = os.path.dirname(temp_path)
-            if not await loop.run_in_executor(None, os.path.exists, parent_dir):
-                await loop.run_in_executor(None, os.makedirs, parent_dir)
-
-            # Write file atomically
-            def write_file():
-                with open(temp_path, "wb") as f:
-                    f.write(data)
-
-            await loop.run_in_executor(None, write_file)
+            # Use file_manager's save operation (accepts absolute paths)
+            await self.services.file_service_manager.save_file(temp_path, data)
 
             await self.services.logging_service.info(
                 f"Saved recording to temp file: {filename} ({len(data)} bytes)"
@@ -144,12 +133,12 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
             raise
 
     async def delete_persistent_file(self, filename: str) -> None:
-        """Delete a file from persistent storage."""
-        persistent_file_path = os.path.join(self.storage_path, filename)
+        """Delete a file from persistent storage using file_manager."""
+        # Build absolute path to ensure file_manager doesn't double-join
+        persistent_file_path = os.path.abspath(os.path.join(self.storage_path, filename))
         try:
-            # Use asyncio executor for file deletion
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, os.remove, persistent_file_path)
+            # Use file_manager's delete operation (accepts absolute paths)
+            await self.services.file_service_manager.delete_file(persistent_file_path)
 
             await self.services.logging_service.info(
                 f"Deleted persistent recording file: {filename}"
@@ -163,12 +152,12 @@ class RecordingFileManagerService(BaseRecordingFileServiceManager):
             raise
 
     async def delete_temp_file(self, filename: str) -> None:
-        """Delete a file from temporary storage."""
-        temp_file_path = os.path.join(self.temp_path, filename)
+        """Delete a file from temporary storage using file_manager."""
+        # Build absolute path to ensure file_manager doesn't double-join
+        temp_file_path = os.path.abspath(os.path.join(self.temp_path, filename))
         try:
-            # Use asyncio executor for file deletion
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, os.remove, temp_file_path)
+            # Use file_manager's delete operation (accepts absolute paths)
+            await self.services.file_service_manager.delete_file(temp_file_path)
 
             await self.services.logging_service.info(
                 f"Deleted temporary recording file: {filename}"
