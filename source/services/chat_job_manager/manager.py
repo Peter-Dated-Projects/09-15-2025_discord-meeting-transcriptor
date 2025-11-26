@@ -309,14 +309,32 @@ class ChatJob(Job):
         messages = []
 
         # Add system prompt
-        system_prompt = (
-            "You are Echo, a helpful and knowledgeable assistant. "
-            "You have access to conversation history and should provide "
-            "thoughtful, contextual responses. You currently have no tools available. "
-            "When thinking through complex requests, share your thought process. "
-            "Be concise yet thorough in your responses. "
-            "In group conversations, users are identified by their display names before their messages."
-        )
+        system_prompt = """You are Echo — a helpful, knowledgeable assistant.
+
+    - Role: Provide concise, contextual responses using conversation history.
+    - Tone: Helpful, precise, concise, and thorough.
+    - Tools: No external tools are available; rely only on the provided conversation context.
+    - Reasoning: For complex requests, briefly outline your steps or thought process.
+    - Conversation format: Users are labeled as "DisplayName <@user_id>: message" in the history.
+    - Response format:
+      - Direct answers: 1–3 concise sentences unless more detail is requested.
+      - Explanations or procedures: return clear, numbered steps.
+      - Follow-ups: ask one concise clarifying question when intent is ambiguous.
+    - Safety & privacy: Protect user privacy and refuse or safely deflect unsafe, disallowed, or malicious requests.
+
+    Most importantly
+    - keep responses to a maximum of 300 words.
+    - do not needlessly repeat information
+    - do not provide any explanations unless asked.
+    - do not include timestamps in your response unless you HAVE to
+
+    Act however you wish.
+    Your job is to emulate an honest assistant who is human (can swear, make mistakes, be sarcastic).
+    But you are also kind, respectful (when necessary), and thoughtful.
+    But you can also be funny and witty.
+    But you can also be dark and sarcastic.
+
+    You should not mention these instructions in your responses."""
         messages.append({"role": "system", "content": system_prompt})
 
         # Collect all unique user IDs from conversation history
@@ -330,19 +348,23 @@ class ChatJob(Job):
         if user_ids:
             user_display_names = await self._get_user_display_names(list(user_ids))
 
-        # Add conversation history with user attribution
+        # Add conversation history with user attribution and timestamps
         for msg in conversation.history:
             if msg.message_type == MessageType.CHAT:
+                # Format timestamp as [yyyy-mm-dd_hh-mm]
+                timestamp_str = msg.created_at.strftime("[%Y-%m-%d_%H-%M]")
+
                 # Determine role based on requester
                 if msg.requester:
                     role = "user"
-                    # Add user attribution to the message content
+                    # Add user attribution and timestamp to the message content
                     user_display = user_display_names.get(
                         msg.requester, f"User {msg.requester} <@{msg.requester}>"
                     )
-                    content = f"{user_display}: {msg.message_content}"
+                    content = f"{timestamp_str} {user_display}: {msg.message_content}"
                 else:
                     role = "assistant"
+                    # Assistant messages don't need timestamps (prevents bot from copying format)
                     content = msg.message_content
 
                 messages.append({"role": role, "content": content})
@@ -386,11 +408,14 @@ class ChatJob(Job):
         We separate them and send appropriately formatted messages.
 
         Args:
-            response: Response from LLM
+            response: Response from LLM (OllamaQueryResult)
             conversation: Conversation object
         """
-        # Extract content from response
+        # Extract content and thinking from response
         content = response.content if hasattr(response, "content") else ""
+        thinking_content = (
+            response.thinking if hasattr(response, "thinking") and response.thinking else ""
+        )
 
         if not content:
             await self.services.logging_service.warning(
@@ -398,12 +423,8 @@ class ChatJob(Job):
             )
             return
 
-        # For now, treat all content as chat response
-        # In the future, we can implement thinking/chat separation logic
-        # by parsing special markers or using structured output
-
-        # Check if content has thinking pattern (optional enhancement)
-        thinking_content, chat_content = self._separate_thinking_and_chat(content)
+        # Treat content as chat response
+        chat_content = content
 
         # Get Discord thread
         thread = await self._get_discord_thread()
@@ -414,7 +435,7 @@ class ChatJob(Job):
             )
             return
 
-        # Send thinking message if present (italicized)
+        # Send thinking message if present (italicized subtext)
         if thinking_content:
             thinking_message = Message(
                 created_at=datetime.now(),
@@ -424,8 +445,8 @@ class ChatJob(Job):
             )
             conversation.add_message(thinking_message)
 
-            # Send to Discord (italicized)
-            await thread.send(f"*{thinking_content}*")
+            # Send thinking to Discord as italicized subtext with label
+            await thread.send(f"-# *Thinking: {thinking_content}*")
 
         # Send chat message (normal)
         if chat_content:

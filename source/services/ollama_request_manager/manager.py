@@ -109,6 +109,7 @@ class OllamaQueryResult:
     content: str
     model: str
     done: bool
+    thinking: str | None = None  # Thinking process from models that support it
     total_duration: int | None = None  # nanoseconds
     load_duration: int | None = None
     prompt_eval_count: int | None = None
@@ -402,6 +403,7 @@ class OllamaRequestManager(Manager):
                     content=content,
                     model=response.get("model", query_input.model),
                     done=response.get("done", True),
+                    thinking=thinking if thinking else None,  # Store original thinking
                     total_duration=response.get("total_duration"),
                     load_duration=response.get("load_duration"),
                     prompt_eval_count=response.get("prompt_eval_count"),
