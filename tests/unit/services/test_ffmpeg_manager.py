@@ -21,7 +21,7 @@ class TestFFmpegHandlerValidation:
     """Test FFmpeg handler validation logic."""
 
     @pytest.fixture
-    def ffmpeg_handler_from_services(self, tmp_path):
+    def ffmpeg_handler_from_services(self, tmp_path, shared_test_log_file):
         """Provide FFmpeg handler constructed through services manager."""
         import asyncio
 
@@ -43,6 +43,7 @@ class TestFFmpegHandlerValidation:
             storage_path = str(tmp_path / "data")
             recording_storage_path = str(tmp_path / "data" / "recordings")
             transcription_storage_path = str(tmp_path / "data" / "transcriptions")
+            conversation_storage_path = str(tmp_path / "data" / "conversations")
 
             services_manager = construct_services_manager(
                 ServerManagerType.DEVELOPMENT,
@@ -50,6 +51,9 @@ class TestFFmpegHandlerValidation:
                 storage_path=storage_path,
                 recording_storage_path=recording_storage_path,
                 transcription_storage_path=transcription_storage_path,
+                conversation_storage_path=conversation_storage_path,
+                log_file=shared_test_log_file,
+                use_timestamp_logs=False,
             )
             await services_manager.initialize_all()
 
@@ -113,7 +117,7 @@ class TestFFmpegHandlerConversion:
     """Test FFmpeg handler conversion with real file conversions."""
 
     @pytest.fixture
-    def ffmpeg_handler_and_services(self, tmp_path):
+    def ffmpeg_handler_and_services(self, tmp_path, shared_test_log_file):
         """Provide FFmpeg handler and services manager via constructors."""
         import asyncio
 
@@ -135,6 +139,7 @@ class TestFFmpegHandlerConversion:
             storage_path = str(tmp_path / "data")
             recording_storage_path = str(tmp_path / "data" / "recordings")
             transcription_storage_path = str(tmp_path / "data" / "transcriptions")
+            conversation_storage_path = str(tmp_path / "data" / "conversations")
 
             services_manager = construct_services_manager(
                 ServerManagerType.DEVELOPMENT,
@@ -142,6 +147,9 @@ class TestFFmpegHandlerConversion:
                 storage_path=storage_path,
                 recording_storage_path=recording_storage_path,
                 transcription_storage_path=transcription_storage_path,
+                conversation_storage_path=conversation_storage_path,
+                log_file=shared_test_log_file,
+                use_timestamp_logs=False,
             )
             await services_manager.initialize_all()
 

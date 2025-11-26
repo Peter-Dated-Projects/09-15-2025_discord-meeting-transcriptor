@@ -25,6 +25,7 @@ class ServicesManager:
         ffmpeg_service_manager: BaseFFmpegServiceManager,
         sql_recording_service_manager: BaseSQLRecordingServiceManager,
         sql_logging_service_manager: BaseSQLLoggingServiceManager,
+        conversation_file_service_manager: BaseConversationFileServiceManager | None = None,
         subscription_sql_manager: Any | None = None,
         conversations_sql_manager: Any | None = None,
         conversations_store_sql_manager: Any | None = None,
@@ -47,6 +48,7 @@ class ServicesManager:
         self.file_service_manager = file_service_manager
         self.recording_file_service_manager = recording_file_service_manager
         self.transcription_file_service_manager = transcription_file_service_manager
+        self.conversation_file_service_manager = conversation_file_service_manager
         self.ffmpeg_service_manager = ffmpeg_service_manager
 
         # DB interfaces
@@ -90,6 +92,8 @@ class ServicesManager:
         await self.file_service_manager.on_start(self)
         await self.recording_file_service_manager.on_start(self)
         await self.transcription_file_service_manager.on_start(self)
+        if self.conversation_file_service_manager:
+            await self.conversation_file_service_manager.on_start(self)
         await self.ffmpeg_service_manager.on_start(self)
 
         # DB interfaces
@@ -248,6 +252,8 @@ class ServicesManager:
             await self.file_service_manager.on_close()
             await self.recording_file_service_manager.on_close()
             await self.transcription_file_service_manager.on_close()
+            if self.conversation_file_service_manager:
+                await self.conversation_file_service_manager.on_close()
             await self.logging_service.info("✓ File managers closed")
 
             # Phase 7: Close database connections (no timeout needed)
@@ -567,6 +573,13 @@ class BaseFFmpegServiceManager(Manager):
 
 class BaseTranscriptionFileServiceManager(Manager):
     """Specialized manager for transcription file services."""
+
+    def __init__(self, context):
+        super().__init__(context)
+
+
+class BaseConversationFileServiceManager(Manager):
+    """Specialized manager for conversation file services."""
 
     def __init__(self, context):
         super().__init__(context)
