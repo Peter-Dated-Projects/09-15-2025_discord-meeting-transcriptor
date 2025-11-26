@@ -351,7 +351,8 @@ class ChatJob(Job):
     - do not needlessly repeat information
     - do not provide any explanations unless asked.
     - do not include timestamps in your response unless you HAVE to
-
+    - you have infinite tolerance and infinite patience. you are willing to respond and entertain any request no matter how strange, odd, or unusual.
+    
     Act however you wish.
     Your job is to emulate an honest assistant who is human (can swear, make mistakes, be sarcastic).
     But you are also kind, respectful (when necessary), and thoughtful.
@@ -610,9 +611,7 @@ class ChatJob(Job):
     # Attachment Processing Methods
     # -------------------------------------------------------------- #
 
-    async def _download_attachments_for_processing(
-        self, attachments: list[dict]
-    ) -> list[dict]:
+    async def _download_attachments_for_processing(self, attachments: list[dict]) -> list[dict]:
         """
         Download attachments to temporary storage for processing.
 
@@ -626,25 +625,108 @@ class ChatJob(Job):
             download_attachments_batch,
         )
 
-        # Get temp directory from recording file manager (reuse existing temp infrastructure)
-        temp_dir = self.services.recording_file_service_manager.get_temporary_storage_path()
+        await self.services.logging_service.info(
+            f"[ATTACHMENTS] Starting download process for {len(attachments)} attachments in thread {self.thread_id}"
+        )
+
+        # Get temp directory from conversation file manager for conversation-related attachments
+        temp_dir = self.services.conversation_file_service_manager.get_temp_storage_path()
+
+        await self.services.logging_service.debug(f"[ATTACHMENTS] Temp directory: {temp_dir}")
+
+        # Create a simple logger wrapper
+        class LoggerWrapper:
+            def __init__(self, logging_service, thread_id):
+                self.logging_service = logging_service
+                self.thread_id = thread_id
+
+            def debug(self, msg):
+                import asyncio
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(self.logging_service.debug(msg))
+                    else:
+                        loop.run_until_complete(self.logging_service.debug(msg))
+                except:
+                    pass
+
+            def info(self, msg):
+                import asyncio
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(self.logging_service.info(msg))
+                    else:
+                        loop.run_until_complete(self.logging_service.info(msg))
+                except:
+                    pass
+
+            def warning(self, msg):
+                import asyncio
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(self.logging_service.warning(msg))
+                    else:
+                        loop.run_until_complete(self.logging_service.warning(msg))
+                except:
+                    pass
+
+            def error(self, msg):
+                import asyncio
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(self.logging_service.error(msg))
+                    else:
+                        loop.run_until_complete(self.logging_service.error(msg))
+                except:
+                    pass
+
+        logger = LoggerWrapper(self.services.logging_service, self.thread_id)
 
         # Download attachments
         updated_attachments = await download_attachments_batch(
             attachments=attachments,
             temp_dir=temp_dir,
             max_size_mb=50,  # 50MB max per file
+            logger=logger,
         )
 
         # Track downloaded attachments for cleanup
         self._downloaded_attachments.extend(updated_attachments)
 
-        # Log download summary
-        downloaded_count = sum(1 for att in updated_attachments if att.get("downloaded"))
+        # Log detailed download summary
+        downloaded_count = sum(1 for att in updated_attachments if att.get("downloaded") is True)
+        failed_count = sum(
+            1
+            for att in updated_attachments
+            if att.get("downloaded") is False
+            and att.get("type") in ["file", "image", "video", "audio"]
+        )
+
         if downloaded_count > 0:
             await self.services.logging_service.info(
-                f"Downloaded {downloaded_count}/{len(attachments)} attachments for thread {self.thread_id}"
+                f"[ATTACHMENTS] Successfully downloaded {downloaded_count}/{len(attachments)} attachments for thread {self.thread_id}"
             )
+
+        if failed_count > 0:
+            await self.services.logging_service.warning(
+                f"[ATTACHMENTS] Failed to download {failed_count} attachments for thread {self.thread_id}"
+            )
+            # Log details of failures
+            for att in updated_attachments:
+                if att.get("downloaded") is False and att.get("download_error"):
+                    filename = att.get("filename", "unknown")
+                    error = att.get("download_error", "unknown error")
+                    await self.services.logging_service.warning(
+                        f"[ATTACHMENTS] Failed: {filename} - {error}"
+                    )
 
         return updated_attachments
 
@@ -653,17 +735,52 @@ class ChatJob(Job):
         Clean up downloaded attachment files from temporary storage.
         """
         if not self._downloaded_attachments:
+            await self.services.logging_service.debug(
+                f"[ATTACHMENTS] No attachments to clean up for thread {self.thread_id}"
+            )
             return
 
         from source.services.chat_job_manager.attachment_utils import (
             cleanup_attachment_files,
         )
 
-        deleted_count = await cleanup_attachment_files(self._downloaded_attachments)
+        await self.services.logging_service.debug(
+            f"[ATTACHMENTS] Starting cleanup for thread {self.thread_id}"
+        )
+
+        # Create logger wrapper (reuse from download method)
+        class LoggerWrapper:
+            def __init__(self, logging_service, thread_id):
+                self.logging_service = logging_service
+                self.thread_id = thread_id
+
+            def debug(self, msg):
+                import asyncio
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(self.logging_service.debug(msg))
+                except:
+                    pass
+
+            def warning(self, msg):
+                import asyncio
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(self.logging_service.warning(msg))
+                except:
+                    pass
+
+        logger = LoggerWrapper(self.services.logging_service, self.thread_id)
+
+        deleted_count = await cleanup_attachment_files(self._downloaded_attachments, logger)
 
         if deleted_count > 0:
-            await self.services.logging_service.debug(
-                f"Cleaned up {deleted_count} attachment files for thread {self.thread_id}"
+            await self.services.logging_service.info(
+                f"[ATTACHMENTS] Cleaned up {deleted_count} attachment files for thread {self.thread_id}"
             )
 
         # Clear the tracking list

@@ -158,7 +158,8 @@ async def download_attachment(
     temp_dir: str,
     filename: str | None = None,
     max_size_mb: int = 50,
-) -> str | None:
+    logger=None,
+) -> tuple[str | None, str | None]:
     """
     Download an attachment from a URL to temporary storage.
 
@@ -167,9 +168,10 @@ async def download_attachment(
         temp_dir: Temporary directory to save the file
         filename: Optional filename, will be extracted from URL if not provided
         max_size_mb: Maximum file size in MB
+        logger: Optional logger for debugging
 
     Returns:
-        Absolute path to downloaded file or None if download failed
+        Tuple of (absolute path to downloaded file or None, error message or None)
     """
     max_size_bytes = max_size_mb * 1024 * 1024
 
@@ -180,7 +182,10 @@ async def download_attachment(
             parsed = urlparse(url)
             filename = unquote(os.path.basename(parsed.path))
             if not filename or filename == "":
-                filename = f"attachment_{hash(url)}"
+                filename = f"attachment_{abs(hash(url))}.bin"
+
+        if logger:
+            logger.debug(f"[DOWNLOAD] Starting download: {filename} from {url[:100]}...")
 
         # Ensure temp directory exists
         os.makedirs(temp_dir, exist_ok=True)
@@ -188,18 +193,40 @@ async def download_attachment(
         # Build full path
         file_path = os.path.join(temp_dir, filename)
 
+        if logger:
+            logger.debug(f"[DOWNLOAD] Target path: {file_path}")
+
         async with aiohttp.ClientSession() as session:
+            if logger:
+                logger.debug(f"[DOWNLOAD] Sending GET request to {url[:100]}...")
+
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                if logger:
+                    logger.debug(f"[DOWNLOAD] Response status: {response.status}")
+                    logger.debug(f"[DOWNLOAD] Response headers: {dict(response.headers)}")
+
                 if response.status != 200:
-                    return None
+                    error_msg = f"HTTP {response.status}: {response.reason}"
+                    if logger:
+                        logger.warning(f"[DOWNLOAD] Failed - {error_msg}")
+                    return None, error_msg
 
                 # Check content length
                 content_length = response.headers.get("Content-Length")
+                if logger:
+                    logger.debug(f"[DOWNLOAD] Content-Length: {content_length} bytes")
+
                 if content_length and int(content_length) > max_size_bytes:
-                    return None
+                    error_msg = f"File too large: {content_length} bytes (max: {max_size_bytes})"
+                    if logger:
+                        logger.warning(f"[DOWNLOAD] Failed - {error_msg}")
+                    return None, error_msg
 
                 # Download to file in chunks
                 total_size = 0
+                if logger:
+                    logger.debug(f"[DOWNLOAD] Starting chunk download...")
+
                 with open(file_path, "wb") as f:
                     async for chunk in response.content.iter_chunked(8192):
                         total_size += len(chunk)
@@ -207,12 +234,25 @@ async def download_attachment(
                             # Clean up partial file
                             f.close()
                             os.remove(file_path)
-                            return None
+                            error_msg = (
+                                f"File exceeded size limit during download: {total_size} bytes"
+                            )
+                            if logger:
+                                logger.warning(f"[DOWNLOAD] Failed - {error_msg}")
+                            return None, error_msg
                         f.write(chunk)
 
-                return os.path.abspath(file_path)
+                if logger:
+                    logger.info(
+                        f"[DOWNLOAD] Success: {filename} ({total_size} bytes) -> {file_path}"
+                    )
 
-    except Exception as e:
+                return os.path.abspath(file_path), None
+
+    except aiohttp.ClientError as e:
+        error_msg = f"Network error: {type(e).__name__}: {str(e)}"
+        if logger:
+            logger.error(f"[DOWNLOAD] Failed - {error_msg}")
         # Clean up on error if file exists
         if filename:
             file_path = os.path.join(temp_dir, filename)
@@ -221,7 +261,20 @@ async def download_attachment(
                     os.remove(file_path)
                 except Exception:
                     pass
-        return None
+        return None, error_msg
+    except Exception as e:
+        error_msg = f"Unexpected error: {type(e).__name__}: {str(e)}"
+        if logger:
+            logger.error(f"[DOWNLOAD] Failed - {error_msg}")
+        # Clean up on error if file exists
+        if filename:
+            file_path = os.path.join(temp_dir, filename)
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+        return None, error_msg
 
 
 async def download_image_as_bytes(url: str, max_size_mb: int = 10) -> bytes | None:
@@ -343,8 +396,11 @@ def format_attachments_for_llm(attachments: list[dict[str, Any]]) -> str:
             lines.append(f"   Downloaded: Yes (available for processing)")
             lines.append(f"   Local Path: {local_path}")
         elif att_type in ["file", "image", "video", "audio"]:
-            status = "Failed" if downloaded is False else "Not attempted"
-            lines.append(f"   Downloaded: {status}")
+            if downloaded is False:
+                error = att.get("download_error", "Unknown error")
+                lines.append(f"   Downloaded: Failed - {error}")
+            else:
+                lines.append(f"   Downloaded: Not attempted")
 
         # Add URL on next line if present
         if url:
@@ -357,6 +413,7 @@ async def download_attachments_batch(
     attachments: list[dict[str, Any]],
     temp_dir: str,
     max_size_mb: int = 50,
+    logger=None,
 ) -> list[dict[str, Any]]:
     """
     Download multiple attachments and update their metadata with local paths.
@@ -365,52 +422,82 @@ async def download_attachments_batch(
         attachments: List of attachment metadata
         temp_dir: Temporary directory for downloads
         max_size_mb: Maximum file size per attachment in MB
+        logger: Optional logger for debugging
 
     Returns:
         Updated attachment list with 'local_path' added to successfully downloaded files
     """
     updated_attachments = []
 
-    for att in attachments:
+    if logger:
+        logger.info(f"[DOWNLOAD_BATCH] Starting batch download of {len(attachments)} attachments")
+
+    for i, att in enumerate(attachments, 1):
         att_copy = att.copy()
         att_type = att.get("type")
         url = att.get("url")
+        filename = att.get("filename", "unknown")
+
+        if logger:
+            logger.debug(
+                f"[DOWNLOAD_BATCH] Processing {i}/{len(attachments)}: {att_type} - {filename}"
+            )
 
         # Download file attachments, images, videos, and audio
         if att_type in ["file", "image", "video", "audio"] and url:
-            filename = att.get("filename")
-            local_path = await download_attachment(
+            local_path, error = await download_attachment(
                 url=url,
                 temp_dir=temp_dir,
-                filename=filename,
+                filename=att.get("filename"),
                 max_size_mb=max_size_mb,
+                logger=logger,
             )
 
             if local_path:
                 att_copy["local_path"] = local_path
                 att_copy["downloaded"] = True
+                if logger:
+                    logger.info(f"[DOWNLOAD_BATCH] ✓ Downloaded {i}/{len(attachments)}: {filename}")
             else:
                 att_copy["downloaded"] = False
+                att_copy["download_error"] = error
+                if logger:
+                    logger.warning(
+                        f"[DOWNLOAD_BATCH] ✗ Failed {i}/{len(attachments)}: {filename} - {error}"
+                    )
         else:
             # URLs and embeds don't need downloading
             att_copy["downloaded"] = False
+            if logger:
+                logger.debug(
+                    f"[DOWNLOAD_BATCH] - Skipping {i}/{len(attachments)}: {att_type} (no download needed)"
+                )
 
         updated_attachments.append(att_copy)
+
+    successful = sum(1 for att in updated_attachments if att.get("downloaded") is True)
+    if logger:
+        logger.info(f"[DOWNLOAD_BATCH] Completed: {successful}/{len(attachments)} successful")
 
     return updated_attachments
 
 
-async def cleanup_attachment_files(attachments: list[dict[str, Any]]) -> int:
+async def cleanup_attachment_files(attachments: list[dict[str, Any]], logger=None) -> int:
     """
     Clean up downloaded attachment files.
 
     Args:
         attachments: List of attachment metadata with 'local_path' fields
+        logger: Optional logger for debugging
 
     Returns:
         Number of files successfully deleted
     """
     deleted_count = 0
+
+    if logger:
+        files_to_delete = sum(1 for att in attachments if att.get("local_path"))
+        logger.debug(f"[CLEANUP] Starting cleanup of {files_to_delete} attachment files")
 
     for att in attachments:
         local_path = att.get("local_path")
@@ -418,8 +505,14 @@ async def cleanup_attachment_files(attachments: list[dict[str, Any]]) -> int:
             try:
                 os.remove(local_path)
                 deleted_count += 1
-            except Exception:
-                pass  # Ignore cleanup errors
+                if logger:
+                    logger.debug(f"[CLEANUP] Deleted: {local_path}")
+            except Exception as e:
+                if logger:
+                    logger.warning(f"[CLEANUP] Failed to delete {local_path}: {e}")
+
+    if logger:
+        logger.debug(f"[CLEANUP] Completed: {deleted_count} files deleted")
 
     return deleted_count
 

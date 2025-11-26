@@ -137,6 +137,24 @@ class Chat(commands.Cog):
             # Extract attachments from the message
             attachments = await extract_attachments_from_message(message)
 
+            # Log attachment extraction
+            if attachments:
+                await self.services.logging_service.info(
+                    f"[ATTACHMENTS] Extracted {len(attachments)} attachments from message {message_id}"
+                )
+                for i, att in enumerate(attachments, 1):
+                    att_type = att.get("type", "unknown")
+                    filename = att.get("filename", att.get("url", "unknown"))
+                    size = att.get("size")
+                    size_str = f" ({size} bytes)" if size else ""
+                    await self.services.logging_service.debug(
+                        f"[ATTACHMENTS] {i}. {att_type}: {filename}{size_str}"
+                    )
+            else:
+                await self.services.logging_service.debug(
+                    f"[ATTACHMENTS] No attachments in message {message_id}"
+                )
+
             # Check if message is in a thread with an active conversation
             if isinstance(message.channel, discord.Thread):
                 thread = message.channel

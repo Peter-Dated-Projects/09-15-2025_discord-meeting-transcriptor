@@ -608,6 +608,11 @@ class BaseConversationFileServiceManager(Manager):
     def __init__(self, context):
         super().__init__(context)
 
+    @abstractmethod
+    def get_temp_storage_path(self) -> str:
+        """Get the absolute temporary storage path for conversation attachments."""
+        pass
+
 
 class BaseDiscordRecorderServiceManager(Manager):
     """Specialized manager for Discord recorder services."""
