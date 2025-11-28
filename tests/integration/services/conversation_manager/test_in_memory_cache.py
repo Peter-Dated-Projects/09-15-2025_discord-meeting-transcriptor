@@ -515,3 +515,190 @@ async def test_manager_save_all_conversations():
     assert results["456"] is True
 
     await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_manager_is_conversation_thread():
+    """Test checking if a thread ID has an active conversation."""
+    manager = InMemoryConversationManager()
+
+    # Initially, no conversations exist
+    assert manager.is_conversation_thread("123") is False
+
+    # Create a conversation
+    manager.create_conversation(
+        thread_id="123",
+        guild_id="456",
+        guild_name="Test Guild",
+        requester="789",
+    )
+
+    # Now the thread should be recognized as a conversation thread
+    assert manager.is_conversation_thread("123") is True
+
+    # Non-existent thread should still return False
+    assert manager.is_conversation_thread("999") is False
+
+    # Remove the conversation
+    manager.remove_conversation("123")
+
+    # Thread should no longer be a conversation thread
+    assert manager.is_conversation_thread("123") is False
+
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_manager_known_thread_cache():
+    """Test the known thread ID cache functionality."""
+    manager = InMemoryConversationManager()
+
+    # Initially, cache should be empty
+    assert not manager.is_known_thread("123")
+    assert len(manager.known_thread_ids) == 0
+
+    # Create a conversation - should add to cache
+    manager.create_conversation(
+        thread_id="123",
+        guild_id="456",
+        guild_name="Test Guild",
+        requester="789",
+    )
+
+    # Thread should now be in cache
+    assert manager.is_known_thread("123")
+    assert "123" in manager.known_thread_ids
+
+    # Different thread should not be in cache
+    assert not manager.is_known_thread("999")
+
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_manager_refresh_thread_id_cache():
+    """Test refreshing thread ID cache from SQL."""
+    manager = InMemoryConversationManager()
+
+    # Mock SQL manager
+    mock_sql_manager = AsyncMock()
+    mock_sql_manager.get_all_thread_ids = AsyncMock(return_value=["thread1", "thread2", "thread3"])
+
+    # Refresh cache
+    count = await manager.refresh_thread_id_cache(mock_sql_manager)
+
+    # Should have loaded 3 thread IDs
+    assert count == 3
+    assert len(manager.known_thread_ids) == 3
+    assert manager.is_known_thread("thread1")
+    assert manager.is_known_thread("thread2")
+    assert manager.is_known_thread("thread3")
+    assert not manager.is_known_thread("thread4")
+
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_manager_load_conversation_already_in_memory():
+    """Test loading a conversation that's already in memory."""
+    manager = InMemoryConversationManager()
+
+    # Create a conversation in memory
+    original_conv = manager.create_conversation(
+        thread_id="123",
+        guild_id="456",
+        guild_name="Test Guild",
+        requester="789",
+    )
+
+    # Try to load it - should return the existing one
+    mock_sql_manager = AsyncMock()
+    mock_file_manager = AsyncMock()
+
+    loaded_conv = await manager.load_conversation_from_storage(
+        thread_id="123",
+        conversations_sql_manager=mock_sql_manager,
+        conversation_file_manager=mock_file_manager,
+    )
+
+    # Should return the same conversation object
+    assert loaded_conv is original_conv
+    assert loaded_conv.thread_id == "123"
+
+    # SQL should not have been called since it's already in memory
+    mock_sql_manager.retrieve_conversation_by_thread_id.assert_not_called()
+
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_manager_load_conversation_from_sql_no_file():
+    """Test loading a conversation from SQL when file doesn't exist."""
+    mock_file_manager = AsyncMock()
+    mock_file_manager.conversation_storage_path = "/tmp/nonexistent"
+
+    manager = InMemoryConversationManager(conversation_file_manager=mock_file_manager)
+
+    # Mock SQL manager returning conversation data
+    mock_sql_manager = AsyncMock()
+    mock_sql_manager.retrieve_conversation_by_thread_id = AsyncMock(
+        return_value={
+            "id": "conv123",
+            "discord_thread_id": "thread456",
+            "discord_guild_id": "guild789",
+            "discord_requester_id": "user111",
+            "created_at": "2025-11-25T10:30:00",
+            "updated_at": "2025-11-25T10:35:00",
+            "chat_meta": {"guild_name": "Test Server"},
+        }
+    )
+
+    # Load conversation
+    conversation = await manager.load_conversation_from_storage(
+        thread_id="thread456",
+        conversations_sql_manager=mock_sql_manager,
+        conversation_file_manager=mock_file_manager,
+    )
+
+    # Should have created a minimal conversation
+    assert conversation is not None
+    assert conversation.thread_id == "thread456"
+    assert conversation.guild_id == "guild789"
+    assert conversation.requester == "user111"
+    assert conversation.guild_name == "Test Server"
+
+    # Should be in memory now
+    assert manager.is_conversation_thread("thread456")
+    assert manager.is_known_thread("thread456")
+
+    # Should have scheduled cleanup
+    assert "thread456" in manager.cleanup_tasks
+
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_manager_load_conversation_not_found():
+    """Test loading a conversation that doesn't exist."""
+    manager = InMemoryConversationManager()
+
+    # Mock SQL manager returning None
+    mock_sql_manager = AsyncMock()
+    mock_sql_manager.retrieve_conversation_by_thread_id = AsyncMock(return_value=None)
+
+    mock_file_manager = AsyncMock()
+
+    # Try to load non-existent conversation
+    conversation = await manager.load_conversation_from_storage(
+        thread_id="nonexistent",
+        conversations_sql_manager=mock_sql_manager,
+        conversation_file_manager=mock_file_manager,
+    )
+
+    # Should return None
+    assert conversation is None
+
+    # Should not be in memory
+    assert not manager.is_conversation_thread("nonexistent")
+
+    await manager.shutdown()

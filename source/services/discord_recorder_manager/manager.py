@@ -1761,11 +1761,12 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             try:
                 t.result()  # This will raise any exception that occurred
             except Exception as e:
-                # Log synchronously since this is a callback
-                import traceback
-
-                print(f"ERROR: Exception in _process_recordings_post_stop: {e}")
-                print(traceback.format_exc())
+                # Schedule async logging since this is a sync callback
+                asyncio.create_task(
+                    self.services.logging_service.error(
+                        f"Exception in _process_recordings_post_stop: {e}", exc_info=True
+                    )
+                )
             finally:
                 # Remove from tracking set when done
                 self._processing_tasks.discard(t)

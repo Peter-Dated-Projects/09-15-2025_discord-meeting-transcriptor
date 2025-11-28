@@ -12,6 +12,9 @@ from source.services.conversation_manager.in_memory_cache import (
     Message,
     MessageType,
 )
+from source.services.chat_job_manager.attachment_utils import (
+    extract_attachments_from_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +42,8 @@ class Chat(commands.Cog):
         """Filter to determine if this cog should handle the message.
 
         This cog handles messages where:
-        - The bot is mentioned
+        - The bot is mentioned, OR
+        - The message is in a thread with an active conversation (in-memory or SQL)
         - In a guild (not DMs)
         - From a non-bot user
 
@@ -57,6 +61,33 @@ class Chat(commands.Cog):
         if not message.guild:
             return False
 
+        # Check if message is in a thread
+        if isinstance(message.channel, discord.Thread):
+            thread_id = str(message.channel.id)
+
+            # Check if conversation is already in memory
+            if self.services.conversation_manager.is_conversation_thread(thread_id):
+                return True
+
+            # Check if conversation exists in SQL cache
+            if self.services.conversation_manager.is_known_thread(thread_id):
+                # Try to load the conversation into memory
+                try:
+                    conversation = await self.services.conversation_manager.load_conversation_from_storage(
+                        thread_id=thread_id,
+                        conversations_sql_manager=self.services.conversations_sql_manager,
+                        conversation_file_manager=self.services.conversation_file_service_manager,
+                    )
+                    if conversation:
+                        await self.services.logging_service.info(
+                            f"Loaded conversation for thread {thread_id} from storage"
+                        )
+                        return True
+                except Exception as e:
+                    await self.services.logging_service.error(
+                        f"Failed to load conversation for thread {thread_id}: {e}"
+                    )
+
         # Check if the bot is mentioned
         if self.bot.user not in message.mentions:
             return False
@@ -68,14 +99,22 @@ class Chat(commands.Cog):
     # -------------------------------------------------------------- #
 
     async def handle_message(self, message: discord.Message) -> bool:
-        """Handle messages where the bot is mentioned.
+        """Handle messages where the bot is mentioned or in a conversation thread.
 
-        When the bot is pinged in a guild, this handler:
-        1. Creates a thread from the message
-        2. Sends "Echo is thinking..." in italics in the thread
-        3. Creates a new conversation in memory and saves to disk
-        4. Creates SQL entries for conversation and conversation_store
-        5. Dispatches a chat job to process the message
+        This handler processes:
+        1. Messages in existing conversation threads (with or without bot mention)
+        2. Bot mentions that create new conversations
+
+        For existing conversations:
+        - If conversation is IDLE: creates a new chat job
+        - If conversation is THINKING/PROCESSING_QUEUE: queues the message
+
+        For new conversations (bot mention outside thread):
+        - Creates a thread from the message
+        - Sends "Echo is thinking..." in italics
+        - Creates conversation in memory and saves to disk
+        - Creates SQL entries for conversation and conversation_store
+        - Dispatches a chat job to process the message
 
         Args:
             message: The Discord message object
@@ -95,31 +134,45 @@ class Chat(commands.Cog):
             author_name = str(message.author)
             message_content = message.content
 
-            # Log the interaction details
-            await self.services.logging_service.info(
-                f"Bot mentioned in guild '{guild_name}' ({guild_id}) "
-                f"by {author_name} ({author_id}) "
-                f"in #{channel_name} ({channel_id})"
-            )
-            await self.services.logging_service.debug(
-                f"Message ID: {message_id}, Content: {message_content[:100]}..."
-            )
+            # Extract attachments from the message
+            attachments = await extract_attachments_from_message(message)
 
-            # Create a thread from the message
-            thread_name = f"Chat with {message.author.name}"
+            # Log attachment extraction
+            if attachments:
+                await self.services.logging_service.info(
+                    f"[ATTACHMENTS] Extracted {len(attachments)} attachments from message {message_id}"
+                )
+                for i, att in enumerate(attachments, 1):
+                    att_type = att.get("type", "unknown")
+                    filename = att.get("filename", att.get("url", "unknown"))
+                    size = att.get("size")
+                    size_str = f" ({size} bytes)" if size else ""
+                    await self.services.logging_service.debug(
+                        f"[ATTACHMENTS] {i}. {att_type}: {filename}{size_str}"
+                    )
+            else:
+                await self.services.logging_service.debug(
+                    f"[ATTACHMENTS] No attachments in message {message_id}"
+                )
 
-            # Check if message is already in a thread
+            # Check if message is in a thread with an active conversation
             if isinstance(message.channel, discord.Thread):
                 thread = message.channel
                 thread_id = str(thread.id)
-                await self.services.logging_service.info(
-                    f"Message already in thread: {thread.name} ({thread_id})"
-                )
 
                 # Check if we have an active conversation for this thread
                 conversation = self.services.conversation_manager.get_conversation(thread_id)
 
                 if conversation:
+                    # Message in existing conversation thread
+                    await self.services.logging_service.info(
+                        f"Message in conversation thread '{thread.name}' ({thread_id}) "
+                        f"by {author_name} ({author_id})"
+                    )
+                    await self.services.logging_service.debug(
+                        f"Message ID: {message_id}, Content: {message_content[:100]}..."
+                    )
+
                     # Check conversation status
                     if conversation.status == ConversationStatus.IDLE:
                         # Create new chat job
@@ -130,14 +183,22 @@ class Chat(commands.Cog):
                                 conversation_id=conversation_id,
                                 message=message_content,
                                 user_id=author_id,
+                                attachments=attachments if attachments else None,
                             )
                             await self.services.logging_service.info(
                                 f"Created chat job {job_id} for existing thread {thread_id}"
                             )
+                        else:
+                            await self.services.logging_service.error(
+                                f"Failed to get conversation ID for thread {thread_id}"
+                            )
                     else:
                         # AI is thinking or processing queue - add to message queue
                         queued = await self.services.chat_job_manager.queue_user_message(
-                            thread_id=thread_id, message=message_content, user_id=author_id
+                            thread_id=thread_id,
+                            message=message_content,
+                            user_id=author_id,
+                            attachments=attachments if attachments else None,
                         )
                         if queued:
                             await self.services.logging_service.info(
@@ -150,6 +211,80 @@ class Chat(commands.Cog):
 
                     return True
 
+            # If we reach here, it's a bot mention outside of a conversation thread
+            # (or in a thread without an active conversation)
+
+            # Verify bot was mentioned
+            if self.bot.user not in message.mentions:
+                # This shouldn't happen due to filter_message, but handle gracefully
+                return True
+
+            # Log the bot mention
+            await self.services.logging_service.info(
+                f"Bot mentioned in guild '{guild_name}' ({guild_id}) "
+                f"by {author_name} ({author_id}) "
+                f"in #{channel_name} ({channel_id})"
+            )
+            await self.services.logging_service.debug(
+                f"Message ID: {message_id}, Content: {message_content[:100]}..."
+            )
+
+            # Create a thread from the message or use existing thread
+            thread_name = f"Chat with {message.author.name}"
+
+            if isinstance(message.channel, discord.Thread):
+                # Already in a thread - check if conversation exists in SQL
+                thread = message.channel
+                thread_id = str(thread.id)
+
+                # Check if this thread already has a SQL entry (regardless of user)
+                existing_conversation_id = await self._get_conversation_id_from_thread(thread_id)
+
+                if existing_conversation_id:
+                    # Thread already has a conversation - load it into memory
+                    await self.services.logging_service.info(
+                        f"Thread {thread_id} already has conversation {existing_conversation_id}, loading into memory"
+                    )
+
+                    try:
+                        conversation = await self.services.conversation_manager.load_conversation_from_storage(
+                            thread_id=thread_id,
+                            conversations_sql_manager=self.services.conversations_sql_manager,
+                            conversation_file_manager=self.services.conversation_file_service_manager,
+                        )
+
+                        if conversation:
+                            await self.services.logging_service.info(
+                                f"Loaded existing conversation for thread {thread_id} from storage"
+                            )
+
+                            # Create and queue chat job with existing conversation
+                            job_id = await self.services.chat_job_manager.create_and_queue_chat_job(
+                                thread_id=thread_id,
+                                conversation_id=existing_conversation_id,
+                                message=message_content,
+                                user_id=author_id,
+                                attachments=attachments if attachments else None,
+                            )
+
+                            await self.services.logging_service.info(
+                                f"Created and queued chat job {job_id} for existing conversation in thread {thread_id}"
+                            )
+
+                            return True
+                        else:
+                            await self.services.logging_service.warning(
+                                f"Failed to load conversation for thread {thread_id}, creating new one"
+                            )
+                    except Exception as e:
+                        await self.services.logging_service.error(
+                            f"Error loading conversation for thread {thread_id}: {e}, creating new one"
+                        )
+
+                # No existing conversation in SQL for this thread
+                await self.services.logging_service.info(
+                    f"Creating new conversation in existing thread: {thread.name} ({thread_id})"
+                )
             else:
                 # Create a new thread from the message
                 thread = await message.create_thread(
@@ -216,6 +351,7 @@ class Chat(commands.Cog):
                 conversation_id=conversation_id,
                 message=message_content,
                 user_id=author_id,
+                attachments=attachments if attachments else None,
             )
 
             await self.services.logging_service.info(

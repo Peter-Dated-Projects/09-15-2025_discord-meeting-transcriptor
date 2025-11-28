@@ -63,6 +63,9 @@ from source.services.ollama_request_manager.manager import (
 )
 from source.services.ollama_request_manager.models import (
     Conversation,
+    Document,
+    DocumentCollection,
+    DocumentType,
     Message,
     MessageChunk,
     MessageUsage,
@@ -77,6 +80,10 @@ __all__ = [
     "OllamaMessage",
     # Conversation service
     "ConversationService",
+    # Document management
+    "Document",
+    "DocumentCollection",
+    "DocumentType",
     # Models
     "Message",
     "MessageUsage",

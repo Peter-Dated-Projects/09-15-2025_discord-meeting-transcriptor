@@ -33,6 +33,10 @@ logging.basicConfig(
     force=True,
 )
 
+# Suppress verbose logging from external libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("ollama").setLevel(logging.WARNING)
+
 dotenv.load_dotenv(dotenv_path=".env.local")
 
 # -------------------------------------------------------------- #
@@ -412,6 +416,13 @@ async def main():
     # Now we can use the async logger
     logger = services_manager.logging_service
     await logger.info("[OK] Initialized all services.")
+
+    # Initialize conversation manager thread ID cache
+    if services_manager.conversation_manager and services_manager.conversations_sql_manager:
+        thread_count = await services_manager.conversation_manager.refresh_thread_id_cache(
+            services_manager.conversations_sql_manager
+        )
+        await logger.info(f"[OK] Loaded {thread_count} thread IDs into conversation cache.")
 
     # Set bot instance on context
     context.set_bot(bot)

@@ -22,6 +22,7 @@ class ConversationFileManagerService(BaseConversationFileServiceManager):
     def __init__(self, context: Context, conversation_storage_path: str):
         super().__init__(context)
         self.conversation_storage_path = conversation_storage_path
+        self.temp_path = os.path.join(self.conversation_storage_path, "temp")
 
     # -------------------------------------------------------------- #
     # Manager Methods
@@ -37,12 +38,42 @@ class ConversationFileManagerService(BaseConversationFileServiceManager):
         if not await loop.run_in_executor(None, os.path.exists, self.conversation_storage_path):
             await loop.run_in_executor(None, os.makedirs, self.conversation_storage_path)
 
+        # Create temp directory for attachments
+        if not await loop.run_in_executor(None, os.path.exists, self.temp_path):
+            await loop.run_in_executor(None, os.makedirs, self.temp_path)
+
         await self.services.logging_service.info(
             f"ConversationFileManagerService initialized with storage path: {self.conversation_storage_path}"
+        )
+        await self.services.logging_service.info(
+            f"Conversation attachments temp directory: {self.temp_path}"
         )
         return True
 
     async def on_close(self):
+        # Clean up temp directory on shutdown
+        loop = asyncio.get_event_loop()
+        try:
+            if await loop.run_in_executor(None, os.path.exists, self.temp_path):
+                filenames = await loop.run_in_executor(None, os.listdir, self.temp_path)
+                for filename in filenames:
+                    file_path = os.path.join(self.temp_path, filename)
+                    try:
+                        is_file = await loop.run_in_executor(None, os.path.isfile, file_path)
+                        if is_file:
+                            await loop.run_in_executor(None, os.unlink, file_path)
+                    except Exception as e:
+                        await self.services.logging_service.debug(
+                            f"Failed to delete temp file {file_path}: {e}"
+                        )
+                await self.services.logging_service.info(
+                    f"Cleaned up conversation temp directory: {self.temp_path}"
+                )
+        except Exception as e:
+            await self.services.logging_service.warning(
+                f"Error cleaning conversation temp directory: {e}"
+            )
+
         await self.services.logging_service.info("ConversationFileManagerService closed")
         return True
 
@@ -53,6 +84,10 @@ class ConversationFileManagerService(BaseConversationFileServiceManager):
     def get_storage_path(self) -> str:
         """Get the absolute storage path."""
         return os.path.abspath(self.conversation_storage_path)
+
+    def get_temp_storage_path(self) -> str:
+        """Get the absolute temporary storage path for attachments."""
+        return os.path.abspath(self.temp_path)
 
     def _build_conversation_filename(
         self, discord_user_id: str, guild_id: str, date: datetime | None = None
