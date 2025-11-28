@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 
 from source.services.manager import Manager
 from source.services.ollama_request_manager.conversation import ConversationHistory
+from source.services.ollama_request_manager.models import DocumentCollection
 
 # -------------------------------------------------------------- #
 # Data Models
@@ -81,10 +82,19 @@ class GenerationConfig:
 
 @dataclass
 class OllamaQueryInput:
-    """Input parameters for Ollama query."""
+    """Input parameters for Ollama query.
+
+    Document Handling (Ollama API Contract):
+    - TEXT documents: Merged into message 'content'
+    - RAG documents: Merged into message 'content' as context
+    - IMAGE documents: Base64 encoded and placed in 'images' field (vision model required)
+
+    Use DocumentCollection to manage attachments, or pass documents directly
+    in the message dicts with 'images' field for vision models.
+    """
 
     model: str
-    messages: list[Message] | list[dict[str, str]]
+    messages: list[Message] | list[dict[str, Any]]  # dict may include 'images' for vision
     system_prompt: str | None = None
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     format: Literal["text", "json"] | None = None
@@ -98,8 +108,9 @@ class OllamaQueryInput:
     # Future extensibility
     tools: list[dict] | None = None
     tool_choice: str | None = None
-    extra_context: str | None = None
-    documents: list[str] | None = None
+    # Document collection for attachments (TEXT, IMAGE, RAG)
+    # These are processed and injected appropriately based on type
+    documents: DocumentCollection | None = None
 
 
 @dataclass
@@ -221,7 +232,7 @@ class OllamaRequestManager(Manager):
     async def query(
         self,
         model: str | None = None,
-        messages: list[Message] | list[dict[str, str]] | None = None,
+        messages: list[Message] | list[dict[str, Any]] | None = None,
         prompt: str | None = None,  # Shortcut for single user message
         system_prompt: str | None = None,
         temperature: float | None = None,
@@ -242,8 +253,8 @@ class OllamaRequestManager(Manager):
         # Future extensibility
         tools: list[dict] | None = None,
         tool_choice: str | None = None,
-        extra_context: str | None = None,
-        documents: list[str] | None = None,
+        # Document collection for attachments
+        documents: DocumentCollection | None = None,
     ) -> OllamaQueryResult | AsyncIterator[str]:
         """
         Execute an Ollama query with full configuration support.
@@ -251,6 +262,7 @@ class OllamaRequestManager(Manager):
         Args:
             model: Model name (uses default if not provided)
             messages: Full chat history or None to use session history
+                     (dict messages may include 'images' field for vision models)
             prompt: Shortcut for single user message (alternative to messages)
             system_prompt: System prompt (overrides default)
             temperature: Sampling temperature
@@ -270,8 +282,7 @@ class OllamaRequestManager(Manager):
             metadata: Additional metadata for logging
             tools: Tool definitions (future use)
             tool_choice: Tool selection strategy (future use)
-            extra_context: Additional context (for RAG)
-            documents: Document list (for RAG)
+            documents: DocumentCollection with TEXT, IMAGE, and RAG documents
 
         Returns:
             OllamaQueryResult or AsyncIterator[str] if streaming
@@ -294,10 +305,6 @@ class OllamaRequestManager(Manager):
         if prompt and not messages:
             messages = [Message(role="user", content=prompt)]
 
-        # Convert dict messages to Message objects
-        if messages and isinstance(messages[0], dict):
-            messages = [Message(role=m["role"], content=m["content"]) for m in messages]
-
         # Get or create session
         if session_id:
             if session_id not in self._sessions:
@@ -311,14 +318,22 @@ class OllamaRequestManager(Manager):
             # Add new messages to session history
             if messages:
                 for msg in messages:
-                    if msg.role == "user":
-                        session.add_user_message(msg.content)
-                    elif msg.role == "assistant":
-                        session.add_assistant_message(msg.content)
+                    # Extract role and content from either Message object or dict
+                    if isinstance(msg, dict):
+                        role = msg["role"]
+                        content = msg["content"]
+                    else:
+                        role = msg.role
+                        content = msg.content
+                    
+                    if role == "user":
+                        session.add_user_message(content)
+                    elif role == "assistant":
+                        session.add_assistant_message(content)
 
-            # Use session history for query
+            # Use session history for query (reconstruct as dicts to preserve any additional fields)
             messages = [
-                Message(role=m["role"], content=m["content"]) for m in session.get_messages()
+                {"role": m["role"], "content": m["content"]} for m in session.get_messages()
             ]
         elif not messages:
             # No session and no messages provided
@@ -340,7 +355,6 @@ class OllamaRequestManager(Manager):
             metadata=metadata or {},
             tools=tools,
             tool_choice=tool_choice,
-            extra_context=extra_context,
             documents=documents,
         )
 
@@ -481,7 +495,14 @@ class OllamaRequestManager(Manager):
             raise
 
     def _build_request_params(self, query_input: OllamaQueryInput) -> dict[str, Any]:
-        """Build Ollama API request parameters."""
+        """
+        Build Ollama API request parameters.
+
+        Handles document injection based on DocumentCollection:
+        - TEXT documents: Injected into the last user message content
+        - RAG documents: Injected into the last user message content as context
+        - IMAGE documents: Base64 encoded and added to 'images' field
+        """
         # Convert messages to dict format
         messages = []
 
@@ -494,19 +515,32 @@ class OllamaRequestManager(Manager):
             if isinstance(msg, Message):
                 messages.append({"role": msg.role, "content": msg.content})
             else:
-                messages.append(msg)
+                # Preserve the full message dict including 'images' field for vision models
+                # Ollama API expects images as base64 strings in the 'images' field
+                messages.append(msg.copy())  # Copy to avoid mutating original
 
-        # Add RAG context if provided
-        if query_input.extra_context or query_input.documents:
-            context_parts = []
-            if query_input.extra_context:
-                context_parts.append(query_input.extra_context)
-            if query_input.documents:
-                context_parts.extend(query_input.documents)
-            context_message = "\n\n".join(context_parts)
-            # Insert context before last user message
-            if messages and messages[-1]["role"] == "user":
-                messages.insert(-1, {"role": "system", "content": f"Context:\n{context_message}"})
+        # Process DocumentCollection if provided
+        if query_input.documents and len(query_input.documents) > 0:
+            # Get text injection (TEXT + RAG docs) and images
+            text_injection, base64_images = query_input.documents.prepare_for_ollama()
+
+            # Find the last user message to inject documents
+            last_user_idx = None
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i].get("role") == "user":
+                    last_user_idx = i
+                    break
+
+            if last_user_idx is not None:
+                # Inject text content (TEXT + RAG documents)
+                if text_injection:
+                    original_content = messages[last_user_idx].get("content", "")
+                    messages[last_user_idx]["content"] = f"{text_injection}\n\n{original_content}"
+
+                # Add base64 images to the message
+                if base64_images:
+                    existing_images = messages[last_user_idx].get("images", [])
+                    messages[last_user_idx]["images"] = existing_images + base64_images
 
         # Build options
         options = {

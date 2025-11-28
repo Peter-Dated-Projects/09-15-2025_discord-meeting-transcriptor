@@ -178,34 +178,16 @@ async def download_attachment(
     Returns:
         Tuple of (absolute path to downloaded file or None, error message or None)
     """
-    from datetime import datetime
-    import uuid
-
     max_size_bytes = max_size_mb * 1024 * 1024
 
     try:
-        # Determine filename
+        # Determine filename from URL if not provided
         if not filename:
-            # Extract filename from URL
+            # Extract filename from URL path
             parsed = urlparse(url)
             filename = unquote(os.path.basename(parsed.path))
             if not filename or filename == "":
                 filename = "attachment.bin"
-
-        # Generate unique filename with UUID and timestamp
-        # Extract extension from original filename
-        name_parts = os.path.splitext(filename)
-        base_name = name_parts[0]
-        extension = name_parts[1] if len(name_parts) > 1 else ""
-
-        # Create timestamp in format: YYYYMMDD_HHMMSS
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        # Create unique identifier
-        unique_id = str(uuid.uuid4())[:8]
-
-        # Build new filename: originalname_YYYYMMDD_HHMMSS_uuid.ext
-        filename = f"{base_name}_{timestamp}_{unique_id}{extension}"
 
         if logger:
             logger.debug(f"[DOWNLOAD] Starting download: {filename} from {url[:100]}...")
