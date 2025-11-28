@@ -252,8 +252,17 @@ start_chromadb_admin() {
         return 1
     fi
     
-    # Start admin dashboard in background
-    nohup python "$ADMIN_SCRIPT" > "$CHROMADB_ADMIN_LOG" 2>&1 &
+    # Start admin dashboard in background using `uv run`
+    CHROMADB_HOST="${CHROMADB_HOST:-0.0.0.0}"
+    CHROMADB_PORT="${CHROMADB_PORT:-8000}"
+
+    # Use `uv run` to launch the ASGI admin app. Expects an importable module
+    # `admin_page` under scripts/chromadb that exposes the ASGI app. If the
+    # app symbol name differs, set `CHROMADB_ADMIN_APP` in your environment to
+    # the correct module:app (e.g. "admin_page:my_app").
+    CHROMADB_ADMIN_APP="${CHROMADB_ADMIN_APP:-scripts/chromadb/admin_page.py}"
+
+    nohup uv run "$CHROMADB_ADMIN_APP" --app-dir "$PROJECT_ROOT/scripts/chromadb" --host "${CHROMADB_HOST}" --port "${CHROMADB_PORT}" > "$CHROMADB_ADMIN_LOG" 2>&1 &
     local pid=$!
     echo $pid > "$CHROMADB_ADMIN_PID_FILE"
     
