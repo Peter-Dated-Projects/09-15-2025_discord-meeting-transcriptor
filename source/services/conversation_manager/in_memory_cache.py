@@ -268,7 +268,6 @@ class Conversation:
 
         except Exception as e:
             # TODO: Add proper logging here
-            print(f"Error saving conversation: {e}")
             return False
 
 
