@@ -576,22 +576,6 @@ class OllamaRequestManager(Manager):
         if query_input.format:
             params["format"] = query_input.format
 
-        # Debug: print the request payload (with truncated images for readability)
-        import copy
-        debug_params = copy.deepcopy(params)
-        for msg in debug_params.get("messages", []):
-            if "images" in msg:
-                # Show truncated base64 for readability
-                msg["images"] = [
-                    f"<base64:{len(img)} chars>" if isinstance(img, str) else img
-                    for img in msg.get("images", [])
-                ]
-        print("\n" + "="*80)
-        print("OLLAMA REQUEST PAYLOAD:")
-        print("="*80)
-        print(json.dumps(debug_params, indent=2, default=str))
-        print("="*80 + "\n")
-
         return params
 
     # -------------------------------------------------------------- #
