@@ -33,6 +33,10 @@ logging.basicConfig(
     force=True,
 )
 
+# Suppress verbose logging from external libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("ollama").setLevel(logging.WARNING)
+
 dotenv.load_dotenv(dotenv_path=".env.local")
 
 # -------------------------------------------------------------- #
