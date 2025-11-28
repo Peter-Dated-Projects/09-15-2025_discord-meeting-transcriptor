@@ -65,6 +65,7 @@ class Message:
 
     role: Literal["system", "user", "assistant"]
     content: str
+    images: list[str] | None = None  # Base64 encoded images for vision models
 
 
 @dataclass
@@ -94,7 +95,7 @@ class OllamaQueryInput:
     """
 
     model: str
-    messages: list[Message] | list[dict[str, Any]]  # dict may include 'images' for vision
+    messages: list[Message]
     system_prompt: str | None = None
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     format: Literal["text", "json"] | None = None
@@ -305,6 +306,17 @@ class OllamaRequestManager(Manager):
         if prompt and not messages:
             messages = [Message(role="user", content=prompt)]
 
+        # Convert dict messages to Message objects if needed
+        if messages and isinstance(messages[0], dict):
+            messages = [
+                Message(
+                    role=m["role"],
+                    content=m["content"],
+                    images=m.get("images"),  # Preserve images field from dict
+                )
+                for m in messages
+            ]
+
         # Get or create session
         if session_id:
             if session_id not in self._sessions:
@@ -318,22 +330,14 @@ class OllamaRequestManager(Manager):
             # Add new messages to session history
             if messages:
                 for msg in messages:
-                    # Extract role and content from either Message object or dict
-                    if isinstance(msg, dict):
-                        role = msg["role"]
-                        content = msg["content"]
-                    else:
-                        role = msg.role
-                        content = msg.content
-                    
-                    if role == "user":
-                        session.add_user_message(content)
-                    elif role == "assistant":
-                        session.add_assistant_message(content)
+                    if msg.role == "user":
+                        session.add_user_message(msg.content)
+                    elif msg.role == "assistant":
+                        session.add_assistant_message(msg.content)
 
-            # Use session history for query (reconstruct as dicts to preserve any additional fields)
+            # Use session history for query
             messages = [
-                {"role": m["role"], "content": m["content"]} for m in session.get_messages()
+                Message(role=m["role"], content=m["content"]) for m in session.get_messages()
             ]
         elif not messages:
             # No session and no messages provided
@@ -503,6 +507,8 @@ class OllamaRequestManager(Manager):
         - RAG documents: Injected into the last user message content as context
         - IMAGE documents: Base64 encoded and added to 'images' field
         """
+        import json
+
         # Convert messages to dict format
         messages = []
 
@@ -512,12 +518,11 @@ class OllamaRequestManager(Manager):
 
         # Add conversation messages
         for msg in query_input.messages:
-            if isinstance(msg, Message):
-                messages.append({"role": msg.role, "content": msg.content})
-            else:
-                # Preserve the full message dict including 'images' field for vision models
-                # Ollama API expects images as base64 strings in the 'images' field
-                messages.append(msg.copy())  # Copy to avoid mutating original
+            message_dict = {"role": msg.role, "content": msg.content}
+            # Add images if present (for vision models)
+            if msg.images:
+                message_dict["images"] = msg.images
+            messages.append(message_dict)
 
         # Process DocumentCollection if provided
         if query_input.documents and len(query_input.documents) > 0:
@@ -570,6 +575,22 @@ class OllamaRequestManager(Manager):
 
         if query_input.format:
             params["format"] = query_input.format
+
+        # Debug: print the request payload (with truncated images for readability)
+        import copy
+        debug_params = copy.deepcopy(params)
+        for msg in debug_params.get("messages", []):
+            if "images" in msg:
+                # Show truncated base64 for readability
+                msg["images"] = [
+                    f"<base64:{len(img)} chars>" if isinstance(img, str) else img
+                    for img in msg.get("images", [])
+                ]
+        print("\n" + "="*80)
+        print("OLLAMA REQUEST PAYLOAD:")
+        print("="*80)
+        print(json.dumps(debug_params, indent=2, default=str))
+        print("="*80 + "\n")
 
         return params
 

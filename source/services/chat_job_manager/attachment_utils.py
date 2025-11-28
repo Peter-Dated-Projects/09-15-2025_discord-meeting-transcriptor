@@ -164,6 +164,7 @@ async def download_attachment(
     filename: str | None = None,
     max_size_mb: int = 50,
     logger=None,
+    attachment_type: str | None = None,
 ) -> tuple[str | None, str | None]:
     """
     Download an attachment from a URL to temporary storage.
@@ -174,10 +175,13 @@ async def download_attachment(
         filename: Optional filename, will be extracted from URL if not provided
         max_size_mb: Maximum file size in MB
         logger: Optional logger for debugging
+        attachment_type: Type of attachment ('image', 'file', etc.) for UUID naming
 
     Returns:
         Tuple of (absolute path to downloaded file or None, error message or None)
     """
+    import uuid
+
     max_size_bytes = max_size_mb * 1024 * 1024
 
     try:
@@ -188,6 +192,20 @@ async def download_attachment(
             filename = unquote(os.path.basename(parsed.path))
             if not filename or filename == "":
                 filename = "attachment.bin"
+
+        # Get file extension
+        _, ext = os.path.splitext(filename)
+        if not ext:
+            ext = ".bin"
+
+        # For images, use UUID-based naming
+        if attachment_type == "image":
+            uuid_name = f"{uuid.uuid4().hex[:16]}{ext}"
+            if logger:
+                logger.debug(
+                    f"[DOWNLOAD] Using UUID filename for image: {uuid_name} (original: {filename})"
+                )
+            filename = uuid_name
 
         if logger:
             logger.debug(f"[DOWNLOAD] Starting download: {filename} from {url[:100]}...")
@@ -251,6 +269,47 @@ async def download_attachment(
                     logger.info(
                         f"[DOWNLOAD] Success: {filename} ({total_size} bytes) -> {file_path}"
                     )
+
+                # Convert images to JPG format
+                if attachment_type == "image":
+                    try:
+                        from PIL import Image
+
+                        if logger:
+                            logger.debug(f"[DOWNLOAD] Converting image to JPG: {file_path}")
+
+                        # Open and convert to RGB (handles RGBA, grayscale, etc.)
+                        img = Image.open(file_path)
+
+                        # Convert to RGB if necessary (JPG doesn't support transparency)
+                        if img.mode in ("RGBA", "LA", "P"):
+                            # Create white background
+                            rgb_img = Image.new("RGB", img.size, (255, 255, 255))
+                            if img.mode == "P":
+                                img = img.convert("RGBA")
+                            rgb_img.paste(
+                                img, mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None
+                            )
+                            img = rgb_img
+                        elif img.mode != "RGB":
+                            img = img.convert("RGB")
+
+                        # Save as JPG with new filename
+                        jpg_path = os.path.splitext(file_path)[0] + ".jpg"
+                        img.save(jpg_path, "JPEG", quality=95, optimize=True)
+
+                        # Remove original file if it's not already JPG
+                        if file_path != jpg_path:
+                            os.remove(file_path)
+                            file_path = jpg_path
+
+                            if logger:
+                                logger.info(f"[DOWNLOAD] ✓ Converted to JPG: {jpg_path}")
+
+                    except Exception as e:
+                        if logger:
+                            logger.warning(f"[DOWNLOAD] Failed to convert to JPG: {e}")
+                        # Continue with original file if conversion fails
 
                 return os.path.abspath(file_path), None
 
@@ -456,6 +515,7 @@ async def download_attachments_batch(
                 filename=att.get("filename"),
                 max_size_mb=max_size_mb,
                 logger=logger,
+                attachment_type=att_type,
             )
 
             if local_path:
@@ -664,12 +724,29 @@ def encode_image_to_base64(file_path: str) -> str | None:
         file_path: Path to the image file
 
     Returns:
-        Base64 encoded string, or None if encoding failed
+        Base64 encoded string (plain base64, no data URI prefix), or None if encoding failed
     """
     try:
+        if not os.path.exists(file_path):
+            return None
+
         data = Path(file_path).read_bytes()
-        return base64.b64encode(data).decode("utf-8")
-    except Exception:
+
+        # Encode to base64 - Ollama expects plain base64 string (no data URI prefix)
+        encoded = base64.b64encode(data).decode("utf-8")
+
+        # Verify it's valid base64
+        if not encoded or len(encoded) == 0:
+            return None
+
+        # Double-check it decodes properly
+        try:
+            base64.b64decode(encoded)
+        except Exception:
+            return None
+
+        return encoded
+    except Exception as e:
         return None
 
 
