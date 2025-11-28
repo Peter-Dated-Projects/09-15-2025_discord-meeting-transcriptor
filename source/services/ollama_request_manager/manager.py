@@ -569,6 +569,7 @@ class OllamaRequestManager(Manager):
             "model": query_input.model,
             "messages": messages,
             "options": options,
+            "think": True,  # Enable thinking/reasoning mode
             "stream": query_input.stream,
             "keep_alive": query_input.keep_alive,
         }
