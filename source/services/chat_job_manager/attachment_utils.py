@@ -1,14 +1,19 @@
-"""
-Utilities for processing Discord message attachments in chat conversations.
+"""Utilities for processing Discord message attachments in chat conversations.
 
 This module provides functions to:
 - Extract attachment metadata from Discord messages
 - Download and process images
 - Extract text from URLs
 - Handle file attachments
+- Build Ollama-compatible prompts with text documents and images
+
+Ollama API Contract:
+- Text documents → merged into prompt `content` (no separate `documents` field)
+- Images → base64 encoded in `images` field (vision model required)
+- No `documents` or `attachments` field exists in Ollama's chat API
 """
 
-import io
+import base64
 import os
 import re
 from pathlib import Path
@@ -559,3 +564,325 @@ async def process_attachments_for_context(
                     image_bytes_list.append(image_data)
 
     return formatted_text, image_bytes_list
+
+
+# -------------------------------------------------------------- #
+# Ollama-Compatible Prompt Building
+# -------------------------------------------------------------- #
+
+# File extensions considered as text documents
+TEXT_DOCUMENT_EXTENSIONS = {
+    ".txt",
+    ".md",
+    ".markdown",
+    ".rst",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".html",
+    ".htm",
+    ".css",
+    ".js",
+    ".ts",
+    ".py",
+    ".java",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".cs",
+    ".go",
+    ".rs",
+    ".rb",
+    ".php",
+    ".sql",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".ps1",
+    ".bat",
+    ".cmd",
+    ".log",
+    ".csv",
+    ".tsv",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".toml",
+}
+
+# File extensions considered as images
+IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".ico",
+    ".svg",
+}
+
+
+def is_text_document(filename: str) -> bool:
+    """
+    Check if a file is a text document based on extension.
+
+    Args:
+        filename: Name of the file
+
+    Returns:
+        True if file is a text document
+    """
+    ext = Path(filename).suffix.lower()
+    return ext in TEXT_DOCUMENT_EXTENSIONS
+
+
+def is_image_file(filename: str) -> bool:
+    """
+    Check if a file is an image based on extension.
+
+    Args:
+        filename: Name of the file
+
+    Returns:
+        True if file is an image
+    """
+    ext = Path(filename).suffix.lower()
+    return ext in IMAGE_EXTENSIONS
+
+
+def read_text_document(file_path: str, encoding: str = "utf-8") -> str | None:
+    """
+    Read a text document file and return its contents.
+
+    Args:
+        file_path: Path to the text file
+        encoding: Text encoding (default: utf-8)
+
+    Returns:
+        File contents as string, or None if read failed
+    """
+    try:
+        return Path(file_path).read_text(encoding=encoding)
+    except Exception:
+        # Try with latin-1 as fallback
+        try:
+            return Path(file_path).read_text(encoding="latin-1")
+        except Exception:
+            return None
+
+
+def encode_image_to_base64(file_path: str) -> str | None:
+    """
+    Encode an image file to base64 string for Ollama vision models.
+
+    Args:
+        file_path: Path to the image file
+
+    Returns:
+        Base64 encoded string, or None if encoding failed
+    """
+    try:
+        data = Path(file_path).read_bytes()
+        return base64.b64encode(data).decode("utf-8")
+    except Exception:
+        return None
+
+
+def build_text_documents_block(docs: dict[str, str]) -> str:
+    """
+    Build a formatted text block from multiple documents.
+
+    This follows the Ollama pattern where text documents are injected
+    directly into the prompt content.
+
+    Args:
+        docs: Dictionary mapping document names to their text content
+
+    Returns:
+        Formatted string with all documents
+    """
+    if not docs:
+        return ""
+
+    return "\n\n".join(f"### {name}\n{content}" for name, content in docs.items())
+
+
+def build_text_doc_prompt(question: str, docs: dict[str, str]) -> list[dict]:
+    """
+    Build Ollama-compatible messages with text documents injected into content.
+
+    For text-only models like gemma3:12b, this is the only supported way
+    to use text documents. Documents are merged into the prompt text.
+
+    Args:
+        question: The user's question or message
+        docs: Dictionary mapping document names to their text content
+
+    Returns:
+        List of message dicts for Ollama chat API
+    """
+    docs_block = build_text_documents_block(docs)
+
+    if docs_block:
+        content = (
+            "Use the following text documents to help answer.\n\n" f"{docs_block}\n\n" f"{question}"
+        )
+    else:
+        content = question
+
+    return [{"role": "user", "content": content}]
+
+
+def build_vision_prompt(
+    question: str,
+    image_paths: list[str],
+    docs: dict[str, str] | None = None,
+) -> list[dict]:
+    """
+    Build Ollama-compatible messages with images for vision models.
+
+    For vision models (llava, llama3.2-vision, etc.), images are base64
+    encoded and placed in the 'images' field. Text documents are still
+    merged into the content.
+
+    Args:
+        question: The user's question or message
+        image_paths: List of paths to image files
+        docs: Optional dictionary mapping document names to text content
+
+    Returns:
+        List of message dicts for Ollama chat API with 'images' field
+    """
+    # Encode all images to base64
+    encoded_images = []
+    for path in image_paths:
+        encoded = encode_image_to_base64(path)
+        if encoded:
+            encoded_images.append(encoded)
+
+    # Build content with optional text documents
+    if docs:
+        docs_block = build_text_documents_block(docs)
+        content = (
+            "Use the following text and images to help answer.\n\n"
+            f"{docs_block}\n\n"
+            f"{question}"
+        )
+    else:
+        content = question
+
+    message = {"role": "user", "content": content}
+
+    # Add images if any were successfully encoded
+    if encoded_images:
+        message["images"] = encoded_images
+
+    return [message]
+
+
+def extract_documents_and_images_from_attachments(
+    attachments: list[dict[str, Any]],
+) -> tuple[dict[str, str], list[str]]:
+    """
+    Extract text documents and image paths from downloaded attachments.
+
+    This processes attachment metadata and reads/identifies files that
+    have been downloaded to local paths.
+
+    Args:
+        attachments: List of attachment metadata with 'local_path' fields
+
+    Returns:
+        Tuple of:
+        - docs: Dictionary mapping filenames to text content
+        - image_paths: List of local paths to image files
+    """
+    docs: dict[str, str] = {}
+    image_paths: list[str] = []
+
+    for att in attachments:
+        local_path = att.get("local_path")
+        if not local_path or not os.path.exists(local_path):
+            continue
+
+        filename = att.get("filename", os.path.basename(local_path))
+        att_type = att.get("type", "")
+
+        # Check if it's an image
+        if att_type == "image" or is_image_file(filename):
+            image_paths.append(local_path)
+
+        # Check if it's a text document
+        elif att_type == "file" and is_text_document(filename):
+            content = read_text_document(local_path)
+            if content:
+                # Use original filename as the document name
+                docs[filename] = content
+
+    return docs, image_paths
+
+
+def build_ollama_message_with_attachments(
+    content: str,
+    attachments: list[dict[str, Any]],
+    include_attachment_summary: bool = True,
+) -> dict[str, Any]:
+    """
+    Build a single Ollama-compatible message with text docs and images.
+
+    This is the main function for preparing a user message with attachments
+    for the Ollama chat API. It:
+    1. Extracts text documents and reads their content
+    2. Extracts image paths and base64 encodes them
+    3. Merges text documents into the content
+    4. Places encoded images in the 'images' field
+
+    Args:
+        content: The user's message content
+        attachments: List of attachment metadata with 'local_path' fields
+        include_attachment_summary: Whether to include a summary of attachments
+
+    Returns:
+        Message dict with 'role', 'content', and optionally 'images'
+    """
+    docs, image_paths = extract_documents_and_images_from_attachments(attachments)
+
+    # Build content with text documents
+    parts = []
+
+    if docs:
+        docs_block = build_text_documents_block(docs)
+        parts.append(f"[Attached Documents]\n{docs_block}")
+
+    if include_attachment_summary and (docs or image_paths):
+        summary_parts = []
+        if docs:
+            summary_parts.append(f"{len(docs)} text document(s)")
+        if image_paths:
+            summary_parts.append(f"{len(image_paths)} image(s)")
+        parts.append(f"[Attachments: {', '.join(summary_parts)}]")
+
+    parts.append(content)
+
+    final_content = "\n\n".join(parts)
+
+    # Build message
+    message: dict[str, Any] = {
+        "role": "user",
+        "content": final_content,
+    }
+
+    # Encode and add images
+    if image_paths:
+        encoded_images = []
+        for path in image_paths:
+            encoded = encode_image_to_base64(path)
+            if encoded:
+                encoded_images.append(encoded)
+        if encoded_images:
+            message["images"] = encoded_images
+
+    return message

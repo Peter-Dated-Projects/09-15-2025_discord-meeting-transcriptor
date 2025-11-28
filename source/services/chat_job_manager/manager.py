@@ -16,7 +16,7 @@ import asyncio
 import os
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from source.context import Context
@@ -313,17 +313,18 @@ class ChatJob(Job):
     # LLM Interaction Methods
     # -------------------------------------------------------------- #
 
-    async def _build_llm_messages(self, conversation: Conversation) -> list[dict[str, str]]:
+    async def _build_llm_messages(self, conversation: Conversation) -> list[dict[str, Any]]:
         """
         Build message history for LLM from conversation.
 
         Adds user attribution to all user messages to clearly identify speakers.
+        Extracts image paths from attachments for vision model support.
 
         Args:
             conversation: The conversation object
 
         Returns:
-            List of message dicts for LLM with user attribution
+            List of message dicts for LLM with user attribution and images
         """
         messages = []
 
@@ -384,20 +385,60 @@ class ChatJob(Job):
                     )
                     content = f"{timestamp_str} {user_display}: {msg.message_content}"
 
-                    # Add attachment information if present
+                    # Extract images for vision models
+                    image_paths = []
                     if msg.attachments:
                         from source.services.chat_job_manager.attachment_utils import (
+                            build_ollama_message_with_attachments,
+                            extract_documents_and_images_from_attachments,
                             format_attachments_for_llm,
                         )
 
+                        # Extract text documents and images using Ollama-compatible utilities
+                        docs, extracted_image_paths = extract_documents_and_images_from_attachments(
+                            msg.attachments
+                        )
+
+                        # Collect image paths for vision models (base64 encoding happens later)
+                        image_paths = extracted_image_paths
+
+                        # Add text document content to the message content
+                        if docs:
+                            from source.services.chat_job_manager.attachment_utils import (
+                                build_text_documents_block,
+                            )
+
+                            docs_block = build_text_documents_block(docs)
+                            content += f"\n\n[Attached Documents]\n{docs_block}"
+
+                        # Add summary of non-text attachments
                         attachment_info = format_attachments_for_llm(msg.attachments)
                         content += attachment_info
+
+                    # Build message dict
+                    message_dict = {"role": role, "content": content}
+
+                    # Add images if present (for vision models)
+                    # Images must be base64 encoded for Ollama API
+                    if image_paths:
+                        from source.services.chat_job_manager.attachment_utils import (
+                            encode_image_to_base64,
+                        )
+
+                        encoded_images = []
+                        for path in image_paths:
+                            encoded = encode_image_to_base64(path)
+                            if encoded:
+                                encoded_images.append(encoded)
+                        if encoded_images:
+                            message_dict["images"] = encoded_images
+
+                    messages.append(message_dict)
                 else:
                     role = "assistant"
                     # Assistant messages don't need timestamps (prevents bot from copying format)
                     content = msg.message_content
-
-                messages.append({"role": role, "content": content})
+                    messages.append({"role": role, "content": content})
 
             elif msg.message_type == MessageType.THINKING:
                 # Thinking messages are assistant's internal thoughts
@@ -407,15 +448,19 @@ class ChatJob(Job):
 
         return messages
 
-    async def _call_llm(self, messages: list[dict[str, str]]) -> dict:
+    async def _call_llm(self, messages: list[dict[str, Any]]) -> dict:
         """
         Call the LLM with messages and return response.
 
         Uses the OLLAMA_CHAT_MODEL environment variable to determine which model to use.
         Sets keep_alive to 1 minute to keep the model in memory briefly after chat requests.
 
+        Ollama API contract:
+        - Text documents are merged into message 'content' (no separate documents field)
+        - Images are base64 encoded and placed in 'images' field (vision model required)
+
         Args:
-            messages: List of message dicts for LLM
+            messages: List of message dicts for LLM (may include 'images' field with base64 strings)
 
         Returns:
             Response dict from Ollama
