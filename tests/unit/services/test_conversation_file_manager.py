@@ -19,7 +19,6 @@ from source.constructor import ServerManagerType
 from source.context import Context
 from source.server.constructor import construct_server_manager
 from source.services.constructor import construct_services_manager
-from source.utils import generate_16_char_uuid
 
 
 class TestConversationFileManagerService:
@@ -285,7 +284,7 @@ class TestConversationFileManagerService:
         assert success is False
 
     @pytest.mark.asyncio
-    async def test_retrieve_nonexistent_conversation_returns_none(self, setup, test_data):
+    async def test_retrieve_nonexistent_conversation_returns_none(self, setup):
         """Test that retrieving a non-existent conversation returns None."""
         services_manager, servers_manager = await anext(setup)
         conversation_manager = services_manager.conversation_file_service_manager
@@ -296,7 +295,7 @@ class TestConversationFileManagerService:
         assert data is None
 
     @pytest.mark.asyncio
-    async def test_delete_nonexistent_conversation_returns_false(self, setup, test_data):
+    async def test_delete_nonexistent_conversation_returns_false(self, setup):
         """Test that deleting a non-existent conversation returns False."""
         services_manager, servers_manager = await anext(setup)
         conversation_manager = services_manager.conversation_file_service_manager

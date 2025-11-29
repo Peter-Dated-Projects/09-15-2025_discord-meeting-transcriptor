@@ -7,8 +7,8 @@ This script helps validate the implementation by checking:
 3. Logic flow is sound
 """
 
-import sys
 import os
+import sys
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -46,11 +46,11 @@ def test_service_methods():
 def test_sql_models():
     """Check that SQL models are correctly defined."""
     from source.server.sql_models import (
-        MeetingModel,
-        TempRecordingModel,
-        RecordingModel,
-        UserTranscriptsModel,
         CompiledTranscriptsModel,
+        MeetingModel,
+        RecordingModel,
+        TempRecordingModel,
+        UserTranscriptsModel,
     )
 
     print("\n✓ Checking SQL model fields...")
@@ -101,12 +101,11 @@ def test_sql_models():
 def test_command_structure():
     """Check that the command is properly structured."""
     import ast
-    import inspect
 
     print("\n✓ Checking command structure...")
 
     # Read the general.py file
-    with open("cogs/general.py", "r") as f:
+    with open("cogs/general.py") as f:
         content = f.read()
 
     # Parse the file
@@ -150,7 +149,7 @@ def check_documentation():
     print(f"  ✓ Documentation exists: {doc_file}")
 
     # Check documentation content
-    with open(doc_file, "r") as f:
+    with open(doc_file) as f:
         content = f.read()
 
     assert "deepinfo" in content.lower(), "Documentation doesn't mention 'deepinfo'"

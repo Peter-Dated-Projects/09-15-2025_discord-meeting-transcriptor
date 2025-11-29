@@ -1,7 +1,6 @@
 import enum
 
-from sqlalchemy import JSON, Column, DateTime, Enum, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, Column, DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.orm import declarative_base
 
 from source.utils import MEETING_UUID_LENGTH

@@ -1,19 +1,14 @@
 import logging
-from typing import Optional
-from datetime import datetime
 
 import discord
 from discord.ext import commands
 
 from source.context import Context
-from source.services.conversation_manager.in_memory_cache import (
-    Conversation,
-    ConversationStatus,
-    Message,
-    MessageType,
-)
 from source.services.chat_job_manager.attachment_utils import (
     extract_attachments_from_message,
+)
+from source.services.conversation_manager.in_memory_cache import (
+    ConversationStatus,
 )
 
 logger = logging.getLogger(__name__)

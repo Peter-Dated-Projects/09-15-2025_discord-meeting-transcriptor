@@ -1,6 +1,7 @@
+from datetime import datetime
+
 import discord
 from discord.ext import commands
-from datetime import datetime
 
 from source.context import Context
 
@@ -262,14 +263,14 @@ class General(commands.Cog):
                 f"Fetching meeting details from database for meeting {meeting_id}"
             )
             meeting = await self.services.sql_recording_service_manager.get_meeting(meeting_id)
-            
+
             await self.services.logging_service.info(
                 f"Successfully retrieved meeting {meeting_id} - Status: {meeting.get('status')}"
             )
 
             # Create embed with meeting information
             embed = discord.Embed(
-                title=f"📊 Meeting Information",
+                title="📊 Meeting Information",
                 description=f"Details for meeting `{meeting_id}`",
                 color=discord.Color.green(),
             )
@@ -412,6 +413,7 @@ class General(commands.Cog):
                     # which knows the proper base path for transcript storage
                     import json
                     import os
+
                     import aiofiles
 
                     # The transcript_filename from the DB contains the full path or relative path
@@ -419,40 +421,48 @@ class General(commands.Cog):
                     await self.services.logging_service.info(
                         f"Compiled transcript file path from DB: {transcript_file}"
                     )
-                    
+
                     # Check if it's a relative path and build full path using the service manager
                     if transcript_file and not os.path.isabs(transcript_file):
                         # Build full path using transcription_file_service_manager's base path
-                        base_path = self.services.transcription_file_service_manager.transcription_storage_path
-                        transcript_file = os.path.join(base_path, "compilations", "storage", os.path.basename(transcript_file))
+                        base_path = (
+                            self.services.transcription_file_service_manager.transcription_storage_path
+                        )
+                        transcript_file = os.path.join(
+                            base_path, "compilations", "storage", os.path.basename(transcript_file)
+                        )
                         await self.services.logging_service.info(
                             f"Built full transcript file path: {transcript_file}"
                         )
-                    
+
                     if transcript_file and os.path.exists(transcript_file):
                         await self.services.logging_service.info(
                             f"Reading compiled transcript file for meeting {meeting_id}"
                         )
                         try:
                             # Use aiofiles for async file reading
-                            async with aiofiles.open(transcript_file, mode="r", encoding="utf-8") as f:
+                            async with aiofiles.open(transcript_file, encoding="utf-8") as f:
                                 content = await f.read()
                                 transcript_data = json.loads(content)
                                 summary = transcript_data.get("summary")
-                                
+
                                 if summary:
                                     await self.services.logging_service.info(
                                         f"Found summary for meeting {meeting_id} (length: {len(summary)} chars)"
                                     )
-                                    
+
                                     # Store summary for later - we'll send it in separate messages if too long
                                     # to avoid exceeding Discord's 6000 char embed limit
                                     meeting["_summary"] = summary
-                                    
+
                                     # Add a note that summary will be shown below
                                     embed.add_field(
                                         name="📋 Meeting Summary",
-                                        value="*See detailed summary below*" if len(summary) > 1000 else summary[:1000],
+                                        value=(
+                                            "*See detailed summary below*"
+                                            if len(summary) > 1000
+                                            else summary[:1000]
+                                        ),
                                         inline=False,
                                     )
                                 else:
@@ -508,7 +518,7 @@ class General(commands.Cog):
                 await self.services.logging_service.error(
                     f"Unexpected error fetching compiled transcript for meeting {meeting_id}: {str(e)}"
                 )
-                embed.add_field(    
+                embed.add_field(
                     name="📋 Meeting Summary",
                     value="*Unable to retrieve summary information.*",
                     inline=False,
@@ -531,19 +541,19 @@ class General(commands.Cog):
                 await self.services.logging_service.info(
                     f"Sending summary in separate messages (length: {len(summary)} chars)"
                 )
-                
+
                 # Split summary into chunks of 1900 chars (Discord message limit is 2000)
                 chunk_size = 1900
                 summary_chunks = []
-                
+
                 for i in range(0, len(summary), chunk_size):
-                    chunk = summary[i:i + chunk_size]
+                    chunk = summary[i : i + chunk_size]
                     summary_chunks.append(chunk)
-                
+
                 await self.services.logging_service.info(
                     f"Split summary into {len(summary_chunks)} message(s)"
                 )
-                
+
                 # Send each chunk as a separate message
                 for idx, chunk in enumerate(summary_chunks, start=1):
                     summary_embed = discord.Embed(
@@ -553,7 +563,7 @@ class General(commands.Cog):
                     )
                     summary_embed.set_footer(text=f"Meeting ID: {meeting_id}")
                     await ctx.followup.send(embed=summary_embed)
-                
+
                 await self.services.logging_service.info(
                     f"Successfully sent {len(summary_chunks)} summary message(s) for meeting {meeting_id}"
                 )
@@ -588,7 +598,9 @@ class General(commands.Cog):
     async def deepinfo(
         self,
         ctx: discord.ApplicationContext,
-        meeting_id: str = discord.Option(description="The meeting ID to get deep information about"),
+        meeting_id: str = discord.Option(
+            description="The meeting ID to get deep information about"
+        ),
     ):
         """Display comprehensive information about a meeting including all processing stages."""
         # Log command invocation
@@ -614,7 +626,7 @@ class General(commands.Cog):
 
             # Create embed with meeting information
             embed = discord.Embed(
-                title=f"🔍 Deep Meeting Analysis",
+                title="🔍 Deep Meeting Analysis",
                 description=f"Comprehensive processing information for meeting `{meeting_id}`",
                 color=discord.Color.blue(),
             )
@@ -700,17 +712,16 @@ class General(commands.Cog):
 
             # Send initial embed
             webhook_message = await ctx.followup.send(embed=embed)
-            
+
             # Fetch the actual message from the channel to get guild info
             # WebhookMessage doesn't have guild info, so we need to fetch it
             initial_message = await ctx.channel.fetch_message(webhook_message.id)
-            
+
             # Create a thread for detailed analysis
             thread = await initial_message.create_thread(
-                name=f"Deep Analysis: {meeting_id}",
-                auto_archive_duration=1440  # 24 hours
+                name=f"Deep Analysis: {meeting_id}", auto_archive_duration=1440  # 24 hours
             )
-            
+
             await self.services.logging_service.info(
                 f"[DEEPINFO] Created thread {thread.id} for meeting {meeting_id} analysis"
             )
@@ -723,8 +734,10 @@ class General(commands.Cog):
             )
 
             # Get temp recordings
-            temp_recordings = await self.services.sql_recording_service_manager.get_temp_recordings_for_meeting(
-                meeting_id
+            temp_recordings = (
+                await self.services.sql_recording_service_manager.get_temp_recordings_for_meeting(
+                    meeting_id
+                )
             )
 
             # Get persistent recordings
@@ -878,6 +891,7 @@ class General(commands.Cog):
             if compiled:
                 import json
                 import os
+
                 import aiofiles
 
                 # Get the transcript file path
@@ -885,7 +899,9 @@ class General(commands.Cog):
 
                 # Check if it's a relative path and build full path
                 if transcript_file and not os.path.isabs(transcript_file):
-                    base_path = self.services.transcription_file_service_manager.transcription_storage_path
+                    base_path = (
+                        self.services.transcription_file_service_manager.transcription_storage_path
+                    )
                     transcript_file = os.path.join(
                         base_path, "compilations", "storage", os.path.basename(transcript_file)
                     )
@@ -893,7 +909,7 @@ class General(commands.Cog):
                 if transcript_file and os.path.exists(transcript_file):
                     try:
                         # Read the compiled transcript file
-                        async with aiofiles.open(transcript_file, mode="r", encoding="utf-8") as f:
+                        async with aiofiles.open(transcript_file, encoding="utf-8") as f:
                             content = await f.read()
                             transcript_data = json.loads(content)
 
@@ -907,7 +923,11 @@ class General(commands.Cog):
                         # Check for main summary
                         main_summary = transcript_data.get("summary")
                         if main_summary:
-                            summary_preview = main_summary[:500] + "..." if len(main_summary) > 500 else main_summary
+                            summary_preview = (
+                                main_summary[:500] + "..."
+                                if len(main_summary) > 500
+                                else main_summary
+                            )
                             summary_embed.add_field(
                                 name="✨ Main Summary",
                                 value=f"**Length:** {len(main_summary)} characters\n**Preview:**\n{summary_preview}",
@@ -926,7 +946,9 @@ class General(commands.Cog):
                             layers_info = f"**Found {len(summary_layers)} layer(s):**\n"
                             for layer_name, layer_content in summary_layers.items():
                                 if isinstance(layer_content, str):
-                                    layers_info += f"  • `{layer_name}`: {len(layer_content)} chars\n"
+                                    layers_info += (
+                                        f"  • `{layer_name}`: {len(layer_content)} chars\n"
+                                    )
                                 elif isinstance(layer_content, dict):
                                     layers_info += f"  • `{layer_name}`: {len(str(layer_content))} chars (structured)\n"
 
@@ -971,7 +993,7 @@ class General(commands.Cog):
                             # Split summary into chunks of 1900 chars
                             chunk_size = 1900
                             summary_chunks = [
-                                main_summary[i:i + chunk_size]
+                                main_summary[i : i + chunk_size]
                                 for i in range(0, len(main_summary), chunk_size)
                             ]
 
@@ -990,7 +1012,7 @@ class General(commands.Cog):
                                 for layer_name, layer_content in summary_layers.items():
                                     if isinstance(layer_content, str) and layer_content:
                                         layer_chunks = [
-                                            layer_content[i:i + chunk_size]
+                                            layer_content[i : i + chunk_size]
                                             for i in range(0, len(layer_content), chunk_size)
                                         ]
 
@@ -1081,6 +1103,7 @@ class General(commands.Cog):
                 f"[DEEPINFO] Unexpected error in /deepinfo command for meeting {meeting_id} by user {ctx.author.id}: {str(e)}"
             )
             import traceback
+
             await self.services.logging_service.error(
                 f"[DEEPINFO] Traceback: {traceback.format_exc()}"
             )
@@ -1091,10 +1114,8 @@ class General(commands.Cog):
             )
             await ctx.followup.send(embed=embed, ephemeral=True)
 
-
     @commands.slash_command(
-        name="process_step",
-        description="Check and process the next incomplete job for a meeting"
+        name="process_step", description="Check and process the next incomplete job for a meeting"
     )
     async def process_step(
         self,
@@ -1103,7 +1124,7 @@ class General(commands.Cog):
     ):
         """
         Check a meeting's processing status and start the next incomplete job.
-        
+
         Job pipeline:
         1. Recording (temp recordings exist)
         2. Transcoding (temp recordings → MP3)
@@ -1147,106 +1168,121 @@ class General(commands.Cog):
             job_reason = ""
 
             # Stage 1: Check if recording exists (temp recordings)
-            temp_recordings = await self.services.sql_recording_service_manager.get_temp_recordings_for_meeting(meeting_id)
+            temp_recordings = (
+                await self.services.sql_recording_service_manager.get_temp_recordings_for_meeting(
+                    meeting_id
+                )
+            )
             if not temp_recordings:
                 job_to_start = "recording"
                 job_reason = "No temp recordings found. Meeting may not have been recorded yet."
-            
+
             # Stage 2: Check if transcoding is complete
             elif temp_recordings:
                 from source.server.sql_models import TranscodeStatus
-                
+
                 # Check if any transcodes are pending or in progress
                 pending_transcodes = [
-                    rec for rec in temp_recordings 
-                    if rec.get("transcode_status") in [
-                        TranscodeStatus.QUEUED.value,
-                        TranscodeStatus.IN_PROGRESS.value
-                    ]
+                    rec
+                    for rec in temp_recordings
+                    if rec.get("transcode_status")
+                    in [TranscodeStatus.QUEUED.value, TranscodeStatus.IN_PROGRESS.value]
                 ]
-                
+
                 if pending_transcodes:
                     job_to_start = "transcoding"
                     job_reason = f"Found {len(pending_transcodes)} temp recordings still being transcoded (queued or in progress)."
-                
+
                 # Check if any transcodes failed
                 failed_transcodes = [
-                    rec for rec in temp_recordings
+                    rec
+                    for rec in temp_recordings
                     if rec.get("transcode_status") == TranscodeStatus.FAILED.value
                 ]
-                
+
                 if failed_transcodes and not job_to_start:
                     job_to_start = "transcoding_failed"
                     job_reason = f"Found {len(failed_transcodes)} failed transcode jobs. Manual intervention may be required."
 
             # Stage 3: Check if concatenation is complete (persistent recordings exist)
             if not job_to_start:
-                persistent_recordings = await self.services.sql_recording_service_manager.get_persistent_recordings_for_meeting(meeting_id)
-                
+                persistent_recordings = await self.services.sql_recording_service_manager.get_persistent_recordings_for_meeting(
+                    meeting_id
+                )
+
                 if not persistent_recordings:
                     job_to_start = "concatenation"
                     job_reason = "Transcoding complete but no persistent recordings found. Need to concatenate temp recordings."
-            
+
             # Stage 4: Check if transcription is complete
             if not job_to_start:
-                user_transcripts = await self.services.sql_recording_service_manager.get_user_transcripts_for_meeting(meeting_id)
-                
+                user_transcripts = await self.services.sql_recording_service_manager.get_user_transcripts_for_meeting(
+                    meeting_id
+                )
+
                 if not user_transcripts:
                     job_to_start = "transcription"
                     job_reason = "Persistent recordings exist but no transcripts found. Need to transcribe recordings."
-            
+
             # Stage 5: Check if compilation is complete
             if not job_to_start:
-                compiled_transcript = await self.services.sql_recording_service_manager.get_compiled_transcript_for_meeting(meeting_id)
-                
+                compiled_transcript = await self.services.sql_recording_service_manager.get_compiled_transcript_for_meeting(
+                    meeting_id
+                )
+
                 if not compiled_transcript:
                     job_to_start = "compilation"
                     job_reason = "Individual transcripts exist but no compiled transcript found. Need to compile transcripts."
-            
+
             # Stage 6: Check if summarization is complete
             if not job_to_start and compiled_transcript:
                 # Load the compiled transcript file to check for summaries
-                import os
                 import json
+                import os
+
                 import aiofiles
-                
+
                 transcript_filename = compiled_transcript.get("filename")
                 if transcript_filename:
-                    storage_path = self.services.transcription_file_service_manager.get_compiled_storage_path()
+                    storage_path = (
+                        self.services.transcription_file_service_manager.get_compiled_storage_path()
+                    )
                     transcript_file = os.path.join(storage_path, transcript_filename)
-                    
+
                     if os.path.exists(transcript_file):
                         try:
-                            async with aiofiles.open(transcript_file, "r", encoding="utf-8") as f:
+                            async with aiofiles.open(transcript_file, encoding="utf-8") as f:
                                 transcript_content = await f.read()
                                 transcript_data = json.loads(transcript_content)
-                                
+
                                 # Check if summary exists and is not empty
-                                if not transcript_data.get("summary") or not transcript_data.get("summary_layers"):
+                                if not transcript_data.get("summary") or not transcript_data.get(
+                                    "summary_layers"
+                                ):
                                     job_to_start = "summarization"
                                     job_reason = "Compiled transcript exists but no summary found. Need to generate summaries."
                         except (json.JSONDecodeError, Exception) as e:
                             await self.services.logging_service.warning(
                                 f"[PROCESS_STEP] Error reading compiled transcript for meeting {meeting_id}: {str(e)}"
                             )
-            
+
             # Stage 7: Check if embeddings are complete
             if not job_to_start:
-                jobs = await self.services.sql_recording_service_manager.get_jobs_for_meeting(meeting_id)
-                from source.server.sql_models import JobsType, JobsStatus
-                
+                jobs = await self.services.sql_recording_service_manager.get_jobs_for_meeting(
+                    meeting_id
+                )
+                from source.server.sql_models import JobsStatus, JobsType
+
                 # Find text embedding job
                 embedding_jobs = [
-                    job for job in jobs
-                    if job.get("type") == JobsType.TEXT_EMBEDDING.value
+                    job for job in jobs if job.get("type") == JobsType.TEXT_EMBEDDING.value
                 ]
-                
+
                 # Check if there's a completed embedding job
                 completed_embedding = any(
-                    job.get("status") == JobsStatus.COMPLETED.value
-                    for job in embedding_jobs
+                    job.get("status") == JobsStatus.COMPLETED.value for job in embedding_jobs
                 )
-                
+
                 if not completed_embedding:
                     job_to_start = "embeddings"
                     job_reason = "Summarization complete but no embeddings found. Need to generate embeddings."
@@ -1264,7 +1300,7 @@ class General(commands.Cog):
                 embed.add_field(
                     name="Status",
                     value="All stages from recording through embeddings are complete.",
-                    inline=False
+                    inline=False,
                 )
                 embed.set_footer(
                     text=f"Requested by {ctx.author.name}",
@@ -1301,7 +1337,7 @@ class General(commands.Cog):
                     color=discord.Color.red(),
                 )
                 await ctx.followup.send(embed=error_embed)
-            
+
             elif job_to_start == "transcoding":
                 error_embed = discord.Embed(
                     title="⏳ Transcoding In Progress",
@@ -1309,7 +1345,7 @@ class General(commands.Cog):
                     color=discord.Color.orange(),
                 )
                 await ctx.followup.send(embed=error_embed)
-            
+
             elif job_to_start == "transcoding_failed":
                 error_embed = discord.Embed(
                     title="❌ Transcoding Failed",
@@ -1317,54 +1353,60 @@ class General(commands.Cog):
                     color=discord.Color.red(),
                 )
                 await ctx.followup.send(embed=error_embed)
-            
+
             elif job_to_start == "concatenation":
                 # Trigger post-stop processing (which handles concatenation)
                 await self.services.logging_service.info(
                     f"[PROCESS_STEP] Starting concatenation for meeting {meeting_id}"
                 )
-                
+
                 # Call the discord recorder manager to process recordings
-                await self.services.discord_recorder_service_manager._process_recordings_post_stop(meeting_id)
-                
+                await self.services.discord_recorder_service_manager._process_recordings_post_stop(
+                    meeting_id
+                )
+
                 success_embed = discord.Embed(
                     title="✅ Concatenation Started",
                     description="Concatenation job has been initiated.",
                     color=discord.Color.green(),
                 )
                 await ctx.followup.send(embed=success_embed)
-            
+
             elif job_to_start == "transcription":
                 # Trigger transcription job creation
                 await self.services.logging_service.info(
                     f"[PROCESS_STEP] Starting transcription for meeting {meeting_id}"
                 )
-                
-                await self.services.sql_recording_service_manager.create_transcription_job_for_completed_meeting(meeting_id)
-                
+
+                await self.services.sql_recording_service_manager.create_transcription_job_for_completed_meeting(
+                    meeting_id
+                )
+
                 success_embed = discord.Embed(
                     title="✅ Transcription Started",
                     description="Transcription job has been queued.",
                     color=discord.Color.green(),
                 )
                 await ctx.followup.send(embed=success_embed)
-            
+
             elif job_to_start == "compilation":
                 # Get user transcripts and create compilation job
                 await self.services.logging_service.info(
                     f"[PROCESS_STEP] Starting compilation for meeting {meeting_id}"
                 )
-                
-                user_transcripts = await self.services.sql_recording_service_manager.get_user_transcripts_for_meeting(meeting_id)
+
+                user_transcripts = await self.services.sql_recording_service_manager.get_user_transcripts_for_meeting(
+                    meeting_id
+                )
                 transcript_ids = [t["id"] for t in user_transcripts]
-                
+
                 if transcript_ids:
                     # Create compilation job using the correct service name
                     job_id = await self.services.transcription_compilation_job_manager.create_and_queue_compilation_job(
                         meeting_id=meeting_id,
                         transcript_ids=transcript_ids,
                     )
-                    
+
                     success_embed = discord.Embed(
                         title="✅ Compilation Started",
                         description=f"Compilation job `{job_id}` has been queued with {len(transcript_ids)} transcripts.",
@@ -1378,20 +1420,24 @@ class General(commands.Cog):
                         color=discord.Color.red(),
                     )
                     await ctx.followup.send(embed=error_embed)
-            
+
             elif job_to_start == "summarization":
                 # Get compiled transcript and user transcripts for summarization
                 await self.services.logging_service.info(
                     f"[PROCESS_STEP] Starting summarization for meeting {meeting_id}"
                 )
-                
-                compiled_transcript = await self.services.sql_recording_service_manager.get_compiled_transcript_for_meeting(meeting_id)
-                user_transcripts = await self.services.sql_recording_service_manager.get_user_transcripts_for_meeting(meeting_id)
-                
+
+                compiled_transcript = await self.services.sql_recording_service_manager.get_compiled_transcript_for_meeting(
+                    meeting_id
+                )
+                user_transcripts = await self.services.sql_recording_service_manager.get_user_transcripts_for_meeting(
+                    meeting_id
+                )
+
                 compiled_transcript_id = compiled_transcript["id"]
                 transcript_ids = [t["id"] for t in user_transcripts]
                 user_ids = list(set(t["user_id"] for t in user_transcripts))
-                
+
                 # Create summarization job
                 job_id = await self.services.summarization_job_manager.create_and_queue_summarization_job(
                     meeting_id=meeting_id,
@@ -1399,35 +1445,41 @@ class General(commands.Cog):
                     transcript_ids=transcript_ids,
                     user_ids=user_ids,
                 )
-                
+
                 success_embed = discord.Embed(
                     title="✅ Summarization Started",
                     description=f"Summarization job `{job_id}` has been queued.",
                     color=discord.Color.green(),
                 )
                 await ctx.followup.send(embed=success_embed)
-            
+
             elif job_to_start == "embeddings":
                 # Get compiled transcript for embeddings
                 await self.services.logging_service.info(
                     f"[PROCESS_STEP] Starting embeddings generation for meeting {meeting_id}"
                 )
-                
-                compiled_transcript = await self.services.sql_recording_service_manager.get_compiled_transcript_for_meeting(meeting_id)
-                user_transcripts = await self.services.sql_recording_service_manager.get_user_transcripts_for_meeting(meeting_id)
-                
+
+                compiled_transcript = await self.services.sql_recording_service_manager.get_compiled_transcript_for_meeting(
+                    meeting_id
+                )
+                user_transcripts = await self.services.sql_recording_service_manager.get_user_transcripts_for_meeting(
+                    meeting_id
+                )
+
                 compiled_transcript_id = compiled_transcript["id"]
                 guild_id = meeting["guild_id"]
                 user_ids = list(set(t["user_id"] for t in user_transcripts))
-                
+
                 # Create embedding job using the correct service name
-                job_id = await self.services.text_embedding_job_manager.create_and_queue_embedding_job(
-                    meeting_id=meeting_id,
-                    guild_id=guild_id,
-                    compiled_transcript_id=compiled_transcript_id,
-                    user_ids=user_ids,
+                job_id = (
+                    await self.services.text_embedding_job_manager.create_and_queue_embedding_job(
+                        meeting_id=meeting_id,
+                        guild_id=guild_id,
+                        compiled_transcript_id=compiled_transcript_id,
+                        user_ids=user_ids,
+                    )
                 )
-                
+
                 success_embed = discord.Embed(
                     title="✅ Embeddings Started",
                     description=f"Text embedding job `{job_id}` has been queued.",
@@ -1452,6 +1504,7 @@ class General(commands.Cog):
                 f"[PROCESS_STEP] Unexpected error in /process_step command for meeting {meeting_id} by user {ctx.author.id}: {str(e)}"
             )
             import traceback
+
             await self.services.logging_service.error(
                 f"[PROCESS_STEP] Traceback: {traceback.format_exc()}"
             )

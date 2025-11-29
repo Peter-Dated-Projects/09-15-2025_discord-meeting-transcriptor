@@ -11,15 +11,13 @@ Tests cover CRUD operations for guild subscriptions including:
 """
 
 import os
-from datetime import datetime
 
 import pytest
 
 from source.constructor import ServerManagerType
 from source.server.constructor import construct_server_manager
-from source.server.sql_models import SubscriptionType, SubscriptionsModel
+from source.server.sql_models import SubscriptionsModel, SubscriptionType
 from source.services.constructor import construct_services_manager
-from source.services.subscription_sql_manager.manager import SubscriptionSQLManagerService
 from source.utils import get_current_timestamp_est
 
 

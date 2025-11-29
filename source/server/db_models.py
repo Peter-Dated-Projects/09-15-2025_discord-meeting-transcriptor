@@ -2,17 +2,17 @@ from pydantic import RootModel, field_validator
 
 from source.server.sql_models import (
     CompiledTranscriptsModel,
+    ConversationsModel,
+    ConversationsStoreModel,
     GuildAdminWhitelistModel,
+    JobsModel,
     JobsStatusErrorLogModel,
     JobsStatusModel,
-    JobsModel,
     MeetingModel,
     RecordingModel,
+    SubscriptionsModel,
     TempRecordingModel,
     UserTranscriptsModel,
-    ConversationsModel,
-    SubscriptionsModel,
-    ConversationsStoreModel,
 )
 
 # -------------------------------------------------------------- #
