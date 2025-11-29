@@ -2,195 +2,139 @@
 
 This guide will help you set up your development environment for the Discord Meeting Transcriptor bot.
 
-## Prerequisites
+## 1. Prerequisites
 
-- Python 3.13+
-- pip
-- git
-- Discord Bot Token
+- Python 3.10+
+- `uv` package manager (`pip install uv`)
+- `git`
+- A Discord Bot Token ([how to get one](https://discord.com/developers/applications))
+- Docker (for running PostgreSQL and other services)
 
-## Quick Setup
+## 2. Initial Project Setup
 
 ```bash
-# 1. Install all development dependencies
-make install-dev
+# Clone the repository
+git clone https://github.com/Peter-Dated-Projects/09-15-2025_discord-meeting-transcriptor.git
+cd 09-15-2025_discord-meeting-transcriptor
 
-# 2. Install pre-commit hooks
-make pre-commit-install
+# Create a virtual environment and install all dependencies
+uv pip install -e ".[dev]"
 
-# 3. Create your .env file
+# Set up pre-commit hooks for code quality
+uv run pre-commit install
+```
+
+## 3. Environment Configuration
+
+The bot uses a `.env` file for configuration.
+
+```bash
+# Create your .env file from the example
 cp .env.example .env
-# Edit .env and add your DISCORD_API_TOKEN
+```
 
-# 4. Run the bot
+Now, open `.env` and add your `DISCORD_API_TOKEN`. You can also configure database settings and other options.
+
+## 4. Running Dependent Services
+
+This project requires external services like PostgreSQL and Whisper to run. The easiest way to manage these is with Docker.
+
+```bash
+# Start all services (PostgreSQL, ChromaDB, etc.) in the background
+docker-compose -f docker-compose.local.yml up -d
+```
+*Note: The Whisper transcription service can also be run locally. See the `README.md` for instructions.*
+
+## 5. Running the Bot for Development
+
+To run the bot with automatic reloading when you make code changes:
+
+```bash
+# Run the bot in development mode
 make dev
 ```
 
-## Manual Setup
+## 6. Development Workflow & Commands
 
-If you prefer to set up manually:
+This project uses `make` for common development tasks. Run `make help` to see all available commands.
 
-```bash
-# Install production dependencies
-pip install -r requirements.txt
+### The Edit-Lint-Test Cycle
 
-# Install development dependencies
-pip install -r requirements-dev.txt
+1.  **Write Code**: Make your changes in the `source/` or `cogs/` directories.
+2.  **Format & Lint**: Before committing, ensure your code meets our quality standards.
+    ```bash
+    # Auto-format your code
+    make format
 
-# Install pre-commit hooks
-pre-commit install
-```
+    # Run all linters and quality checks
+    make lint
+    ```
+3.  **Test**: Run the test suite to make sure your changes didn't break anything.
+    ```bash
+    # Run all tests
+    make test
 
-## Available Commands
+    # Run tests with a coverage report
+    make test-cov
+    ```
 
-Run `make help` to see all available commands. Here are the most useful ones:
+### Committing Your Changes
 
-### Code Quality
-```bash
-make format         # Format code with black and ruff
-make lint           # Check code with ruff linter
-make lint-fix       # Fix linting issues automatically
-make type-check     # Run mypy type checking
-make security       # Run security checks with bandit
-make check-all      # Run all checks (format, lint, type-check, test)
-```
+This project uses **pre-commit hooks** that will automatically run `make format` and `make lint` on the files you've changed. If the hooks fail, review the output, fix the issues, and `git add` your files again before re-running `git commit`.
 
-### Testing
-```bash
-make test           # Run tests
-make test-cov       # Run tests with coverage report
-make test-quick     # Quick tests without coverage
-```
+To bypass hooks (not recommended): `git commit --no-verify`.
 
-### Development
-```bash
-make run            # Run the bot
-make dev            # Run bot with auto-reload (recommended for development)
-make clean          # Clean up cache and build artifacts
-```
+### Useful `make` commands
 
-### Pre-commit
-```bash
-make pre-commit-run     # Run pre-commit on all files
-make pre-commit-update  # Update pre-commit hooks
-```
+-   `make check-all`: Run all formatters, linters, and tests.
+-   `make type-check`: Run MyPy for static type checking.
+-   `make clean`: Remove cache and build files.
 
-## Pre-commit Hooks
+## 7. IDE Setup (VS Code Recommended)
 
-Pre-commit hooks run automatically before each commit to ensure code quality. They will:
+Install these VS Code extensions for the best experience:
+- `ms-python.python` (Python)
+- `charliermarsh.ruff` (Ruff)
+- `ms-python.black-formatter` (Black Formatter)
+- `ms-python.mypy-type-checker` (Mypy Type Checker)
 
-1. ✨ Format your code with Black and Ruff
-2. 🔍 Lint your code with Ruff
-3. 🔒 Check for security issues with Bandit
-4. 🔑 Scan for accidentally committed secrets
-5. 📝 Check file formatting (trailing whitespace, line endings, etc.)
-6. ⚡ Run type checks with MyPy
+These extensions will automatically use the project's `pyproject.toml` file to format and lint your code as you save it.
 
-If any check fails, the commit will be blocked. Fix the issues and try again.
+## 8. Testing in Detail
 
-### Bypassing Pre-commit (Not Recommended)
+-   **Location**: All tests are in the `tests/` directory.
+-   **Framework**: We use `pytest`.
+-   **Running Tests**:
+    ```bash
+    # Run all tests
+    make test
 
-In rare cases where you need to commit without running hooks:
-```bash
-git commit --no-verify -m "Your message"
-```
+    # Run a specific file
+    uv run pytest tests/unit/services/test_rag.py
 
-## IDE Setup
+    # Run a specific test by name
+    uv run pytest -k "test_specific_behavior"
+    ```
+-   **Test Markers**:
+    -   `@pytest.mark.unit`: Fast, isolated unit tests.
+    -   `@pytest.mark.integration`: Tests requiring external services (like a database).
+    -   Run specific markers: `uv run pytest -m unit`
 
-### VS Code
+## 9. Dependency Management
 
-Install these recommended extensions:
-- Python (ms-python.python)
-- Ruff (charliermarsh.ruff)
-- Black Formatter (ms-python.black-formatter)
-- Mypy Type Checker (ms-python.mypy-type-checker)
-- EditorConfig (editorconfig.editorconfig)
+Dependencies are managed in `pyproject.toml` under the `[project]` and `[project.optional-dependencies]` sections.
 
-The `.editorconfig` file will automatically configure formatting in VS Code.
+-   **Production `dependencies`**: Required to run the bot.
+-   **`dev` dependencies**: Required for testing, linting, and development.
 
-### PyCharm
+To add a new dependency:
 
-PyCharm should automatically detect the `pyproject.toml` configuration. Make sure to:
-1. Set Python 3.13 as your interpreter
-2. Enable "Optimize imports on the fly"
-3. Enable "Reformat code on save" (optional)
+1.  Add the package to the appropriate list in `pyproject.toml`.
+2.  Re-install the dependencies:
+    ```bash
+    # If you added a production dependency
+    uv pip install -e .
 
-## Configuration Files
-
-- **`pyproject.toml`** - Central configuration for all Python tools (ruff, black, mypy, pytest, coverage)
-- **`.pre-commit-config.yaml`** - Pre-commit hooks configuration
-- **`.editorconfig`** - Editor configuration for consistent formatting
-- **`Makefile`** - Convenient commands for development tasks
-- **`mypy.ini`** - ⚠️ DEPRECATED - Configuration moved to `pyproject.toml`
-
-## Code Style
-
-This project uses:
-- **Black** for code formatting (88 character line length)
-- **Ruff** for linting and import sorting
-- **MyPy** for static type checking
-
-All code should be:
-- Formatted with Black
-- Pass Ruff linting
-- Include type hints for function parameters and return values
-- Pass MyPy type checking (where practical)
-
-## Testing
-
-Tests should be placed in the `tests/` directory (to be created). We use:
-- **pytest** for test framework
-- **pytest-asyncio** for async tests
-- **pytest-cov** for coverage reports
-
-Run tests before committing:
-```bash
-make test
-```
-
-## Security
-
-Security is important! The pre-commit hooks include:
-- **Bandit** - Scans for common security issues
-- **detect-secrets** - Prevents accidentally committing secrets
-
-To initialize the secrets baseline (first time only):
-```bash
-make init-secrets
-```
-
-## Troubleshooting
-
-### Pre-commit hooks fail
-
-If hooks fail, read the error messages carefully. Common fixes:
-```bash
-# Update hooks to latest versions
-make pre-commit-update
-
-# Clean and reinstall
-pre-commit clean
-pre-commit install
-```
-
-### Import errors after installing packages
-
-```bash
-# Clean cache and restart
-make clean
-```
-
-### MyPy errors with py-cord
-
-The project is configured to ignore missing imports for py-cord. If you get type errors, they might be legitimate issues to fix.
-
-## Contributing
-
-Before submitting a pull request:
-
-1. Run all checks: `make check-all`
-2. Ensure tests pass: `make test-cov`
-3. Update documentation if needed
-4. Write meaningful commit messages
-
-Happy coding! 🚀
+    # If you added a development dependency
+    uv pip install -e ".[dev]"
+    ```
