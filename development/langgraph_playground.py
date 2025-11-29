@@ -108,10 +108,22 @@ async def agent_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
         stream=False,
     )
 
+    # Convert Ollama tool calls to the format LangChain's AIMessage expects
+    langchain_tool_calls = []
+    if response.tool_calls:
+        for ollama_tc in response.tool_calls:
+            langchain_tool_calls.append(
+                {
+                    "name": ollama_tc["function"]["name"],
+                    "args": ollama_tc["function"]["arguments"],
+                    "id": ollama_tc.get("id"), # .get() for safety, though id is standard
+                }
+            )
+
     # Wrap the response in an AIMessage for the graph state
     ai_response = AIMessage(
         content=response.content,
-        tool_calls=response.tool_calls or [],
+        tool_calls=langchain_tool_calls,
     )
     
     return {"messages": [ai_response]}
