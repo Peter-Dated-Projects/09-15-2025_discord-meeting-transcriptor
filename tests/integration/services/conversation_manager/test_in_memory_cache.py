@@ -5,8 +5,7 @@ Run with: pytest source/services/conversation_manager/test_in_memory_cache.py
 
 import asyncio
 from datetime import datetime
-from typing import Optional
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -16,7 +15,6 @@ from source.services.conversation_manager import (
     Message,
     MessageType,
 )
-
 
 # -------------------------------------------------------------- #
 # Message Tests

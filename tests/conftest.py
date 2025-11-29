@@ -225,7 +225,6 @@ def shared_test_log_file(tmp_path_factory) -> str:
     Returns:
         str: Path to the shared log file
     """
-    import tempfile
     from datetime import datetime
 
     # Create a logs directory in the test temp directory

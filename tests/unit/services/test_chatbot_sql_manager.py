@@ -61,7 +61,7 @@ class TestChatbotSQLManagerService:
         await servers_manager.disconnect_all()
 
     @pytest.fixture
-    def test_data(self, tmp_path):
+    def test_data(self):
         """Provide test data."""
         test_user_id = "1234567890123456"
         test_guild_id = "9876543210987654"
@@ -85,7 +85,6 @@ class TestChatbotSQLManagerService:
         services_manager, servers_manager = services_and_db
 
         # Create ChatbotSQLManagerService instance
-        from source.context import Context
 
         chatbot_service = ChatbotSQLManagerService(services_manager.context)
         await chatbot_service.on_start(services_manager)
@@ -409,7 +408,7 @@ class TestChatbotSQLManagerService:
 
         assert len(conversations) == 3
         assert all(conv["requesting_user_id"] == user_1 for conv in conversations)
-        assert set(conv["id"] for conv in conversations) == set(conv_ids_user1)
+        assert set(conv["id"] for conv in conversations) is set(conv_ids_user1)
 
     @pytest.mark.asyncio
     async def test_get_conversations_by_user_no_results(self, chatbot_service):
@@ -464,7 +463,7 @@ class TestChatbotSQLManagerService:
 
         assert len(conversations) == 3
         assert all(conv["discord_guild_id"] == guild_1 for conv in conversations)
-        assert set(conv["id"] for conv in conversations) == set(conv_ids_guild1)
+        assert set(conv["id"] for conv in conversations) is set(conv_ids_guild1)
 
     @pytest.mark.asyncio
     async def test_get_conversations_by_guild_no_results(self, chatbot_service):

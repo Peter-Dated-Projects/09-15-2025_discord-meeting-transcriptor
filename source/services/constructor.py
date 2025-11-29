@@ -81,16 +81,16 @@ def construct_services_manager(
         # Service Managers Setup
         # -------------------------------------------------------------- #
 
-        from source.services.ffmpeg_manager.manager import FFmpegManagerService
-        from source.services.file_manager.manager import FileManagerService
-        from source.services.recording_file_manager.manager import (
+        from source.services.chat.conversation_file_manager.manager import (
+            ConversationFileManagerService,
+        )
+        from source.services.common.file_manager.manager import FileManagerService
+        from source.services.discord.recording_file_manager.manager import (
             RecordingFileManagerService,
         )
-        from source.services.transcription_file_manager.manager import (
+        from source.services.gpu.ffmpeg_manager.manager import FFmpegManagerService
+        from source.services.transcription.transcription_file_manager.manager import (
             TranscriptionFileManagerService,
-        )
-        from source.services.conversation_file_manager.manager import (
-            ConversationFileManagerService,
         )
 
         file_service_manager = FileManagerService(context=context, storage_path=storage_path)
@@ -118,17 +118,17 @@ def construct_services_manager(
         # DB Interfaces Setup
         # -------------------------------------------------------------- #
 
-        from source.services.conversations_sql_manager.manager import (
+        from source.services.chat.conversations_sql_manager.manager import (
             ConversationsSQLManagerService,
         )
-        from source.services.conversations_store_sql_manager.manager import (
+        from source.services.chat.conversations_store_sql_manager.manager import (
             ConversationsStoreSQLManagerService,
         )
-        from source.services.recording_sql_manager.manager import SQLRecordingManagerService
-        from source.services.sql_logging_manager.manager import SQLLoggingManagerService
-        from source.services.subscription_sql_manager.manager import (
+        from source.services.common.sql_logging_manager.manager import SQLLoggingManagerService
+        from source.services.common.subscription_sql_manager.manager import (
             SubscriptionSQLManagerService,
         )
+        from source.services.discord.recording_sql_manager.manager import SQLRecordingManagerService
 
         sql_recording_service_manager = SQLRecordingManagerService(context=context)
         sql_logging_service_manager = SQLLoggingManagerService(context=context)
@@ -140,7 +140,9 @@ def construct_services_manager(
         # Discord Recorder Setup
         # -------------------------------------------------------------- #
 
-        from source.services.discord_recorder_manager.manager import DiscordRecorderManagerService
+        from source.services.discord.discord_recorder_manager.manager import (
+            DiscordRecorderManagerService,
+        )
 
         discord_recorder_service_manager = DiscordRecorderManagerService(context=context)
 
@@ -148,7 +150,7 @@ def construct_services_manager(
         # Presence Manager Setup
         # -------------------------------------------------------------- #
 
-        from source.services.presence_manager.manager import PresenceManagerService
+        from source.services.discord.presence_manager.manager import PresenceManagerService
 
         presence_manager_service = PresenceManagerService(context=context)
 
@@ -156,10 +158,10 @@ def construct_services_manager(
         # Transcription Job Manager Setup
         # -------------------------------------------------------------- #
 
-        from source.services.transcription_job_manager.compiler import (
+        from source.services.transcription.transcription_job_manager.compiler import (
             TranscriptionCompilationJobManagerService,
         )
-        from source.services.transcription_job_manager.manager import (
+        from source.services.transcription.transcription_job_manager.manager import (
             TranscriptionJobManagerService,
         )
 
@@ -172,7 +174,7 @@ def construct_services_manager(
         # Summarization Job Manager Setup
         # -------------------------------------------------------------- #
 
-        from source.services.summarization_job_manager.manager import (
+        from source.services.transcription.summarization_job_manager.manager import (
             SummarizationJobManagerService,
         )
 
@@ -182,7 +184,7 @@ def construct_services_manager(
         # Text Embedding Job Manager Setup
         # -------------------------------------------------------------- #
 
-        from source.services.text_embedding_manager.manager import (
+        from source.services.transcription.text_embedding_manager.manager import (
             TextEmbeddingJobManagerService,
         )
 
@@ -192,7 +194,7 @@ def construct_services_manager(
         # GPU Resource Manager Setup
         # -------------------------------------------------------------- #
 
-        from source.services.gpu_resource_manager import GPUResourceManager
+        from source.services.gpu.gpu_resource_manager import GPUResourceManager
 
         gpu_resource_manager = GPUResourceManager(context=context)
 
@@ -200,7 +202,7 @@ def construct_services_manager(
         # Ollama Request Manager Setup
         # -------------------------------------------------------------- #
 
-        from source.services.ollama_request_manager.manager import OllamaRequestManager
+        from source.services.gpu.ollama_request_manager.manager import OllamaRequestManager
 
         ollama_request_manager = OllamaRequestManager(context=context)
 
@@ -208,7 +210,7 @@ def construct_services_manager(
         # Conversation Manager Setup
         # -------------------------------------------------------------- #
 
-        from source.services.conversation_manager.in_memory_cache import (
+        from source.services.chat.conversation_manager.in_memory_cache import (
             InMemoryConversationManager,
         )
 
@@ -220,7 +222,7 @@ def construct_services_manager(
         # Chat Job Manager Setup
         # -------------------------------------------------------------- #
 
-        from source.services.chat_job_manager.manager import ChatJobManagerService
+        from source.services.chat.chat_job_manager.manager import ChatJobManagerService
 
         chat_job_manager = ChatJobManagerService(context=context)
 

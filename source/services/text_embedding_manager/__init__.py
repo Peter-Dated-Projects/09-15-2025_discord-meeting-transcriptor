@@ -1,1 +1,0 @@
-# Text Embedding Manager Service

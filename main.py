@@ -136,9 +136,9 @@ async def load_cogs(context: Context):
     Args:
         context: The application context instance
     """
+    from cogs.chat import setup as setup_chat
     from cogs.general import setup as setup_general
     from cogs.voice import setup as setup_voice
-    from cogs.chat import setup as setup_chat
 
     setup_general(context)
     await context.services_manager.logging_service.info("✓ Loaded cogs.general")

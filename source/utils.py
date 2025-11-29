@@ -95,7 +95,7 @@ def calculate_audio_file_duration_ms(file_path: str) -> int:
         output = subprocess.check_output(command, stderr=subprocess.STDOUT)
         duration = float(output)
         return int(duration * 1000)  # Convert to milliseconds
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         # TODO: Add proper logging service here
         return 0
 
