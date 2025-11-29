@@ -179,7 +179,7 @@ class SummarizationJob(Job):
         """
         import os
 
-        from source.services.summarization_job_manager.prompts import (
+        from source.services.transcription.summarization_job_manager.prompts import (
             LEVEL_0_SYSTEM_MESSAGE,
             LEVEL_0_USER_CONTENT_TEMPLATE,
             LEVEL_N_SYSTEM_MESSAGE,

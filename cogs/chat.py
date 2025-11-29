@@ -4,10 +4,10 @@ import discord
 from discord.ext import commands
 
 from source.context import Context
-from source.services.chat_job_manager.attachment_utils import (
+from source.services.chat.chat_job_manager.attachment_utils import (
     extract_attachments_from_message,
 )
-from source.services.conversation_manager.in_memory_cache import (
+from source.services.chat.conversation_manager.in_memory_cache import (
     ConversationStatus,
 )
 

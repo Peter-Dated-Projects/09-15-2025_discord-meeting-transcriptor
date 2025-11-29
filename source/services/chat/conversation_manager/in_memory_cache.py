@@ -13,7 +13,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from source.services.conversation_file_manager.manager import (
+    from source.services.chat.conversation_file_manager.manager import (
         BaseConversationFileServiceManager,
     )
 

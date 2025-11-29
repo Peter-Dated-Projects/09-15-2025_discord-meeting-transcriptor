@@ -4,7 +4,7 @@ Chat Job Manager Package.
 This package contains the job manager for handling chatbot conversations.
 """
 
-from source.services.chat_job_manager.manager import (
+from source.services.chat.chat_job_manager.manager import (
     ChatJob,
     ChatJobManagerService,
 )

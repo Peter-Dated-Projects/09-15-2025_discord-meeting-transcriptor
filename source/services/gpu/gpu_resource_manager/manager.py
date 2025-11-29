@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from source.context import Context
 
-from source.services.gpu_resource_manager.lock import GPUResourceLock
+from source.services.gpu.gpu_resource_manager.lock import GPUResourceLock
 from source.services.manager import Manager
 
 
