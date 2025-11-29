@@ -5,6 +5,7 @@ Playground for testing LangGraph subroutines with a real Ollama LLM call.
 import asyncio
 from typing import Any, Dict, List, Literal
 import json
+import uuid # Add this import
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
@@ -116,7 +117,7 @@ async def agent_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
                 {
                     "name": ollama_tc["function"]["name"],
                     "args": ollama_tc["function"]["arguments"],
-                    "id": ollama_tc.get("id"), # .get() for safety, though id is standard
+                    "id": ollama_tc.get("id", str(uuid.uuid4())), # Ensure id is always a string
                 }
             )
 
