@@ -1330,6 +1330,10 @@ class DiscordSessionHandler:
                 temp_recording_id=temp_recording_id, status=new_status
             )
 
+            # Send DM notification to requestor if transcode failed
+            if not success:
+                await self._send_transcode_error_dm(self.meeting_id, temp_recording_id)
+
             # Delete PCM file after successful transcode (non-blocking)
             if success and os.path.exists(pcm_path):
                 try:
@@ -1349,6 +1353,50 @@ class DiscordSessionHandler:
             job_id=job_id,
             meeting_id=self.meeting_id,
         )
+
+    async def _send_transcode_error_dm(self, meeting_id: str, temp_recording_id: str) -> None:
+        """Send error notification to meeting requestor when transcoding fails."""
+        try:
+            # Get meeting data to retrieve requestor
+            meeting_data = await self.services.sql_recording_service_manager.get_meeting(
+                meeting_id=meeting_id
+            )
+            if not meeting_data:
+                return
+
+            requestor_id = meeting_data.get("requested_by")
+            if not requestor_id:
+                return
+
+            # Create error embed
+            embed = discord.Embed(
+                title="❌ Transcoding Failed",
+                description=(
+                    f"An error occurred while transcoding audio for meeting `{meeting_id}`.\n\n"
+                    f"**Temp Recording ID:** `{temp_recording_id}`\n\n"
+                    "This audio chunk could not be converted to MP3. "
+                    "You can retry the concatenation step using `/process_step`."
+                ),
+                color=discord.Color.red(),
+            )
+
+            embed.add_field(
+                name="Next Steps",
+                value="Run `/process_step` with the meeting ID to retry the failed job.",
+                inline=False,
+            )
+
+            # Send DM to requestor only
+            from source.utils import BotUtils
+
+            await BotUtils.send_dm(
+                self.services.context.bot, requestor_id, embed=embed
+            )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to send transcode error DM for meeting {meeting_id}: {e}"
+            )
 
     # -------------------------------------------------------------- #
     # Session Information Methods
@@ -2118,6 +2166,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Temp recordings exist ({len(recordings)} total) but MP3 transcoding may have failed. "
                     f"Check transcode_status in temp_recordings table."
                 )
+                # Send error notification to requestor
+                await self._send_concatenation_error_dm(meeting_id, user_id, "No MP3 files available")
                 return None
 
             await self.services.logging_service.info(
@@ -2134,6 +2184,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                 await self.services.logging_service.error(
                     f"Failed to concatenate MP3 files for user {user_id} in meeting {meeting_id}"
                 )
+                # Send error notification to requestor
+                await self._send_concatenation_error_dm(meeting_id, user_id, "MP3 concatenation failed")
                 return None
 
             # Insert persistent recording into SQL
@@ -2191,7 +2243,54 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             await self.services.logging_service.error(
                 f"Error processing recordings for user {user_id} in meeting {meeting_id}: {e}"
             )
+            # Send error notification to requestor
+            await self._send_concatenation_error_dm(meeting_id, user_id, str(e))
             return None
+
+    async def _send_concatenation_error_dm(self, meeting_id: str, user_id: int | str, error_details: str) -> None:
+        """Send error notification to meeting requestor when concatenation/recording processing fails."""
+        try:
+            # Get meeting data to retrieve requestor
+            meeting_data = await self.services.sql_recording_service_manager.get_meeting(
+                meeting_id=meeting_id
+            )
+            if not meeting_data:
+                return
+
+            requestor_id = meeting_data.get("requested_by")
+            if not requestor_id:
+                return
+
+            # Create error embed
+            embed = discord.Embed(
+                title="❌ Audio Processing Failed",
+                description=(
+                    f"An error occurred while processing audio recordings for meeting `{meeting_id}`.\n\n"
+                    f"**Affected User:** <@{user_id}>\n"
+                    f"**Error:** {error_details}\n\n"
+                    "The audio files could not be concatenated into a final recording. "
+                    "This may be due to transcoding failures or missing audio chunks."
+                ),
+                color=discord.Color.red(),
+            )
+
+            embed.add_field(
+                name="Next Steps",
+                value="Run `/process_step` with the meeting ID to retry concatenation.",
+                inline=False,
+            )
+
+            # Send DM to requestor only
+            from source.utils import BotUtils
+
+            await BotUtils.send_dm(
+                self.services.context.bot, requestor_id, embed=embed
+            )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to send concatenation error DM for meeting {meeting_id}: {e}"
+            )
 
     async def _process_recordings_post_stop(
         self,
