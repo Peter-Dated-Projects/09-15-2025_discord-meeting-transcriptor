@@ -45,10 +45,10 @@ if TYPE_CHECKING:
 from source.server.sql_models import JobsStatus, JobsType
 from source.services.common.job import Job, JobQueue
 from source.services.manager import BaseTextEmbeddingJobManagerService
-from source.services.text_embedding_manager.summary_partitioner import (
+from source.services.transcription.text_embedding_manager.summary_partitioner import (
     partition_multi_level_summaries,
 )
-from source.services.text_embedding_manager.text_partitioner import (
+from source.services.transcription.text_embedding_manager.text_partitioner import (
     partition_transcript_segments,
 )
 from source.utils import generate_16_char_uuid

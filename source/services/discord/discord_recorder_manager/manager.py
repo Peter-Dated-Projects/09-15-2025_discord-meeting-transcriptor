@@ -16,7 +16,7 @@ from source.server.sql_models import (
     TempRecordingModel,
     TranscodeStatus,
 )
-from source.services.discord_recorder_manager.pcm_generator import (
+from source.services.discord.discord_recorder_manager.pcm_generator import (
     SilentPCM,
     calculate_pcm_duration_ms,
 )

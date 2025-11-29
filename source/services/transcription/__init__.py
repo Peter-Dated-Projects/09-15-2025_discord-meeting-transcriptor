@@ -17,7 +17,7 @@ from source.services.transcription.transcription_job_manager import (
     TranscriptionJob,
     TranscriptionJobManagerService,
 )
-from source.services.transcription.vector_reranker_manager import VectorRerankerManagerService
+from source.services.transcription.vector_reranker_manager import VectorRerankerManager
 
 __all__ = [
     "SummarizationJob",
@@ -27,5 +27,5 @@ __all__ = [
     "TranscriptionFileManagerService",
     "TranscriptionJob",
     "TranscriptionJobManagerService",
-    "VectorRerankerManagerService",
+    "VectorRerankerManager",
 ]

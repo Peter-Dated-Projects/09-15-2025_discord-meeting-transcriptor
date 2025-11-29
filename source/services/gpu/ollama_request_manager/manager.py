@@ -51,8 +51,8 @@ if TYPE_CHECKING:
     from source.services.manager import ServicesManager
 
 from source.services.manager import Manager
-from source.services.ollama_request_manager.conversation import ConversationHistory
-from source.services.ollama_request_manager.models import DocumentCollection
+from source.services.gpu.ollama_request_manager.conversation import ConversationHistory
+from source.services.gpu.ollama_request_manager.models import DocumentCollection
 
 # -------------------------------------------------------------- #
 # Data Models

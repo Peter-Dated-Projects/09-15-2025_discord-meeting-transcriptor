@@ -11,7 +11,7 @@ from source.services.gpu.ffmpeg_manager import (
     FFmpegManagerService,
 )
 from source.services.gpu.gpu_resource_manager import GPUResourceManager
-from source.services.gpu.ollama_request_manager import OllamaRequestManagerService
+from source.services.gpu.ollama_request_manager import OllamaRequestManager
 
 __all__ = [
     "FFJob",
@@ -19,5 +19,5 @@ __all__ = [
     "FFmpegHandler",
     "FFmpegManagerService",
     "GPUResourceManager",
-    "OllamaRequestManagerService",
+    "OllamaRequestManager",
 ]

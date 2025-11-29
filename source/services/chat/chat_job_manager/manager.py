@@ -26,7 +26,7 @@ from datetime import datetime
 
 from source.server.sql_models import JobsStatus, JobsType
 from source.services.common.job import Job, JobQueue
-from source.services.conversation_manager.in_memory_cache import (
+from source.services.chat.conversation_manager.in_memory_cache import (
     Conversation,
     ConversationStatus,
     Message,
@@ -334,7 +334,7 @@ class ChatJob(Job):
         Returns:
             List of Message objects for LLM with user attribution and images
         """
-        from source.services.ollama_request_manager.manager import Message as LLMMessage
+        from source.services.gpu.ollama_request_manager.manager import Message as LLMMessage
 
         messages = []
 
@@ -399,7 +399,7 @@ Do not spend more than 500 tokens on thinking before responding.
                     # Extract images for vision models
                     image_paths = []
                     if msg.attachments:
-                        from source.services.chat_job_manager.attachment_utils import (
+                        from source.services.chat.chat_job_manager.attachment_utils import (
                             extract_documents_and_images_from_attachments,
                             format_attachments_for_llm,
                         )
@@ -414,7 +414,7 @@ Do not spend more than 500 tokens on thinking before responding.
 
                         # Add text document content to the message content
                         if docs:
-                            from source.services.chat_job_manager.attachment_utils import (
+                            from source.services.chat.chat_job_manager.attachment_utils import (
                                 build_text_documents_block,
                             )
 
@@ -433,7 +433,7 @@ Do not spend more than 500 tokens on thinking before responding.
                     # Encode images to base64 if present
                     encoded_images = None
                     if image_paths:
-                        from source.services.chat_job_manager.attachment_utils import (
+                        from source.services.chat.chat_job_manager.attachment_utils import (
                             encode_image_to_base64,
                         )
 
@@ -775,7 +775,7 @@ Do not spend more than 500 tokens on thinking before responding.
         Returns:
             Updated attachment list with local_path added
         """
-        from source.services.chat_job_manager.attachment_utils import (
+        from source.services.chat.chat_job_manager.attachment_utils import (
             download_attachments_batch,
         )
 

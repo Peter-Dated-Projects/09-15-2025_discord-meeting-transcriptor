@@ -9,7 +9,6 @@ from source.services.chat.chat_job_manager import ChatJob, ChatJobManagerService
 from source.services.chat.conversation_file_manager import ConversationFileManagerService
 from source.services.chat.conversations_sql_manager import ConversationsSQLManagerService
 from source.services.chat.conversations_store_sql_manager import ConversationsStoreSQLManagerService
-from source.services.chat.conversation_manager import ConversationManager
 
 __all__ = [
     "ChatbotSQLManagerService",
@@ -18,5 +17,4 @@ __all__ = [
     "ConversationFileManagerService",
     "ConversationsSQLManagerService",
     "ConversationsStoreSQLManagerService",
-    "ConversationManager",
 ]
