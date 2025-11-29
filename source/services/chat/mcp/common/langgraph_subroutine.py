@@ -10,7 +10,8 @@ import operator
 import inspect
 from typing import Annotated, Any, Callable, Dict, List, TypedDict
 
-from langgraph.graph import END, StateGraph, CompiledGraph
+from langgraph.graph import END
+from langgraph.graph.state import StateGraph, CompiledStateGraph
 from langchain_core.messages import BaseMessage
 
 

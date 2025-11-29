@@ -13,7 +13,8 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 # For a standalone script, you might need to add the project root to sys.path.
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from source.services.chat.mcp.common.tool import BaseTool
 from source.services.chat.mcp.common.langgraph_subroutine import (
@@ -27,15 +28,19 @@ from source.services.gpu.gpu_resource_manager.manager import GPUResourceManager
 # The GPUResourceManager requires context and services for logging.
 # We'll create minimal mock objects to satisfy these dependencies.
 
+
 class MockLoggingService:
     async def info(self, msg: str):
         print(f"[INFO] {msg}")
+
     async def error(self, msg: str):
         print(f"[ERROR] {msg}")
+
 
 class MockServices:
     def __init__(self):
         self.logging_service = MockLoggingService()
+
 
 class MockContext:
     def __init__(self):
@@ -44,13 +49,16 @@ class MockContext:
 
 # --- 1. Define a simple tool and a callback function ---
 
+
 def add(a: int, b: int) -> int:
     """Adds two numbers."""
     print(f"\n--- Tool: 'add' called with a={a}, b={b} ---")
     return a + b
 
+
 add_tool = BaseTool(func=add)
 tools = {"add": add_tool}
+
 
 def step_callback(step_info: dict):
     """A simple callback to print the details of each step."""
@@ -64,6 +72,7 @@ def step_callback(step_info: dict):
 
 
 # --- 2. Define the Agentic Workflow (as a Subroutine) ---
+
 
 # This node simulates an LLM deciding what to do.
 def agent_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
@@ -90,6 +99,7 @@ def agent_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
     }
     return {"messages": [AIMessage(content="", tool_calls=[tool_call])]}
 
+
 # This node executes the tool call requested by the agent.
 def tool_executor_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
     """
@@ -98,7 +108,7 @@ def tool_executor_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
     print("\n--- Tool Executor Node Logic Executing ---")
     last_message = state["messages"][-1]
     tool_call = last_message.tool_calls[0]
-    
+
     tool_name = tool_call["name"]
     tool_args = tool_call["args"]
     tool_id = tool_call["id"]
@@ -109,7 +119,7 @@ def tool_executor_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
 
     # We need to use asyncio.run for the __call__ since it's async
     result = asyncio.run(tool_to_run(**tool_args))
-    
+
     return {"messages": [ToolMessage(content=str(result), tool_call_id=tool_id)]}
 
 
@@ -142,7 +152,7 @@ async def main():
             name="AdditionAgent",
             description="An agent that uses a tool to add two numbers.",
             input_schema={"properties": {"prompt": {"type": "string"}}},
-            on_step_end=step_callback  # <-- Register the callback here
+            on_step_end=step_callback,  # <-- Register the callback here
         )
 
         addition_subroutine.add_node("agent", agent_node)
@@ -159,7 +169,7 @@ async def main():
                 "__end__": "__end__",
             },
         )
-        
+
         # Add the edge back from the tool executor to the agent
         addition_subroutine.add_edge("execute_tool", "agent")
 
@@ -171,9 +181,7 @@ async def main():
         print("\nCompiling and invoking the subroutine manually...")
         addition_subroutine.compile()
 
-        initial_state = {
-            "messages": [HumanMessage(content="What is 5 + 7?")]
-        }
+        initial_state = {"messages": [HumanMessage(content="What is 5 + 7?")]}
 
         final_result = addition_subroutine.invoke(initial_state)
 
