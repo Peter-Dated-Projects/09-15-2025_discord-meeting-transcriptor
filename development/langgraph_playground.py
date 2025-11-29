@@ -56,30 +56,42 @@ ollama_manager = OllamaRequestManager(context=mock_context)
 # --- 1. Define a simple tool and a callback function ---
 
 
-def add(a: int, b: int) -> int:
+def add(a: float, b: float) -> float:
     """Adds two numbers.
     Args:
-        a (int): The first number.
-        b (int): The second number.
+        a (float): The first number.
+        b (float): The second number.
     """
     print(f"\n--- Tool: 'add' called with a={a}, b={b} ---")
     return a + b
 
 
-add_tool = BaseTool(func=add)
+add_tool = BaseTool(
+    func=add,
+    name="add",
+    description="Adds two numbers together.",
+    arguments={"a": 10.23, "b": 5.424},  # Example arguments to guide the LLM
+)
 # The executor needs a map of tool names to tool objects
 tool_executor_map = {"add": add_tool}
 
 
 def step_callback(step_info: dict):
     """A simple callback to print the details of each step."""
-    print("\n=========================================")
-    print(f"| Subroutine: {step_info['subroutine_name']}")
-    print(f"| Step {step_info['step_count']}: {step_info['step_name']}")
-    print("-----------------------------------------")
+    print(f"\n[Step {step_info['step_count']}] {step_info['step_name']}")
     last_message = step_info["current_state"]["messages"][-1]
-    print(f"| Step Output: {last_message.pretty_repr()}")
-    print("=========================================")
+
+    # Show message type and content concisely
+    msg_type = type(last_message).__name__
+    if hasattr(last_message, "content") and last_message.content:
+        content = last_message.content
+        print(
+            f"  → {msg_type}: {content[:100]}..."
+            if len(content) > 100
+            else f"  → {msg_type}: {content}"
+        )
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        print(f"  → Tool calls: {len(last_message.tool_calls)} call(s)")
 
 
 # --- 2. Define the Agentic Workflow (as a Subroutine) ---
@@ -115,24 +127,19 @@ async def agent_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
     Calls the Ollama model with the current state and a tool, then returns
     the model's response as an AIMessage.
     """
-    print("\n--- Agent Node Logic Executing: Calling Ollama ---")
+    print("\n🤖 Agent: Calling LLM...")
 
     # Get the schema of the 'add' tool for the LLM
     add_tool_schema = add_tool.to_mcp_schema()
 
     # Convert LangChain message history to the format Ollama manager needs
     ollama_messages = convert_lc_messages_to_ollama(state["messages"])
-
-    print(f"DEBUG: Sending {len(ollama_messages)} messages to Ollama:")
-    for i, msg in enumerate(ollama_messages):
-        print(
-            f"  Message {i+1}: role={msg.get('role')}, has_tool_calls={bool(msg.get('tool_calls'))}"
-        )
+    print(f"   Conversation history: {len(ollama_messages)} message(s)")
 
     # Define a system prompt to encourage tool use
     system_prompt = (
         "You are a helpful assistant. You must use the provided tools to answer "
-        "questions whenever possible. If you need to perform addition, use the 'add' tool."
+        "questions whenever possible."
     )
 
     # Call the Ollama manager
@@ -144,16 +151,14 @@ async def agent_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
         stream=False,
     )
 
+    # Display thinking if available
+    if response.thinking:
+        print(f"\n💭 Model thinking: {response.thinking}")
+
     # Convert Ollama tool calls to the format LangChain's AIMessage expects
     langchain_tool_calls = []
     if response.tool_calls:
         for ollama_tc in response.tool_calls:
-            print(f"DEBUG: Raw Ollama tool call type: {type(ollama_tc)}")
-            print(f"DEBUG: Raw Ollama tool call: {ollama_tc}")
-            print(
-                f"DEBUG: Tool call dict: {ollama_tc.__dict__ if hasattr(ollama_tc, '__dict__') else 'N/A'}"
-            )
-
             # Handle both dict and object formats
             if isinstance(ollama_tc, dict):
                 tool_name = ollama_tc["function"]["name"]
@@ -164,6 +169,10 @@ async def agent_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
                 tool_name = ollama_tc.function.name
                 tool_args = ollama_tc.function.arguments
                 tool_id = getattr(ollama_tc, "id", str(uuid.uuid4()))
+
+            print(
+                f"   🔧 Tool call: {tool_name}({', '.join(f'{k}={v}' for k, v in tool_args.items())})"
+            )
 
             langchain_tool_calls.append(
                 {
@@ -186,42 +195,68 @@ async def agent_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
 async def tool_executor_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
     """
     Executes the tool call returned by the agent node.
+    Validates tool arguments against the tool's expected schema.
     """
-    print("\n--- Tool Executor Node Logic Executing ---")
+    print("\n⚙️  Executing tool...")
     last_message = state["messages"][-1]
     tool_call = last_message.tool_calls[0]
-
-    print(f"DEBUG: Tool call from message: {tool_call}")
 
     tool_name = tool_call["name"]
     tool_args = tool_call["args"]
     tool_id = tool_call["id"]
 
-    print(f"DEBUG: Tool name: {tool_name}")
-    print(f"DEBUG: Tool args: {tool_args}")
-
     tool_to_run = tool_executor_map.get(tool_name)
     if not tool_to_run:
-        raise ValueError(f"Tool '{tool_name}' not found.")
+        error_msg = f"Tool '{tool_name}' not found"
+        print(f"   ❌ {error_msg}")
+        return {"messages": [ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id)]}
 
-    result = await tool_to_run(**tool_args)
+    # Validate tool arguments against the tool's schema
+    tool_schema = tool_to_run.input_schema
+    required_params = tool_schema.get("required", [])
+    schema_properties = tool_schema.get("properties", {})
 
-    return {"messages": [ToolMessage(content=str(result), tool_call_id=tool_id)]}
+    # Check for missing required parameters
+    missing_params = [param for param in required_params if param not in tool_args]
+    if missing_params:
+        error_msg = f"Missing parameters: {missing_params}"
+        print(f"   ❌ {error_msg}")
+        return {"messages": [ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id)]}
+
+    # Check for unexpected parameters
+    unexpected_params = [param for param in tool_args.keys() if param not in schema_properties]
+    if unexpected_params:
+        print(f"   ⚠️  Ignoring unexpected parameters: {unexpected_params}")
+        tool_args = {k: v for k, v in tool_args.items() if k in schema_properties}
+
+    print(f"   ✓ Arguments validated")
+
+    # Execute the tool
+    try:
+        result = await tool_to_run(**tool_args)
+        print(f"   ✓ Result: {result}")
+        return {"messages": [ToolMessage(content=str(result), tool_call_id=tool_id)]}
+    except Exception as e:
+        error_msg = f"Execution error: {str(e)}"
+        print(f"   ❌ {error_msg}")
+        return {"messages": [ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id)]}
 
 
 # Conditional edge logic: decide where to go after the agent node.
 def should_continue(state: SubroutineState) -> Literal["execute_tool", "__end__"]:
     last_message = state["messages"][-1]
     if last_message.tool_calls:
-        print("Agent has decided to use a tool. -> Routing to tool executor.")
+        print("   → Routing to tool executor")
         return "execute_tool"
-    print("Agent has provided the final answer. -> Routing to END.")
+    print("   → Task complete, ending")
     return "__end__"
 
 
 async def main():
     """Main function to set up and run the playground script."""
-    print("Initializing Ollama Request Manager...")
+    print("\n" + "=" * 60)
+    print("🚀 LangGraph + Ollama Tool Calling Playground")
+    print("=" * 60)
 
     try:
         await ollama_manager.on_start(mock_context.services)
@@ -246,25 +281,31 @@ async def main():
         )  # Formality, end is handled by conditional edge
 
         # 4. Invoke the subroutine with a real question
-        print("\nCompiling and invoking the subroutine...")
         addition_subroutine.compile()
 
-        initial_state = {"messages": [HumanMessage(content="what is 10 + 10")]}
+        import random
+
+        a = random.random() * random.randint(-100, 100)
+        b = random.randint(10, 2000)
+
+        print(f"\n📝 Question: What is {a} + {b}?")
+        print(f"📊 Expected: {a + b}\n")
+
+        initial_state = {"messages": [HumanMessage(content=f"what is {a} + {b}?")]}
 
         # Add recursion limit to prevent infinite loops
         config = {"recursion_limit": 10}
         final_result = await addition_subroutine.ainvoke(initial_state, config=config)
 
-        print("\n-----------------------------------------")
-        print(f"Subroutine finished with final result: '{final_result}'")
-        print("-----------------------------------------")
+        print("\n" + "=" * 60)
+        print(f"✅ Final Answer: {final_result}")
+        print(f"📊 Expected: {a + b}")
+        print(f"✓ Correct: {str(a + b) in str(final_result)}")
+        print("=" * 60)
 
     finally:
-        print("\nClosing Ollama Request Manager...")
         await ollama_manager.on_close()
 
 
 if __name__ == "__main__":
-    # Make sure your Ollama server is running and has the 'gpt-oss:20b' model
-    print("Please ensure your Ollama server is running and has the 'gpt-oss:20b' model available.")
     asyncio.run(main())

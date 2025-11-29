@@ -387,6 +387,15 @@ class OllamaRequestManager(Manager):
                 # Build Ollama request
                 request_params = self._build_request_params(query_input)
 
+                # Debug: Log the request being sent
+                if self.services:
+                    await self.services.logging_service.debug(
+                        f"Ollama request params: model={request_params.get('model')}, "
+                        f"num_messages={len(request_params.get('messages', []))}, "
+                        f"has_tools={bool(request_params.get('tools'))}, "
+                        f"num_tools={len(request_params.get('tools', []))}"
+                    )
+
                 # Execute request with timeout
                 response = await asyncio.wait_for(
                     self._client.chat(**request_params), timeout=query_input.timeout_ms / 1000
@@ -578,9 +587,31 @@ class OllamaRequestManager(Manager):
 
         if query_input.format:
             params["format"] = query_input.format
-        
+
         if query_input.tools:
-            params["tools"] = query_input.tools
+            # Convert MCP schema format to Ollama's expected format
+            # Ollama expects: {"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}
+            ollama_tools = []
+            for tool in query_input.tools:
+                if "type" in tool and tool["type"] == "function":
+                    # Already in Ollama format
+                    ollama_tools.append(tool)
+                elif "inputSchema" in tool:
+                    # Convert from MCP format to Ollama format
+                    ollama_tool = {
+                        "type": "function",
+                        "function": {
+                            "name": tool["name"],
+                            "description": tool.get("description", ""),
+                            "parameters": tool["inputSchema"],
+                        },
+                    }
+                    ollama_tools.append(ollama_tool)
+                else:
+                    # Assume it's already a raw schema, wrap it
+                    ollama_tools.append(tool)
+
+            params["tools"] = ollama_tools
 
         return params
 

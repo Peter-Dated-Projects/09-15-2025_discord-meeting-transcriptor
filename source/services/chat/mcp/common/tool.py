@@ -33,6 +33,7 @@ class BaseTool:
         description: str = None,
         allow_write: bool = None,
         allow_sensitive_data_access: bool = None,
+        arguments: Dict[str, Any] = None,
     ):
         """
         Initializes a BaseTool instance.
@@ -47,10 +48,13 @@ class BaseTool:
                 to perform write operations. A value of None means the check doesn't apply.
             allow_sensitive_data_access (bool, optional): If set, determines if the tool can
                 access sensitive data. None means the check doesn't apply.
+            arguments (Dict[str, Any], optional): Example arguments to pass to the LLM for
+                guidance on how to use the tool. These are included in the tool schema.
         """
         self.func = func
         self.allow_write = allow_write
         self.sensitive_data_access = allow_sensitive_data_access
+        self.arguments = arguments or {}
 
         # Generate name from function if not provided
         self.name = name or self._generate_tool_name(func.__name__)
@@ -154,13 +158,19 @@ class BaseTool:
     def to_mcp_schema(self) -> Dict[str, Any]:
         """
         Returns the full tool definition as a dictionary that conforms to the
-        MCP specification.
+        MCP specification. Includes example arguments if provided.
         """
-        return {
+        schema = {
             "name": self.name,
             "description": self.description,
             "inputSchema": self.input_schema,
         }
+
+        # Add example arguments if provided (helps LLM understand usage)
+        if self.arguments:
+            schema["arguments"] = self.arguments
+
+        return schema
 
     def check_tool_access(self):
         """
@@ -198,6 +208,7 @@ def tool(
     description: str = None,
     allow_write: bool = None,
     allow_sensitive_data_access: bool = None,
+    arguments: Dict[str, Any] = None,
 ) -> Callable:
     """
     A decorator that transforms a Python function into an MCP tool instance.
@@ -205,7 +216,7 @@ def tool(
     This handles the instantiation of BaseTool, making it easy to declare tools.
 
     Example:
-        @tool()
+        @tool(arguments={"query": "Python tutorials"})
         def my_search_tool(query: str):
             \"\"\"
             Searches for information online.
@@ -223,6 +234,7 @@ def tool(
             description=description,
             allow_write=allow_write,
             allow_sensitive_data_access=allow_sensitive_data_access,
+            arguments=arguments,
         )
 
         # Attach the tool instance to the function so it can be accessed
