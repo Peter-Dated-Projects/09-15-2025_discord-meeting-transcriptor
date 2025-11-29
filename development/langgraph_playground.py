@@ -140,57 +140,64 @@ async def main():
     print("Initializing mock context and GPU manager...")
     mock_context = MockContext()
     gpu_manager = GPUResourceManager(context=mock_context)
-    # The manager's scheduler starts on its own in a real app via `on_start`.
-    # For this script, we don't need to start it as we are not using the priority queue.
+    
+    try:
+        # Start the GPU manager's scheduler. This is crucial.
+        await gpu_manager.on_start(mock_context.services)
 
-    print("\nAttempting to acquire GPU lock...")
-    # Use the GPU manager to acquire a lock for a 'chatbot' type job
-    async with gpu_manager.acquire_lock(job_type="chatbot"):
-        print("\nGPU Lock Acquired. Starting LangGraph workflow...")
+        print("\nAttempting to acquire GPU lock...")
+        # Use the GPU manager to acquire a lock for a 'chatbot' type job
+        async with gpu_manager.acquire_lock(job_type="chatbot"):
+            print("\nGPU Lock Acquired. Starting LangGraph workflow...")
 
-        # 3. Create the Subroutine WITH the callback
-        addition_subroutine = BaseSubroutine(
-            name="AdditionAgent",
-            description="An agent that uses a tool to add two numbers.",
-            input_schema={"properties": {"prompt": {"type": "string"}}},
-            on_step_end=step_callback,  # <-- Register the callback here
-        )
+            # 3. Create the Subroutine WITH the callback
+            addition_subroutine = BaseSubroutine(
+                name="AdditionAgent",
+                description="An agent that uses a tool to add two numbers.",
+                input_schema={"properties": {"prompt": {"type": "string"}}},
+                on_step_end=step_callback,  # <-- Register the callback here
+            )
 
-        addition_subroutine.add_node("agent", agent_node)
-        addition_subroutine.add_node("execute_tool", tool_executor_node)
+            addition_subroutine.add_node("agent", agent_node)
+            addition_subroutine.add_node("execute_tool", tool_executor_node)
 
-        addition_subroutine.set_entry_point("agent")
+            addition_subroutine.set_entry_point("agent")
 
-        # Add the conditional edge
-        addition_subroutine.graph.add_conditional_edges(
-            "agent",
-            should_continue,
-            {
-                "execute_tool": "execute_tool",
-                "__end__": "__end__",
-            },
-        )
+            # Add the conditional edge
+            addition_subroutine.graph.add_conditional_edges(
+                "agent",
+                should_continue,
+                {
+                    "execute_tool": "execute_tool",
+                    "__end__": "__end__",
+                },
+            )
 
-        # Add the edge back from the tool executor to the agent
-        addition_subroutine.add_edge("execute_tool", "agent")
+            # Add the edge back from the tool executor to the agent
+            addition_subroutine.add_edge("execute_tool", "agent")
 
-        # It's important to set a finish point, even if conditional logic points to END.
-        # This is a formality for the graph structure.
-        addition_subroutine.set_finish_point("agent")
+            # It's important to set a finish point, even if conditional logic points to END.
+            # This is a formality for the graph structure.
+            addition_subroutine.set_finish_point("agent")
 
-        # 4. Manually invoke the subroutine
-        print("\nCompiling and invoking the subroutine manually...")
-        addition_subroutine.compile()
+            # 4. Manually invoke the subroutine
+            print("\nCompiling and invoking the subroutine manually...")
+            addition_subroutine.compile()
 
-        initial_state = {"messages": [HumanMessage(content="What is 5 + 7?")]}
+            initial_state = {"messages": [HumanMessage(content="What is 5 + 7?")]}
 
-        final_result = addition_subroutine.invoke(initial_state)
+            final_result = addition_subroutine.invoke(initial_state)
 
-        print("\n-----------------------------------------")
-        print(f"Subroutine finished with final result: '{final_result}'")
-        print("-----------------------------------------")
+            print("\n-----------------------------------------")
+            print(f"Subroutine finished with final result: '{final_result}'")
+            print("-----------------------------------------")
 
-    print("\nGPU Lock Released.")
+        print("\nGPU Lock Released.")
+    
+    finally:
+        # Ensure the GPU manager is closed gracefully
+        print("\nClosing GPU manager...")
+        await gpu_manager.on_close()
 
 
 if __name__ == "__main__":
