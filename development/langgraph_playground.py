@@ -42,7 +42,7 @@ class MockContext:
         self.services = MockServices()
 
 
-# --- 1. Define a simple tool ---
+# --- 1. Define a simple tool and a callback function ---
 
 def add(a: int, b: int) -> int:
     """Adds two numbers."""
@@ -52,6 +52,17 @@ def add(a: int, b: int) -> int:
 add_tool = BaseTool(func=add)
 tools = {"add": add_tool}
 
+def step_callback(step_info: dict):
+    """A simple callback to print the details of each step."""
+    print("\n=========================================")
+    print(f"| Subroutine: {step_info['subroutine_name']}")
+    print(f"| Step {step_info['step_count']}: {step_info['step_name']}")
+    print("-----------------------------------------")
+    last_message = step_info["current_state"]["messages"][-1]
+    print(f"| Step Output: {last_message.pretty_repr()}")
+    print("=========================================")
+
+
 # --- 2. Define the Agentic Workflow (as a Subroutine) ---
 
 # This node simulates an LLM deciding what to do.
@@ -60,7 +71,7 @@ def agent_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
     Agent node that decides whether to call a tool or finish.
     In a real app, this would involve an LLM call.
     """
-    print("\n--- Agent Node Executing ---")
+    print("\n--- Agent Node Logic Executing ---")
     last_message = state["messages"][-1]
 
     # If the last message was a tool result, formulate a final answer.
@@ -84,7 +95,7 @@ def tool_executor_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
     """
     Executes the tool call requested by the agent node.
     """
-    print("\n--- Tool Executor Node Executing ---")
+    print("\n--- Tool Executor Node Logic Executing ---")
     last_message = state["messages"][-1]
     tool_call = last_message.tool_calls[0]
     
@@ -126,12 +137,12 @@ async def main():
     async with gpu_manager.acquire_lock(job_type="chatbot"):
         print("\nGPU Lock Acquired. Starting LangGraph workflow...")
 
-        # 3. Create the Subroutine
+        # 3. Create the Subroutine WITH the callback
         addition_subroutine = BaseSubroutine(
             name="AdditionAgent",
             description="An agent that uses a tool to add two numbers.",
-            # The input schema for the whole agent is just the initial prompt.
-            input_schema={"properties": {"prompt": {"type": "string"}}}
+            input_schema={"properties": {"prompt": {"type": "string"}}},
+            on_step_end=step_callback  # <-- Register the callback here
         )
 
         addition_subroutine.add_node("agent", agent_node)
