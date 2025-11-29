@@ -520,4 +520,52 @@ class TranscriptionJobManagerService(BaseTranscriptionJobManagerService):
         # Update SQL status
         await self._update_sql_job_status(job)
 
-        # Optionally: Send notification to admin or user about failed transcription
+        # Send error notification to meeting requestor
+        await self._send_transcription_error_dm(job)
+
+    async def _send_transcription_error_dm(self, job: TranscriptionJob) -> None:
+        """Send error notification to meeting requestor when transcription fails."""
+        try:
+            # Get meeting data to retrieve requestor
+            meeting_data = await self.services.sql_recording_service_manager.get_meeting(
+                meeting_id=job.meeting_id
+            )
+            if not meeting_data:
+                return
+
+            requestor_id = meeting_data.get("requested_by")
+            if not requestor_id:
+                return
+
+            # Create error embed
+            import discord
+
+            embed = discord.Embed(
+                title="❌ Transcription Failed",
+                description=(
+                    f"An error occurred while transcribing audio for meeting `{job.meeting_id}`.\n\n"
+                    f"**Job ID:** `{job.job_id}`\n"
+                    f"**Error:** {job.error_message or 'Unknown error'}\n\n"
+                    "The audio recordings could not be transcribed using Whisper AI. "
+                    "This may be due to corrupted audio files or a service issue."
+                ),
+                color=discord.Color.red(),
+            )
+
+            embed.add_field(
+                name="Next Steps",
+                value="Run `/process_step` with the meeting ID to retry transcription.",
+                inline=False,
+            )
+
+            # Send DM to requestor only
+            from source.utils import BotUtils
+
+            await BotUtils.send_dm(
+                self.services.context.bot, requestor_id, embed=embed
+            )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to send transcription error DM for meeting {job.meeting_id}: {e}"
+            )

@@ -1018,3 +1018,53 @@ class TextEmbeddingJobManagerService(BaseTextEmbeddingJobManagerService):
 
         # Update SQL status
         await self._update_sql_job_status(job)
+
+        # Send error notification to meeting requestor
+        await self._send_embedding_error_dm(job)
+
+    async def _send_embedding_error_dm(self, job: TextEmbeddingJob) -> None:
+        """Send error notification to meeting requestor when embedding generation fails."""
+        try:
+            # Get meeting data to retrieve requestor
+            meeting_data = await self.services.sql_recording_service_manager.get_meeting(
+                meeting_id=job.meeting_id
+            )
+            if not meeting_data:
+                return
+
+            requestor_id = meeting_data.get("requested_by")
+            if not requestor_id:
+                return
+
+            # Create error embed
+            import discord
+
+            embed = discord.Embed(
+                title="❌ Embedding Generation Failed",
+                description=(
+                    f"An error occurred while generating vector embeddings for meeting `{job.meeting_id}`.\n\n"
+                    f"**Job ID:** `{job.job_id}`\n"
+                    f"**Error:** {job.error_message or 'Unknown error'}\n\n"
+                    "The transcript and summaries could not be indexed for semantic search. "
+                    "This may be due to ChromaDB issues or embedding model problems."
+                ),
+                color=discord.Color.red(),
+            )
+
+            embed.add_field(
+                name="Next Steps",
+                value="Run `/process_step` with the meeting ID to retry embedding generation.",
+                inline=False,
+            )
+
+            # Send DM to requestor only
+            from source.utils import BotUtils
+
+            await BotUtils.send_dm(
+                self.services.context.bot, requestor_id, embed=embed
+            )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to send embedding error DM for meeting {job.meeting_id}: {e}"
+            )

@@ -731,4 +731,52 @@ class SummarizationJobManagerService(BaseSummarizationJobManagerService):
         # Update SQL status
         await self._update_sql_job_status(job)
 
-        # Optionally: Send notification to admin or user about failed summarization
+        # Send error notification to meeting requestor
+        await self._send_summarization_error_dm(job)
+
+    async def _send_summarization_error_dm(self, job: SummarizationJob) -> None:
+        """Send error notification to meeting requestor when summarization fails."""
+        try:
+            # Get meeting data to retrieve requestor
+            meeting_data = await self.services.sql_recording_service_manager.get_meeting(
+                meeting_id=job.meeting_id
+            )
+            if not meeting_data:
+                return
+
+            requestor_id = meeting_data.get("requested_by")
+            if not requestor_id:
+                return
+
+            # Create error embed
+            import discord
+
+            embed = discord.Embed(
+                title="❌ Summarization Failed",
+                description=(
+                    f"An error occurred while generating AI summaries for meeting `{job.meeting_id}`.\n\n"
+                    f"**Job ID:** `{job.job_id}`\n"
+                    f"**Error:** {job.error_message or 'Unknown error'}\n\n"
+                    "The compiled transcript could not be summarized using the LLM. "
+                    "This may be due to Ollama service issues or transcript format problems."
+                ),
+                color=discord.Color.red(),
+            )
+
+            embed.add_field(
+                name="Next Steps",
+                value="Run `/process_step` with the meeting ID to retry summarization.",
+                inline=False,
+            )
+
+            # Send DM to requestor only
+            from source.utils import BotUtils
+
+            await BotUtils.send_dm(
+                self.services.context.bot, requestor_id, embed=embed
+            )
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to send summarization error DM for meeting {job.meeting_id}: {e}"
+            )
