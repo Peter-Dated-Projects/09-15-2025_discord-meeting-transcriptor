@@ -121,6 +121,7 @@ class OllamaQueryResult:
     content: str
     model: str
     done: bool
+    tool_calls: list[dict] | None = None  # Added for tool support
     thinking: str | None = None  # Thinking process from models that support it
     total_duration: int | None = None  # nanoseconds
     load_duration: int | None = None
@@ -395,6 +396,7 @@ class OllamaRequestManager(Manager):
                 message = response.get("message", {})
                 content = message.get("content", "")
                 thinking = message.get("thinking", "")
+                tool_calls = message.get("tool_calls")
 
                 # If content is empty but thinking exists, use thinking as fallback
                 # This handles models like gpt-oss:20b that prioritize thinking field
@@ -421,6 +423,7 @@ class OllamaRequestManager(Manager):
                     content=content,
                     model=response.get("model", query_input.model),
                     done=response.get("done", True),
+                    tool_calls=tool_calls,
                     thinking=thinking if thinking else None,  # Store original thinking
                     total_duration=response.get("total_duration"),
                     load_duration=response.get("load_duration"),
@@ -575,6 +578,9 @@ class OllamaRequestManager(Manager):
 
         if query_input.format:
             params["format"] = query_input.format
+        
+        if query_input.tools:
+            params["tools"] = query_input.tools
 
         return params
 

@@ -84,16 +84,19 @@ class BaseSubroutine:
 
     def add_node(self, name: str, node_callable: Callable[[SubroutineState], Dict]):
         """
-        Adds a node to the graph, wrapping it to support the on_step_end callback.
+        Adds a node to the graph, wrapping it to support callbacks and async.
 
         Args:
             name (str): The unique name of the node.
-            node_callable (Callable): The function to execute for this node.
+            node_callable (Callable): The sync or async function for this node.
         """
 
-        def wrapper(state: SubroutineState) -> Dict:
-            # Execute the original node logic
-            result = node_callable(state)
+        async def wrapper(state: SubroutineState) -> Dict:
+            # Execute the original node logic, awaiting if it's async
+            if inspect.iscoroutinefunction(node_callable):
+                result = await node_callable(state)
+            else:
+                result = node_callable(state)
 
             # After execution, trigger the callback if it exists
             if self.on_step_end:
@@ -107,7 +110,11 @@ class BaseSubroutine:
                     "subroutine_name": self.name,
                     "current_state": new_state,
                 }
-                self.on_step_end(step_info)
+                # If the on_step_end callback is async, await it.
+                if inspect.iscoroutinefunction(self.on_step_end):
+                    await self.on_step_end(step_info)
+                else:
+                    self.on_step_end(step_info)
 
             return result
 
@@ -172,6 +179,33 @@ class BaseSubroutine:
             raise Exception("Graph could not be compiled.")
 
         final_state = self._compiled_graph.invoke(initial_state)
+
+        final_messages = final_state.get("messages", [])
+        if not final_messages:
+            return None
+        return final_messages[-1].content
+
+    async def ainvoke(self, initial_state: Dict) -> Any:
+        """
+        Asynchronously runs the compiled subroutine with a given initial state.
+
+        Args:
+            initial_state (Dict): The initial state to pass to the graph.
+
+        Returns:
+            The content of the last message in the graph's final state.
+        """
+        # Reset step counter for each invocation
+        self._step_count = 0
+
+        if self._compiled_graph is None:
+            print("Graph not compiled. Compiling now...")
+            self.compile()
+
+        if self._compiled_graph is None:
+            raise Exception("Graph could not be compiled.")
+
+        final_state = await self._compiled_graph.ainvoke(initial_state)
 
         final_messages = final_state.get("messages", [])
         if not final_messages:
