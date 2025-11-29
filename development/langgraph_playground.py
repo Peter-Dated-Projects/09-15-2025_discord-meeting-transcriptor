@@ -235,7 +235,9 @@ async def tool_executor_node(state: SubroutineState) -> Dict[str, List[BaseMessa
     try:
         result = await tool_to_run(**tool_args)
         print(f"   ✓ Result: {result}")
-        return {"messages": [ToolMessage(content=str(result), tool_call_id=tool_id)]}
+        return {
+            "messages": [ToolMessage(content=f"Tool Call Result: {result}", tool_call_id=tool_id)]
+        }
     except Exception as e:
         error_msg = f"Execution error: {str(e)}"
         print(f"   ❌ {error_msg}")
@@ -257,6 +259,8 @@ async def main():
     print("\n" + "=" * 60)
     print("🚀 LangGraph + Ollama Tool Calling Playground")
     print("=" * 60)
+
+    results = []
 
     try:
         await ollama_manager.on_start(mock_context.services)
@@ -298,7 +302,8 @@ async def main():
         final_result = await addition_subroutine.ainvoke(initial_state, config=config)
 
         print("\n" + "=" * 60)
-        print(f"✅ Final Answer: {final_result}")
+        _ = "\n".join([str(x) for x in final_result])
+        print(f"✅ Final Answer: {_}")
         print(f"📊 Expected: {a + b}")
         print(f"✓ Correct: {str(a + b) in str(final_result)}")
         print("=" * 60)
@@ -308,4 +313,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    for i in range(10):
+        asyncio.run(main())

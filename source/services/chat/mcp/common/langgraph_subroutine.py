@@ -195,7 +195,7 @@ class BaseSubroutine:
                 such as recursion_limit.
 
         Returns:
-            The content of the last message in the graph's final state.
+            The message history in the graph's final state.
         """
         # Reset step counter for each invocation
         self._step_count = 0
@@ -212,4 +212,4 @@ class BaseSubroutine:
         final_messages = final_state.get("messages", [])
         if not final_messages:
             return None
-        return final_messages[-1].content
+        return final_messages
