@@ -445,5 +445,58 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+    import signal
+
+    # -------------------------------------------------------------- #
+    # Signal Handler for Graceful Shutdown
+    # -------------------------------------------------------------- #
+
+    shutdown_initiated = False
+
+    async def graceful_shutdown(signame: str):
+        """Handle shutdown signals (Ctrl+C, SIGTERM) gracefully."""
+        global shutdown_initiated
+
+        # Prevent multiple shutdown attempts
+        if shutdown_initiated:
+            print(f"\n{signame} received again - forcing immediate shutdown...")
+            return
+        shutdown_initiated = True
+
+        print(f"\n{signame} received - initiating graceful shutdown...")
+
+        # Try to access context and services
+        try:
+            if hasattr(bot, "context") and bot.context and bot.context.services_manager:
+                logger = bot.context.services_manager.logging_service
+                await logger.info(f"{signame} signal received - shutting down gracefully")
+
+                # Perform graceful shutdown of all services
+                await bot.context.services_manager.shutdown_all(timeout=60.0)
+                await logger.info("Graceful shutdown completed")
+            else:
+                print("Context not initialized - skipping service shutdown")
+
+            # Close the bot
+            if bot.is_ready():
+                await bot.close()
+                print("Bot closed successfully")
+
+        except Exception as e:
+            print(f"Error during shutdown: {e}")
+            # Force close as fallback
+            if bot.is_ready():
+                await bot.close()
+
+    def handle_signal(signame: str):
+        """Sync signal handler that schedules async shutdown."""
+        # Get the running event loop
+        loop = asyncio.get_event_loop()
+        # Schedule the async shutdown coroutine
+        loop.create_task(graceful_shutdown(signame))
+
+    # Register signal handlers
+    signal.signal(signal.SIGINT, lambda s, f: handle_signal("SIGINT (Ctrl+C)"))
+    signal.signal(signal.SIGTERM, lambda s, f: handle_signal("SIGTERM"))
 
     asyncio.run(main())
