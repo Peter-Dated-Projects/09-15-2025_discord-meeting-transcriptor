@@ -185,12 +185,14 @@ class BaseSubroutine:
             return None
         return final_messages[-1].content
 
-    async def ainvoke(self, initial_state: Dict) -> Any:
+    async def ainvoke(self, initial_state: Dict, config: Dict = None) -> Any:
         """
         Asynchronously runs the compiled subroutine with a given initial state.
 
         Args:
             initial_state (Dict): The initial state to pass to the graph.
+            config (Dict, optional): Configuration options for the graph execution,
+                such as recursion_limit.
 
         Returns:
             The content of the last message in the graph's final state.
@@ -205,7 +207,7 @@ class BaseSubroutine:
         if self._compiled_graph is None:
             raise Exception("Graph could not be compiled.")
 
-        final_state = await self._compiled_graph.ainvoke(initial_state)
+        final_state = await self._compiled_graph.ainvoke(initial_state, config=config)
 
         final_messages = final_state.get("messages", [])
         if not final_messages:
