@@ -45,6 +45,7 @@ class MockServices:
 class MockContext:
     def __init__(self):
         self.services = MockServices()
+        self.server_manager = None
 
 
 # --- 1. Define a simple tool and a callback function ---

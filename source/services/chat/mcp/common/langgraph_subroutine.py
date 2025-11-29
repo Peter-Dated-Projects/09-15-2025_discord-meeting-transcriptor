@@ -62,10 +62,10 @@ class BaseSubroutine:
         if on_step_end:
             self._validate_callback(on_step_end)
         self.on_step_end = on_step_end
-        
+
         self._step_count = 0
         self.graph = StateGraph(SubroutineState)
-        self._compiled_graph: CompiledGraph | None = None
+        self._compiled_graph: CompiledStateGraph | None = None
         self._entry_point: str | None = None
         self._finish_point: str | None = None
 
@@ -73,7 +73,7 @@ class BaseSubroutine:
         """Checks if the provided callback has a valid signature."""
         if not callable(func):
             raise TypeError("The provided 'on_step_end' callback must be a callable function.")
-        
+
         sig = inspect.signature(func)
         if len(sig.parameters) != 1:
             raise TypeError(
@@ -90,16 +90,17 @@ class BaseSubroutine:
             name (str): The unique name of the node.
             node_callable (Callable): The function to execute for this node.
         """
+
         def wrapper(state: SubroutineState) -> Dict:
             # Execute the original node logic
             result = node_callable(state)
-            
+
             # After execution, trigger the callback if it exists
             if self.on_step_end:
                 self._step_count += 1
                 # The new state is the current state merged with the node's output
                 new_state = {**state, **result}
-                
+
                 step_info = {
                     "step_name": name,
                     "step_count": self._step_count,
@@ -107,7 +108,7 @@ class BaseSubroutine:
                     "current_state": new_state,
                 }
                 self.on_step_end(step_info)
-            
+
             return result
 
         self.graph.add_node(name, wrapper)
@@ -139,7 +140,7 @@ class BaseSubroutine:
         """
         self.graph.add_edge(start_node, end_node)
 
-    def compile(self) -> CompiledGraph:
+    def compile(self) -> CompiledStateGraph:
         """
         Compiles the defined graph into a runnable object.
         Returns:
@@ -162,17 +163,17 @@ class BaseSubroutine:
         """
         # Reset step counter for each invocation
         self._step_count = 0
-        
+
         if self._compiled_graph is None:
             print("Graph not compiled. Compiling now...")
             self.compile()
-        
+
         if self._compiled_graph is None:
             raise Exception("Graph could not be compiled.")
 
         final_state = self._compiled_graph.invoke(initial_state)
 
-        final_messages = final_state.get('messages', [])
+        final_messages = final_state.get("messages", [])
         if not final_messages:
             return None
         return final_messages[-1].content
