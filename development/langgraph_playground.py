@@ -199,54 +199,57 @@ async def tool_executor_node(state: SubroutineState) -> Dict[str, List[BaseMessa
     """
     print("\n⚙️  Executing tool...")
     last_message = state["messages"][-1]
-    tool_call = last_message.tool_calls[0]
 
-    tool_name = tool_call["name"]
-    tool_args = tool_call["args"]
-    tool_id = tool_call["id"]
+    for tool_call in last_message.tool_calls:
+        tool_name = tool_call["name"]
+        tool_args = tool_call["args"]
+        tool_id = tool_call["id"]
 
-    tool_to_run = tool_executor_map.get(tool_name)
-    if not tool_to_run:
-        error_msg = f"Tool '{tool_name}' not found"
-        print(f"   ❌ {error_msg}")
-        return {"messages": [ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id)]}
+        tool_to_run = tool_executor_map.get(tool_name)
+        if not tool_to_run:
+            error_msg = f"Tool '{tool_name}' not found"
+            print(f"   ❌ {error_msg}")
+            return {"messages": [ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id)]}
 
-    # Validate tool arguments against the tool's schema
-    tool_schema = tool_to_run.input_schema
-    required_params = tool_schema.get("required", [])
-    schema_properties = tool_schema.get("properties", {})
+        # Validate tool arguments against the tool's schema
+        tool_schema = tool_to_run.input_schema
+        required_params = tool_schema.get("required", [])
+        schema_properties = tool_schema.get("properties", {})
 
-    # Check for missing required parameters
-    missing_params = [param for param in required_params if param not in tool_args]
-    if missing_params:
-        error_msg = f"Missing parameters: {missing_params}"
-        print(f"   ❌ {error_msg}")
-        return {"messages": [ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id)]}
+        # Check for missing required parameters
+        missing_params = [param for param in required_params if param not in tool_args]
+        if missing_params:
+            error_msg = f"Missing parameters: {missing_params}"
+            print(f"   ❌ {error_msg}")
+            return {"messages": [ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id)]}
 
-    # Check for unexpected parameters
-    unexpected_params = [param for param in tool_args.keys() if param not in schema_properties]
-    if unexpected_params:
-        print(f"   ⚠️  Ignoring unexpected parameters: {unexpected_params}")
-        tool_args = {k: v for k, v in tool_args.items() if k in schema_properties}
+        # Check for unexpected parameters
+        unexpected_params = [param for param in tool_args.keys() if param not in schema_properties]
+        if unexpected_params:
+            print(f"   ⚠️  Ignoring unexpected parameters: {unexpected_params}")
+            tool_args = {k: v for k, v in tool_args.items() if k in schema_properties}
 
-    print(f"   ✓ Arguments validated")
+        print(f"   ✓ Arguments validated")
 
-    # Execute the tool
-    try:
-        result = await tool_to_run(**tool_args)
-        print(f"   ✓ Result: {result}")
-        return {
-            "messages": [ToolMessage(content=f"Tool Call Result: {result}", tool_call_id=tool_id)]
-        }
-    except Exception as e:
-        error_msg = f"Execution error: {str(e)}"
-        print(f"   ❌ {error_msg}")
-        return {"messages": [ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id)]}
+        # Execute the tool
+        try:
+            result = await tool_to_run(**tool_args)
+            print(f"   ✓ Result: {result}")
+            return {
+                "messages": [
+                    ToolMessage(content=f"Tool Call Result: {result}", tool_call_id=tool_id)
+                ]
+            }
+        except Exception as e:
+            error_msg = f"Execution error: {str(e)}"
+            print(f"   ❌ {error_msg}")
+            return {"messages": [ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id)]}
 
 
 # Conditional edge logic: decide where to go after the agent node.
 def should_continue(state: SubroutineState) -> Literal["execute_tool", "__end__"]:
     last_message = state["messages"][-1]
+    print("The Last Message:", last_message)
     if last_message.tool_calls:
         print("   → Routing to tool executor")
         return "execute_tool"
@@ -313,5 +316,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    for i in range(10):
-        asyncio.run(main())
+    # for i in range(10):
+    asyncio.run(main())

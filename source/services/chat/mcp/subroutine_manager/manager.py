@@ -1,20 +1,22 @@
 """
 This module defines the SubroutineManager, a class responsible for managing
 LangGraph subroutines and exposing them as callable, context-aware tools for an LLM.
+
+Updated to work with FastMCP instead of the custom BaseTool implementation.
 """
 
 import functools
 from typing import Any, Dict, List
 
 from langchain_core.messages import AIMessage
+from fastmcp.tools import Tool
 
 # Adjust imports based on actual project structure
-from ....chat.conversation_manager.in_memory_cache import (
+from source.services.chat.conversation_manager.in_memory_cache import (
     InMemoryConversationManager,
 )
-from .langgraph_subroutine import BaseSubroutine
-from .tool import BaseTool
-from .utils import convert_to_langchain_messages
+from source.services.chat.mcp.common.langgraph_subroutine import BaseSubroutine
+from source.services.chat.mcp.common.utils import convert_to_langchain_messages
 
 
 class SubroutineManager:
@@ -36,7 +38,7 @@ class SubroutineManager:
         """
         self._conversation_manager = conversation_manager
         self._subroutines: Dict[str, BaseSubroutine] = {}
-        self._tools: Dict[str, BaseTool] = {}
+        self._tools: Dict[str, Tool] = {}
 
     def _execute_subroutine_with_context(
         self, subroutine_name: str, thread_id: str, tool_kwargs: Dict[str, Any]
@@ -76,6 +78,47 @@ class SubroutineManager:
         initial_state = {"messages": langchain_messages}
         return subroutine.invoke(initial_state)
 
+    async def _execute_subroutine_with_context_async(
+        self, subroutine_name: str, thread_id: str, tool_kwargs: Dict[str, Any]
+    ):
+        """
+        Async version of execute_subroutine_with_context for FastMCP compatibility.
+        """
+        subroutine = self._subroutines.get(subroutine_name)
+        if not subroutine:
+            raise ValueError(f"Subroutine '{subroutine_name}' not found.")
+
+        # 1. Fetch conversation history
+        conversation = self._conversation_manager.get_conversation(thread_id)
+        history = conversation.history if conversation else []
+
+        # 2. Convert to LangChain messages
+        langchain_messages = convert_to_langchain_messages(history)
+
+        # 3. Append the current tool call to the message history
+        tool_call_id = tool_kwargs.pop("tool_call_id", f"call_{subroutine_name}")
+        langchain_messages.append(
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": subroutine.name,
+                        "args": tool_kwargs,
+                        "id": tool_call_id,
+                    }
+                ],
+            )
+        )
+
+        # 4. Invoke the subroutine with the prepared state
+        initial_state = {"messages": langchain_messages}
+
+        # Use ainvoke if available, otherwise fall back to invoke
+        if hasattr(subroutine, "ainvoke"):
+            return await subroutine.ainvoke(initial_state)
+        else:
+            return subroutine.invoke(initial_state)
+
     def add_subroutine(
         self,
         subroutine: BaseSubroutine,
@@ -93,76 +136,44 @@ class SubroutineManager:
 
         self._subroutines[subroutine.name] = subroutine
 
-        # Create a partial function that locks in the subroutine's name.
-        # This is the function the tool will ultimately call.
-        runner_func = functools.partial(
-            self._execute_subroutine_with_context, subroutine.name
-        )
+        # Create a wrapper function for the subroutine execution
+        # This will be converted to a tool by FastMCP
+        async def subroutine_tool_wrapper(
+            thread_id: str,
+            **tool_kwargs: Any,
+        ) -> Any:
+            """
+            Execute the subroutine with conversation context.
 
-        # To create the correct schema for the tool, we dynamically create a
-        # wrapper function that has the right signature for BaseTool to inspect.
-        # This is an advanced technique to avoid having to manually define the tool.
-        
-        # Start with the mandatory thread_id parameter
-        params = ["thread_id: str"]
-        # Add parameters from the subroutine's declared input schema
-        for name, schema in subroutine.input_schema.get("properties", {}).items():
-            # This is a simplification; a full implementation would map JSON schema types
-            # to Python types more robustly.
-            type_str = "Any"
-            if schema.get("type") == "string":
-                type_str = "str"
-            elif schema.get("type") == "integer":
-                type_str = "int"
-            elif schema.get("type") == "number":
-                type_str = "float"
-            elif schema.get("type") == "boolean":
-                type_str = "bool"
-            elif schema.get("type") == "array":
-                type_str = "list"
-            elif schema.get("type") == "object":
-                type_str = "dict"
-            
-            params.append(f"{name}: {type_str}")
-        
-        params_str = ", ".join(params)
-        func_def = f"def tool_wrapper({params_str}):\n    pass"
+            Args:
+                thread_id: The active conversation thread ID
+                **tool_kwargs: Additional arguments specific to the subroutine
+            """
+            return await self._execute_subroutine_with_context_async(
+                subroutine.name,
+                thread_id,
+                tool_kwargs,
+            )
 
-        # Execute the function definition in a temporary scope
-        temp_scope = {}
-        exec(func_def, globals(), temp_scope)
-        tool_wrapper_func = temp_scope['tool_wrapper']
-
-        # Now, create the tool using this dynamically generated wrapper for its schema,
-        # but with the *actual* runner function as its callable.
-        tool = BaseTool(
+        # Create a tool from the wrapper function
+        # FastMCP will handle schema generation from type hints
+        tool = Tool.from_function(
+            fn=subroutine_tool_wrapper,
             name=subroutine.name,
             description=subroutine.description,
-            func=runner_func,  # The real logic
-            # We need to modify BaseTool to accept a schema_func for introspection
-            # For now, we'll pass the wrapper, but this highlights a need for a small refactor there.
-            # A cleaner way would be tool(..., schema_override=subroutine.input_schema)
         )
-        
-        # Manually override the generated schema with our more precise one
-        tool.input_schema["properties"] = {
-            "thread_id": {"type": "string", "description": "The active conversation thread ID."},
-            **subroutine.input_schema.get("properties", {})
-        }
-        tool.input_schema["required"] = ["thread_id"] + subroutine.input_schema.get("required", [])
-
 
         self._tools[tool.name] = tool
         print(f"Subroutine '{subroutine.name}' added and context-aware tool created.")
 
-    def get_tools(self) -> List[BaseTool]:
+    def get_tools(self) -> List[Tool]:
         """Returns a list of all generated tool objects."""
         return list(self._tools.values())
 
     def get_tool_schemas(self) -> List[Dict]:
         """Returns a list of the JSON schemas for all managed tools."""
-        return [tool.to_mcp_schema() for tool in self.get_tools()]
+        return [tool.to_mcp_tool().model_dump() for tool in self.get_tools()]
 
     @property
-    def tools(self) -> Dict[str, BaseTool]:
+    def tools(self) -> Dict[str, Tool]:
         return self._tools
