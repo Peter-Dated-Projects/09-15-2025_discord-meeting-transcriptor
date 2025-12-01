@@ -87,7 +87,8 @@ class MCPManager(Manager):
     async def on_close(self) -> None:
         """Actions to perform on manager shutdown."""
         if self.services:
-            tool_count = len(self._mcp.tool_manager.get_tools())
+            tools = await self._mcp._tool_manager.get_tools()
+            tool_count = len(tools)
             await self.services.logging_service.info(
                 f"MCP Manager stopped (registered {tool_count} tools)"
             )
@@ -184,16 +185,16 @@ class MCPManager(Manager):
     # Tool Access and Conversion
     # -------------------------------------------------------------- #
 
-    def get_all_tools(self) -> dict[str, Tool]:
+    async def get_all_tools(self) -> dict[str, Tool]:
         """
         Get all registered tools.
 
         Returns:
             Dictionary mapping tool names to Tool objects
         """
-        return self._mcp.tool_manager.get_tools()
+        return await self._mcp._tool_manager.get_tools()
 
-    def get_tool(self, name: str) -> Tool | None:
+    async def get_tool(self, name: str) -> Tool | None:
         """
         Get a specific tool by name.
 
@@ -204,11 +205,11 @@ class MCPManager(Manager):
             The Tool object or None if not found
         """
         try:
-            return self._mcp.tool_manager.get_tool(name)
+            return await self._mcp._tool_manager.get_tool(name)
         except (KeyError, ValueError):
             return None
 
-    def has_tool(self, name: str) -> bool:
+    async def has_tool(self, name: str) -> bool:
         """
         Check if a tool exists.
 
@@ -218,19 +219,19 @@ class MCPManager(Manager):
         Returns:
             True if the tool exists
         """
-        return self._mcp.tool_manager.has_tool(name)
+        return await self._mcp._tool_manager.has_tool(name)
 
-    def get_mcp_tools(self) -> list[dict[str, Any]]:
+    async def get_mcp_tools(self) -> list[dict[str, Any]]:
         """
         Get all tools in MCP format.
 
         Returns:
             List of tool definitions in MCP format
         """
-        tools = self._mcp.tool_manager.get_tools()
+        tools = await self._mcp._tool_manager.get_tools()
         return [tool.to_mcp_tool().model_dump() for tool in tools.values()]
 
-    def get_ollama_tools(self) -> list[dict[str, Any]]:
+    async def get_ollama_tools(self) -> list[dict[str, Any]]:
         """
         Get all tools in Ollama-compatible format.
 
@@ -251,7 +252,7 @@ class MCPManager(Manager):
         Returns:
             List of tool definitions in Ollama format
         """
-        mcp_tools = self.get_mcp_tools()
+        mcp_tools = await self.get_mcp_tools()
         ollama_tools = []
 
         for tool in mcp_tools:
@@ -291,7 +292,7 @@ class MCPManager(Manager):
             ValueError: If the tool is not found
             Exception: If tool execution fails
         """
-        tool = self.get_tool(name)
+        tool = await self.get_tool(name)
         if not tool:
             raise ValueError(f"Tool '{name}' not found")
 
@@ -299,7 +300,7 @@ class MCPManager(Manager):
 
         try:
             # Execute the tool
-            result = tool.run(arguments=arguments)
+            result = await tool.run(arguments=arguments)
 
             # Extract the actual result data
             # ToolResult may contain content blocks and structured data
@@ -334,14 +335,14 @@ class MCPManager(Manager):
     # Statistics and Utilities
     # -------------------------------------------------------------- #
 
-    def get_statistics(self) -> dict[str, Any]:
+    async def get_statistics(self) -> dict[str, Any]:
         """
         Get statistics about registered tools.
 
         Returns:
             Dictionary with statistics
         """
-        tools = self.get_all_tools()
+        tools = await self.get_all_tools()
 
         # Count enabled/disabled tools
         enabled_count = sum(1 for tool in tools.values() if tool.enabled)

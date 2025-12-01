@@ -1,11 +1,13 @@
 """
 Playground for testing LangGraph subroutines with a real Ollama LLM call.
+
+Updated to use FastMCP-based MCPManager implementation.
 """
 
 import asyncio
 from typing import Any, Dict, List, Literal
 import json
-import uuid  # Add this import
+import uuid
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
@@ -15,7 +17,7 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from source.services.chat.mcp.common.tool import BaseTool
+from source.services.chat.mcp import MCPManager
 from source.services.chat.mcp.common.langgraph_subroutine import (
     BaseSubroutine,
     SubroutineState,
@@ -52,28 +54,53 @@ class MockContext:
 # --- Global instances for the playground ---
 mock_context = MockContext()
 ollama_manager = OllamaRequestManager(context=mock_context)
+mcp_manager = MCPManager(context=mock_context)
 
-# --- 1. Define a simple tool and a callback function ---
+# --- 1. Define tools using MCPManager ---
 
 
+@mcp_manager.tool
 def add(a: float, b: float) -> float:
-    """Adds two numbers.
+    """
+    Adds two numbers.
+
     Args:
-        a (float): The first number.
-        b (float): The second number.
+        a: The first number.
+        b: The second number.
     """
     print(f"\n--- Tool: 'add' called with a={a}, b={b} ---")
     return a + b
 
 
-add_tool = BaseTool(
-    func=add,
-    name="add",
-    description="Adds two numbers together.",
-    arguments={"a": 10.23, "b": 5.424},  # Example arguments to guide the LLM
-)
-# The executor needs a map of tool names to tool objects
-tool_executor_map = {"add": add_tool}
+@mcp_manager.tool
+def multiply(a: float, b: float) -> float:
+    """
+    Multiplies two numbers.
+
+    Args:
+        a: The first number.
+        b: The second number.
+    """
+    print(f"\n--- Tool: 'multiply' called with a={a}, b={b} ---")
+    return a * b
+
+
+@mcp_manager.tool
+def get_random_number(min_val: int = 1, max_val: int = 100) -> int:
+    """
+    Generate a random number within a range.
+
+    Args:
+        min_val: Minimum value (inclusive)
+        max_val: Maximum value (inclusive)
+    """
+    import random
+
+    result = random.randint(min_val, max_val)
+    print(
+        f"\n--- Tool: 'get_random_number' called with min={min_val}, max={max_val}, result={result} ---"
+    )
+    return result
 
 
 def step_callback(step_info: dict):
@@ -115,8 +142,14 @@ def convert_lc_messages_to_ollama(messages: List[BaseMessage]) -> List[Dict]:
             ollama_msgs.append(msg_dict)
         elif isinstance(msg, ToolMessage):
             # Add tool results as tool messages
+            tool_name = getattr(msg, "name", "unknown_tool")
             ollama_msgs.append(
-                {"role": "tool", "content": msg.content, "tool_call_id": msg.tool_call_id}
+                {
+                    "role": "tool",
+                    "tool_name": tool_name,
+                    "content": f"Result from {tool_name} is: {msg.content}",
+                    "tool_call_id": msg.tool_call_id,
+                }
             )
     return ollama_msgs
 
@@ -124,13 +157,14 @@ def convert_lc_messages_to_ollama(messages: List[BaseMessage]) -> List[Dict]:
 # This node now makes a real LLM call
 async def agent_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
     """
-    Calls the Ollama model with the current state and a tool, then returns
-    the model's response as an AIMessage.
+    Calls the Ollama model with the current state and tools from MCPManager,
+    then returns the model's response as an AIMessage.
     """
     print("\n🤖 Agent: Calling LLM...")
 
-    # Get the schema of the 'add' tool for the LLM
-    add_tool_schema = add_tool.to_mcp_schema()
+    # Get all tools from MCPManager in Ollama format
+    ollama_tools = await mcp_manager.get_ollama_tools()
+    print(f"   Available tools: {len(ollama_tools)}")
 
     # Convert LangChain message history to the format Ollama manager needs
     ollama_messages = convert_lc_messages_to_ollama(state["messages"])
@@ -142,12 +176,12 @@ async def agent_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
         "questions whenever possible."
     )
 
-    # Call the Ollama manager
+    # Call the Ollama manager with tools from MCPManager
     response = await ollama_manager.query(
         model="gpt-oss:20b",
         messages=ollama_messages,
         system_prompt=system_prompt,
-        tools=[add_tool_schema],
+        tools=ollama_tools,  # ← Using tools from MCPManager
         stream=False,
     )
 
@@ -194,8 +228,8 @@ async def agent_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
 # This node executes the tool call requested by the agent.
 async def tool_executor_node(state: SubroutineState) -> Dict[str, List[BaseMessage]]:
     """
-    Executes the tool call returned by the agent node.
-    Validates tool arguments against the tool's expected schema.
+    Executes the tool call returned by the agent node using MCPManager.
+    Validates tool arguments and executes via MCPManager.execute_tool().
     """
     print("\n⚙️  Executing tool...")
     last_message = state["messages"][-1]
@@ -205,45 +239,49 @@ async def tool_executor_node(state: SubroutineState) -> Dict[str, List[BaseMessa
         tool_args = tool_call["args"]
         tool_id = tool_call["id"]
 
-        tool_to_run = tool_executor_map.get(tool_name)
-        if not tool_to_run:
+        # Check if tool exists in MCPManager
+        if not await mcp_manager.has_tool(tool_name):
             error_msg = f"Tool '{tool_name}' not found"
             print(f"   ❌ {error_msg}")
-            return {"messages": [ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id)]}
+            return {
+                "messages": [
+                    ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id, name=tool_name)
+                ]
+            }
 
-        # Validate tool arguments against the tool's schema
-        tool_schema = tool_to_run.input_schema
-        required_params = tool_schema.get("required", [])
-        schema_properties = tool_schema.get("properties", {})
+        # Get tool info for validation
+        tool = await mcp_manager.get_tool(tool_name)
+        if tool:
+            print(f"   ✓ Tool '{tool_name}' found in MCPManager")
 
-        # Check for missing required parameters
-        missing_params = [param for param in required_params if param not in tool_args]
-        if missing_params:
-            error_msg = f"Missing parameters: {missing_params}"
-            print(f"   ❌ {error_msg}")
-            return {"messages": [ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id)]}
-
-        # Check for unexpected parameters
-        unexpected_params = [param for param in tool_args.keys() if param not in schema_properties]
-        if unexpected_params:
-            print(f"   ⚠️  Ignoring unexpected parameters: {unexpected_params}")
-            tool_args = {k: v for k, v in tool_args.items() if k in schema_properties}
-
-        print(f"   ✓ Arguments validated")
-
-        # Execute the tool
+        # Execute the tool using MCPManager
         try:
-            result = await tool_to_run(**tool_args)
+            result = await mcp_manager.execute_tool(tool_name, tool_args)
             print(f"   ✓ Result: {result}")
             return {
                 "messages": [
-                    ToolMessage(content=f"Tool Call Result: {result}", tool_call_id=tool_id)
+                    ToolMessage(
+                        content=f"Tool Call Result: {result}", tool_call_id=tool_id, name=tool_name
+                    )
+                ]
+            }
+        except ValueError as e:
+            # Tool not found or validation error
+            error_msg = f"Validation error: {str(e)}"
+            print(f"   ❌ {error_msg}")
+            return {
+                "messages": [
+                    ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id, name=tool_name)
                 ]
             }
         except Exception as e:
             error_msg = f"Execution error: {str(e)}"
             print(f"   ❌ {error_msg}")
-            return {"messages": [ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id)]}
+            return {
+                "messages": [
+                    ToolMessage(content=f"Error: {error_msg}", tool_call_id=tool_id, name=tool_name)
+                ]
+            }
 
 
 # Conditional edge logic: decide where to go after the agent node.
@@ -260,13 +298,19 @@ def should_continue(state: SubroutineState) -> Literal["execute_tool", "__end__"
 async def main():
     """Main function to set up and run the playground script."""
     print("\n" + "=" * 60)
-    print("🚀 LangGraph + Ollama Tool Calling Playground")
+    print("🚀 LangGraph + Ollama + FastMCP Tool Calling Playground")
     print("=" * 60)
 
-    results = []
-
     try:
+        # Initialize managers
         await ollama_manager.on_start(mock_context.services)
+        await mcp_manager.on_start(mock_context.services)
+
+        # Display registered tools
+        stats = await mcp_manager.get_statistics()
+        print(f"\n📊 MCPManager Statistics:")
+        print(f"   Total tools: {stats['total_tools']}")
+        print(f"   Tool names: {', '.join(stats['tool_names'])}")
 
         # 3. Create the Subroutine WITH the callback
         addition_subroutine = BaseSubroutine(
@@ -312,6 +356,7 @@ async def main():
         print("=" * 60)
 
     finally:
+        await mcp_manager.on_close()
         await ollama_manager.on_close()
 
 
