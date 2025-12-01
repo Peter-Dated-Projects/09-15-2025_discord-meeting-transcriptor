@@ -467,6 +467,7 @@ Do not spend more than 500 tokens on thinking before responding.
 
         Uses the OLLAMA_CHAT_MODEL environment variable to determine which model to use.
         Sets keep_alive to 1 minute to keep the model in memory briefly after chat requests.
+        Automatically retrieves and passes tools from MCP manager if available.
 
         Args:
             messages: List of Message objects for LLM (may include images field with base64 strings)
@@ -474,12 +475,27 @@ Do not spend more than 500 tokens on thinking before responding.
         Returns:
             Response dict from Ollama
         """
+        # Get tools from MCP manager if available
+        tools = None
+        if self.services.mcp_manager:
+            try:
+                tools = await self.services.mcp_manager.get_ollama_tools()
+                if tools:
+                    await self.services.logging_service.debug(
+                        f"Retrieved {len(tools)} tools from MCP manager for LLM request"
+                    )
+            except Exception as e:
+                await self.services.logging_service.warning(
+                    f"Failed to retrieve tools from MCP manager: {e}"
+                )
+
         response = await self.services.ollama_request_manager.query(
             model=OLLAMA_CHAT_MODEL,
             messages=messages,
             temperature=0.7,
             stream=False,
             keep_alive="1m",  # Keep model in memory for 1 minute after request
+            tools=tools,  # Pass tools to Ollama
         )
 
         return response
@@ -541,8 +557,9 @@ Do not spend more than 500 tokens on thinking before responding.
         """
         Parse LLM response and send to Discord.
 
-        The response may contain both thinking and chat content.
+        The response may contain both thinking and chat content, as well as tool calls.
         We separate them and send appropriately formatted messages.
+        If tool calls are present, we execute them and add results to the conversation.
 
         Args:
             response: Response from LLM (OllamaQueryResult)
@@ -553,6 +570,54 @@ Do not spend more than 500 tokens on thinking before responding.
         thinking_content = (
             response.thinking if hasattr(response, "thinking") and response.thinking else ""
         )
+        tool_calls = response.tool_calls if hasattr(response, "tool_calls") else None
+
+        # Handle tool calls if present
+        if tool_calls and self.services.mcp_manager:
+            await self.services.logging_service.info(
+                f"Processing {len(tool_calls)} tool call(s) from LLM response"
+            )
+
+            for tool_call in tool_calls:
+                try:
+                    # Extract tool information
+                    tool_name = tool_call["function"]["name"]
+                    tool_args = tool_call["function"]["arguments"]
+                    tool_id = tool_call.get("id", "unknown")
+
+                    await self.services.logging_service.info(
+                        f"Executing tool: {tool_name} with args: {tool_args}"
+                    )
+
+                    # Execute the tool
+                    tool_result = await self.services.mcp_manager.execute_tool(tool_name, tool_args)
+
+                    await self.services.logging_service.info(
+                        f"Tool {tool_name} executed successfully: {tool_result}"
+                    )
+
+                    # Add tool call and result to conversation history
+                    tool_call_message = Message(
+                        created_at=datetime.now(),
+                        message_type=MessageType.TOOL_CALL,
+                        message_content=f"Tool: {tool_name}",
+                        tools=[{"name": tool_name, "arguments": tool_args, "id": tool_id}],
+                        requester=None,
+                    )
+                    conversation.add_message(tool_call_message)
+
+                    tool_result_message = Message(
+                        created_at=datetime.now(),
+                        message_type=MessageType.TOOL_CALL_RESPONSE,
+                        message_content=str(tool_result),
+                        requester=None,
+                    )
+                    conversation.add_message(tool_result_message)
+
+                except Exception as e:
+                    await self.services.logging_service.error(
+                        f"Failed to execute tool {tool_call.get('function', {}).get('name', 'unknown')}: {e}"
+                    )
 
         if not content:
             await self.services.logging_service.warning(
