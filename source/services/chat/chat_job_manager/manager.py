@@ -335,13 +335,13 @@ class ChatJob(Job):
         Returns:
             List of Message objects for LLM with user attribution and images
         """
-        from source.services.gpu.ollama_request_manager.manager import Message as LLMMessage
+        # from source.services.gpu.ollama_request_manager.manager import Message as LLMMessage
 
         messages = []
 
         # Add system prompt
         system_prompt = CHAT_JOB_SYSTEM_PROMPT
-        messages.append(LLMMessage(role="system", content=system_prompt))
+        messages.append({"role": "system", "content": system_prompt})
 
         # Collect all unique user IDs from conversation history
         user_ids = set()
@@ -442,18 +442,21 @@ class ChatJob(Job):
                         )
 
                     # Create Message object with optional images
-                    messages.append(LLMMessage(role=role, content=content, images=encoded_images))
+                    msg_dict = {"role": role, "content": content}
+                    if encoded_images:
+                        msg_dict["images"] = encoded_images
+                    messages.append(msg_dict)
                 else:
                     # Fallback for old messages without requester but type CHAT
                     role = "assistant"
                     content = msg.message_content
-                    messages.append(LLMMessage(role=role, content=content))
+                    messages.append({"role": role, "content": content})
 
             elif msg.message_type == MessageType.AI_RESPONSE:
                 role = "assistant"
                 # Assistant messages don't need timestamps (prevents bot from copying format)
                 content = msg.message_content
-                messages.append(LLMMessage(role=role, content=content))
+                messages.append({"role": role, "content": content})
 
             elif msg.message_type == MessageType.TOOL_CALL:
                 # Represent tool calls as assistant messages with tool_calls field
@@ -475,7 +478,10 @@ class ChatJob(Job):
                             }
                         )
 
-                messages.append(LLMMessage(role=role, content=content, tool_calls=tool_calls))
+                msg_dict = {"role": role, "content": content}
+                if tool_calls:
+                    msg_dict["tool_calls"] = tool_calls
+                messages.append(msg_dict)
 
             elif msg.message_type == MessageType.TOOL_CALL_RESPONSE:
                 # Represent tool responses as user messages (standard for many chat formats)
@@ -490,7 +496,7 @@ class ChatJob(Job):
                 content = msg.message_content
 
                 # We assume the message content contains the result
-                messages.append(LLMMessage(role=role, content=content))
+                messages.append({"role": role, "content": content})
 
             elif msg.message_type == MessageType.THINKING:
                 # Thinking messages are assistant's internal thoughts
@@ -705,13 +711,11 @@ class ChatJob(Job):
 
             # Add a prompt to ask the model to respond about the tool execution
             # This ensures the model generates a user-facing response, not just thinking
-            from source.services.gpu.ollama_request_manager.manager import Message as LLMMessage
-
             messages.append(
-                LLMMessage(
-                    role="user",
-                    content="[System: The tool(s) have finished executing. The results are above. Please respond to the user confirming the action. Do NOT plan the action again.]",
-                )
+                {
+                    "role": "user",
+                    "content": "[System: The tool(s) have finished executing. The results are above. Please respond to the user confirming the action. Do NOT plan the action again.]",
+                }
             )
 
             try:

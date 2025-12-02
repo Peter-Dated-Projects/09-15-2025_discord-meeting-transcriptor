@@ -114,9 +114,10 @@ def parse_thinking_from_content(content: str) -> tuple[str, str]:
 class Message:
     """A single message in a conversation."""
 
-    role: Literal["system", "user", "assistant"]
+    role: Literal["system", "user", "assistant", "tool"]
     content: str
     images: list[str] | None = None  # Base64 encoded images for vision models
+    tool_calls: list[dict] | None = None  # Tool calls for assistant messages
 
 
 @dataclass
@@ -365,6 +366,7 @@ class OllamaRequestManager(Manager):
                     role=m["role"],
                     content=m["content"],
                     images=m.get("images"),  # Preserve images field from dict
+                    tool_calls=m.get("tool_calls"),  # Preserve tool_calls field from dict
                 )
                 for m in messages
             ]
@@ -595,6 +597,9 @@ class OllamaRequestManager(Manager):
             # Add images if present (for vision models)
             if msg.images:
                 message_dict["images"] = msg.images
+            # Add tool_calls if present
+            if msg.tool_calls:
+                message_dict["tool_calls"] = msg.tool_calls
             messages.append(message_dict)
 
         # Process DocumentCollection if provided
