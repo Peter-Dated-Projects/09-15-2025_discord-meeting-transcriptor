@@ -3,29 +3,34 @@ This module provides a base class for creating LangGraph subroutines.
 
 It encapsulates the setup and execution of a langgraph.StateGraph, allowing
 for the structured definition of multi-step processes (subroutines) that can
-be compiled and run.
+be compiled and run with lifecycle hooks.
 """
 
-import operator
 import inspect
-from typing import Annotated, Any, Callable, Dict, List, TypedDict
+from typing import Annotated, Any, Callable, Dict, List, TypedDict, Union, Optional
 
-from langgraph.graph import END
-from langgraph.graph.state import StateGraph, CompiledStateGraph
 from langchain_core.messages import BaseMessage
+from langchain_core.runnables import Runnable
+from langgraph.graph import END, START, StateGraph
+
+# Try importing add_messages from the top level (newer versions) or submodule (older versions)
+try:
+    from langgraph.graph import add_messages
+except ImportError:
+    from langgraph.graph.message import add_messages
 
 
 class SubroutineState(TypedDict):
     """
-    Represents the state of our subroutine graph, centered around a list of messages.
+    Represents the state of our subroutine graph.
 
     Attributes:
-        messages: A list of LangChain BaseMessage objects that the graph will
-                  process and add to. The `operator.add` annotation tells
-                  LangGraph to append new messages to this list.
+        messages: A list of LangChain BaseMessage objects.
+                  Using `add_messages` ensures proper ID-based deduplication
+                  and appending rather than simple list concatenation.
     """
 
-    messages: Annotated[List[BaseMessage], operator.add]
+    messages: Annotated[List[BaseMessage], add_messages]
 
 
 class BaseSubroutine:
@@ -33,8 +38,8 @@ class BaseSubroutine:
     A base class for creating and managing LangGraph subroutines.
 
     This class provides a high-level interface to define a graph of operations
-    (nodes), compile it, and execute it with a given initial state. It also
-    supports an optional callback that is triggered after each step.
+    (nodes), compile it, and execute it. It automatically wraps nodes to support
+    step-by-step callbacks (`on_step_end`).
     """
 
     def __init__(
@@ -42,7 +47,7 @@ class BaseSubroutine:
         name: str,
         description: str,
         input_schema: Dict[str, Any],
-        on_step_end: Callable[[Dict[str, Any]], None] = None,
+        on_step_end: Optional[Callable[[Dict[str, Any]], Any]] = None,
     ):
         """
         Initializes the BaseSubroutine.
@@ -50,10 +55,9 @@ class BaseSubroutine:
         Args:
             name (str): The name of the subroutine.
             description (str): A description of what the subroutine does.
-            input_schema (Dict[str, Any]): A JSON schema defining the arguments
-                this subroutine expects from an LLM tool call.
-            on_step_end (Callable[[Dict[str, Any]], None], optional): An optional
-                callback function to be called after each node execution.
+            input_schema (Dict[str, Any]): JSON schema for input arguments.
+            on_step_end (Callable, optional): A callback function triggered after
+                each node execution. Can be sync or async.
         """
         self.name = name
         self.description = description
@@ -65,9 +69,12 @@ class BaseSubroutine:
 
         self._step_count = 0
         self.graph = StateGraph(SubroutineState)
-        self._compiled_graph: CompiledStateGraph | None = None
-        self._entry_point: str | None = None
-        self._finish_point: str | None = None
+        # Use Runnable as the type hint to avoid ImportError on specific Graph classes
+        self._compiled_graph: Optional[Runnable] = None
+        self._entry_point: Optional[str] = None
+
+        # Track if we have manually set a path to END
+        self._has_finish_point = False
 
     def _validate_callback(self, func: Callable) -> None:
         """Checks if the provided callback has a valid signature."""
@@ -75,42 +82,47 @@ class BaseSubroutine:
             raise TypeError("The provided 'on_step_end' callback must be a callable function.")
 
         sig = inspect.signature(func)
-        if len(sig.parameters) != 1:
+        # We allow flexible signatures (*args, **kwargs) or exactly 1 argument
+        if len(sig.parameters) != 1 and not any(
+            p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
+        ):
             raise TypeError(
-                f"The 'on_step_end' callback function must accept exactly one argument, "
-                f"but it accepts {len(sig.parameters)}."
-                "\nExpected signature: `def my_callback(step_info: dict): ...`"
+                f"The 'on_step_end' callback function must accept one argument (step_info)."
             )
 
     def add_node(self, name: str, node_callable: Callable[[SubroutineState], Dict]):
         """
-        Adds a node to the graph, wrapping it to support callbacks and async.
+        Adds a node to the graph, wrapping it to support callbacks and async execution.
 
         Args:
             name (str): The unique name of the node.
-            node_callable (Callable): The sync or async function for this node.
+            node_callable (Callable): The function for this node.
         """
 
         async def wrapper(state: SubroutineState) -> Dict:
-            # Execute the original node logic, awaiting if it's async
+            # 1. Execute the actual node logic
             if inspect.iscoroutinefunction(node_callable):
                 result = await node_callable(state)
             else:
                 result = node_callable(state)
 
-            # After execution, trigger the callback if it exists
+            # 2. Trigger callback if defined
             if self.on_step_end:
                 self._step_count += 1
-                # The new state is the current state merged with the node's output
-                new_state = {**state, **result}
+
+                # Note: This is a rough approximation of the new state for the callback.
+                # In LangGraph, the actual state merge happens *after* the node exits.
+                # However, for logging purposes, merging the result dict is usually sufficient.
+                current_state_snapshot = {**state, **(result if isinstance(result, dict) else {})}
 
                 step_info = {
                     "step_name": name,
                     "step_count": self._step_count,
                     "subroutine_name": self.name,
-                    "current_state": new_state,
+                    "current_state": current_state_snapshot,
+                    "node_output": result,
                 }
-                # If the on_step_end callback is async, await it.
+
                 if inspect.iscoroutinefunction(self.on_step_end):
                     await self.on_step_end(step_info)
                 else:
@@ -121,95 +133,67 @@ class BaseSubroutine:
         self.graph.add_node(name, wrapper)
 
     def set_entry_point(self, node_name: str):
-        """
-        Sets the entry point for the graph.
-        Args:
-            node_name (str): The name of the node that should execute first.
-        """
-        self.graph.set_entry_point(node_name)
+        """Sets the entry point for the graph."""
+        self.graph.add_edge(START, node_name)
         self._entry_point = node_name
 
     def set_finish_point(self, node_name: str):
-        """
-        Sets the finish point for the graph.
-        Args:
-            node_name (str): The name of the node that should be the last one to execute.
-        """
+        """Sets the finish point for the graph (connects node to END)."""
         self.graph.add_edge(node_name, END)
-        self._finish_point = node_name
+        self._has_finish_point = True
+
+    def add_conditional_edges(self, source: str, path: Callable, path_map: Dict[str, str]):
+        """Expose conditional edges wrapper."""
+        self.graph.add_conditional_edges(source, path, path_map)
 
     def add_edge(self, start_node: str, end_node: str):
-        """
-        Adds a directed edge between two nodes.
-        Args:
-            start_node (str): The name of the node from which the edge originates.
-            end_node (str): The name of the node where the edge terminates.
-        """
+        """Adds a directed edge between two nodes."""
         self.graph.add_edge(start_node, end_node)
 
-    def compile(self) -> CompiledStateGraph:
-        """
-        Compiles the defined graph into a runnable object.
-        Returns:
-            A compiled LangGraph instance.
-        """
-        if self._entry_point is None or self._finish_point is None:
-            raise Exception("An entry point and a finish point must be set before compiling.")
+    def compile(self) -> Runnable:
+        """Compiles the defined graph into a runnable object."""
+        if self._entry_point is None:
+            raise ValueError("An entry point must be set before compiling (use set_entry_point).")
+
         self._compiled_graph = self.graph.compile()
         return self._compiled_graph
 
-    def invoke(self, initial_state: Dict) -> Any:
+    def invoke(self, initial_state: Dict) -> Optional[str]:
         """
-        Runs the compiled subroutine with a given initial state.
-
-        Args:
-            initial_state (Dict): The initial state to pass to the graph.
+        Sync execution of the graph.
 
         Returns:
-            The content of the last message in the graph's final state.
+            str: The content of the last message in the history.
         """
-        # Reset step counter for each invocation
         self._step_count = 0
-
         if self._compiled_graph is None:
-            print("Graph not compiled. Compiling now...")
             self.compile()
 
-        if self._compiled_graph is None:
-            raise Exception("Graph could not be compiled.")
-
+        # Invoke the graph
         final_state = self._compiled_graph.invoke(initial_state)
 
-        final_messages = final_state.get("messages", [])
-        if not final_messages:
-            return None
-        return final_messages[-1].content
+        # Extract last message content (matching your original return signature)
+        messages = final_state.get("messages", [])
+        if messages and isinstance(messages, list):
+            return messages[-1].content
+        return None
 
-    async def ainvoke(self, initial_state: Dict, config: Dict = None) -> Any:
+    async def ainvoke(
+        self, initial_state: Dict, config: Dict = None
+    ) -> Optional[List[BaseMessage]]:
         """
-        Asynchronously runs the compiled subroutine with a given initial state.
-
-        Args:
-            initial_state (Dict): The initial state to pass to the graph.
-            config (Dict, optional): Configuration options for the graph execution,
-                such as recursion_limit.
+        Async execution of the graph.
 
         Returns:
-            The message history in the graph's final state.
+            List[BaseMessage]: The full history of messages.
         """
-        # Reset step counter for each invocation
         self._step_count = 0
-
         if self._compiled_graph is None:
-            print("Graph not compiled. Compiling now...")
             self.compile()
-
-        if self._compiled_graph is None:
-            raise Exception("Graph could not be compiled.")
 
         final_state = await self._compiled_graph.ainvoke(initial_state, config=config)
 
-        final_messages = final_state.get("messages", [])
-        if not final_messages:
+        messages = final_state.get("messages", [])
+        if not messages:
             return None
-        return final_messages
+        return messages
