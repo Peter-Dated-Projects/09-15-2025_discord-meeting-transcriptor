@@ -1,25 +1,25 @@
 """
 User Query Handler Subroutine
 
-This subroutine handles user queries with LLM interaction and tool calling.
-It follows a loop pattern:
-1. User sends query → prompt LLM
-2. If LLM requires tool call → execute tool
-3. Check if LLM needs another tool call
-4. If yes → repeat step 2, else respond to user and exit
-
-This subroutine is designed to be used with the SubroutineManager.
+Flow:
+1. Entry (call_llm) -> Setup state
+2. Update User (Brain) -> Explain action (Before) + Decide Tool
+3. Execute Tools -> Run tool
+4. Loop back to Update User -> Explain result (After) + Decide next
 """
 
+import re
 from typing import Any, Dict, List, Union
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage, SystemMessage
 from langgraph.graph import END
 
-# Adjust import path as needed based on your project structure
 from source.services.chat.mcp.common.langgraph_subroutine import (
     BaseSubroutine,
     SubroutineState,
+)
+from source.services.chat.mcp.subroutine_manager.subroutines.prompts import (
+    USER_QUERY_HANDLER_SYSTEM_PROMPT,
 )
 from source.services.gpu.ollama_request_manager.manager import (
     Message as LLMMessage,
@@ -27,16 +27,6 @@ from source.services.gpu.ollama_request_manager.manager import (
 
 
 class UserQueryHandlerSubroutine(BaseSubroutine):
-    """
-    A subroutine that handles user queries with iterative tool calling.
-
-    This subroutine:
-    - Prompts the LLM with user query and conversation context
-    - Detects and executes tool calls from the LLM
-    - Continues calling tools until the LLM is satisfied
-    - Returns final response to the user
-    """
-
     def __init__(
         self,
         ollama_request_manager: Any,
@@ -44,29 +34,12 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
         model: str = "gemma3:12b",
         on_step_end: Any = None,
     ):
-        """
-        Initialize the UserQueryHandlerSubroutine.
-
-        Args:
-            ollama_request_manager: Manager for calling Ollama LLM
-            mcp_manager: Manager for accessing and executing tools
-            model: The Ollama model to use for queries
-            on_step_end: Optional callback for step completion
-        """
         super().__init__(
             name="user_query_handler",
-            description=(
-                "Handles user queries with LLM and tool calling capabilities. "
-                "Iteratively calls tools until the query is fully resolved."
-            ),
+            description="Handles user queries with iterative tool calling.",
             input_schema={
                 "type": "object",
-                "properties": {
-                    "user_query": {
-                        "type": "string",
-                        "description": "The user's query to process",
-                    }
-                },
+                "properties": {"user_query": {"type": "string", "description": "The user's query"}},
                 "required": ["user_query"],
             },
             on_step_end=on_step_end,
@@ -76,72 +49,161 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
         self.mcp_manager = mcp_manager
         self.model = model
 
-        # Build the graph structure using BaseSubroutine methods
+        # Virtual tool for explicitly ending the conversation
+        self._finalize_tool_def = {
+            "type": "function",
+            "function": {
+                "name": "finalize_response",
+                "description": (
+                    "Call this tool ONLY when you have completed the user's request "
+                    "and have nothing left to do. This ends the conversation."
+                ),
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        }
+
+        # --- SYSTEM PROMPT DEFINITION ---
+        # This is the "God Instruction" that forces the model to behave.
+        self._system_prompt = USER_QUERY_HANDLER_SYSTEM_PROMPT
+
         self._build_graph()
 
     def _build_graph(self):
-        """Build the LangGraph workflow for user query handling."""
         # 1. Add Nodes
-        self.add_node("call_llm", self._call_llm_node)
+        self.add_node("call_llm", self._process_input_node)
+        self.add_node("update_user", self._update_user_node)
         self.add_node("execute_tools", self._execute_tools_node)
-        self.add_node("finalize_response", self._finalize_response_node)
 
         # 2. Set Entry Point
         self.set_entry_point("call_llm")
 
-        # 3. Add Conditional Logic
-        # After calling LLM, check if tools are needed
+        # 3. Define Flow
+
+        # Entry -> Update User (The Brain)
+        self.add_edge("call_llm", "update_user")
+
+        # Update User -> (Router) -> Execute OR End
         self.add_conditional_edges(
-            "call_llm",
-            self._should_execute_tools,
+            "update_user",
+            self._router,
             {
                 "execute_tools": "execute_tools",
-                "finalize": "finalize_response",
+                "end": END,
             },
         )
 
-        # After executing tools, loop back to LLM to process results
-        self.add_edge("execute_tools", "call_llm")
+        # Execute -> Loop back to Update User (For the "After" update)
+        self.add_edge("execute_tools", "update_user")
 
-        # 4. Set Finish Point
-        self.set_finish_point("finalize_response")
+    # --- Helpers ---
 
-    async def _call_llm_node(self, state: SubroutineState) -> Dict:
+    def _clean_content(self, content: str) -> str:
         """
-        Call the LLM with current conversation context.
+        Cleans the model output to prevent 'thinking' leakage.
+        Handles both XML tags and common plain-text leakage patterns.
+        """
+        if not content:
+            return ""
+
+        # 1. Strip XML <think> tags (Case insensitive)
+        cleaned = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE)
+
+        # 2. Strip common third-person analysis patterns (Heuristic fallback)
+        # Models sometimes start with "The user is asking..." when confused.
+        # We strip this prefix if found at the very start.
+        patterns = [
+            r"^The user is asking:?\s*",
+            r"^The user wants:?\s*",
+            r"^User request:?\s*",
+            r"^We need to:?\s*",
+        ]
+        for pattern in patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+
+        return cleaned.strip()
+
+    async def _convert_to_ollama_messages(self, messages: List[BaseMessage]) -> List[LLMMessage]:
+        """
+        Converts LangChain messages to Ollama format.
+        Ensures the System Prompt is ALWAYS the first message.
+        """
+        # Start with the System Prompt
+        ollama_msgs = [LLMMessage(role="system", content=self._system_prompt)]
+
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                ollama_msgs.append(LLMMessage(role="user", content=msg.content))
+
+            elif isinstance(msg, SystemMessage):
+                # We already added our main system prompt, but we append others if present
+                ollama_msgs.append(LLMMessage(role="system", content=msg.content))
+
+            elif isinstance(msg, AIMessage):
+                # Clean assistant messages so history doesn't contain "thoughts"
+                clean = self._clean_content(msg.content or "")
+                ollama_msgs.append(LLMMessage(role="assistant", content=clean))
+
+            elif isinstance(msg, ToolMessage):
+                # Map Tool Result -> User Role
+                # This is necessary for Ollama but creates the risk of the model
+                # thinking it's reading a transcript. The System Prompt counters this.
+                formatted = f"[Tool Result] (ID: {msg.tool_call_id})\n{msg.content}"
+                ollama_msgs.append(LLMMessage(role="user", content=formatted))
+
+        return ollama_msgs
+
+    # --- Nodes ---
+
+    async def _process_input_node(self, state: SubroutineState) -> Dict:
+        """Entry Node: Pass-through."""
+        return {}
+
+    async def _update_user_node(self, state: SubroutineState) -> Dict:
+        """
+        THE BRAIN NODE.
+        Decides actions and updates the user.
         """
         messages = state.get("messages", [])
 
-        # Get available tools
-        tools = None
+        # Fetch tools
+        tools = []
         if self.mcp_manager:
             try:
-                tools = await self.mcp_manager.get_ollama_tools()
+                tools = await self.mcp_manager.get_ollama_tools() or []
             except Exception as e:
-                # Log but continue without tools if manager fails
-                print(f"Warning: Failed to get tools from MCP manager: {e}")
+                print(f"Warning: Failed to get tools: {e}")
 
-        # Convert to format expected by the specific Request Manager
+        # Inject finalize tool
+        if not any(t["function"]["name"] == "finalize_response" for t in tools):
+            tools.append(self._finalize_tool_def)
+
+        # Convert messages (System Prompt is added inside this method now)
         ollama_messages = await self._convert_to_ollama_messages(messages)
 
         try:
             response = await self.ollama_request_manager.query(
                 model=self.model,
                 messages=ollama_messages,
-                temperature=0.7,
                 stream=False,
-                keep_alive="1m",
                 tools=tools,
             )
 
-            # safely extract content and tool_calls
-            content = getattr(response, "content", "")
+            raw_content = getattr(response, "content", "")
+
+            # --- Clean content immediately ---
+            clean_content = self._clean_content(raw_content)
+
+            # Check for tool calls
             tool_calls = getattr(response, "tool_calls", None)
 
-            # Construct AIMessage
+            # Safety fallback for empty content
+            if tool_calls and not clean_content:
+                clean_content = "I am processing your request..."
+            elif not clean_content and not tool_calls:
+                clean_content = "I have finished processing."
+
+            lc_tool_calls = []
             if tool_calls:
-                # Map Ollama response format to LangChain format
-                lc_tool_calls = []
                 for tc in tool_calls:
                     fn = tc.get("function", {})
                     lc_tool_calls.append(
@@ -152,26 +214,19 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
                         }
                     )
 
-                ai_message = AIMessage(content=content or "", tool_calls=lc_tool_calls)
-            else:
-                ai_message = AIMessage(content=content)
-
+            ai_message = AIMessage(content=clean_content, tool_calls=lc_tool_calls)
             return {"messages": [ai_message]}
 
         except Exception as e:
-            return {"messages": [AIMessage(content=f"Error interacting with LLM: {str(e)}")]}
+            return {"messages": [AIMessage(content=f"Error in reasoning loop: {str(e)}")]}
 
     async def _execute_tools_node(self, state: SubroutineState) -> Dict:
-        """
-        Execute all tool calls found in the last AI message.
-        """
+        """Executes tools and returns results."""
         messages = state.get("messages", [])
         if not messages:
             return {"messages": []}
 
         last_message = messages[-1]
-
-        # Validation: Ensure we are acting on an AI message with tool calls
         if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
             return {"messages": []}
 
@@ -181,11 +236,15 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
             tool_args = tool_call["args"]
             tool_id = tool_call["id"]
 
+            if tool_name == "finalize_response":
+                # Virtual tool - acknowledge and pass through
+                results.append(ToolMessage(content="Response finalized.", tool_call_id=tool_id))
+                continue
+
             try:
-                # Execute via manager
                 output = await self.mcp_manager.execute_tool(tool_name, tool_args)
 
-                # Format output as string
+                # Format output
                 if isinstance(output, dict):
                     content_str = f"Result: {output.get('success', 'unknown')}"
                     if output.get("message"):
@@ -193,107 +252,40 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
                     if output.get("error"):
                         content_str += f" - Error: {output['error']}"
                 else:
-                    content_str = str(output)[:2000]  # Truncate large outputs
+                    content_str = str(output)[:2000]
 
                 results.append(ToolMessage(content=content_str, tool_call_id=tool_id))
-
             except Exception as e:
-                results.append(
-                    ToolMessage(content=f"Tool Execution Error: {str(e)}", tool_call_id=tool_id)
-                )
+                results.append(ToolMessage(content=f"Error: {str(e)}", tool_call_id=tool_id))
 
         return {"messages": results}
 
-    def _should_execute_tools(self, state: SubroutineState) -> str:
-        """
-        Conditional Edge Logic: Check if the last message requested tools.
-        """
+    def _router(self, state: SubroutineState) -> str:
+        """Decides: Continue Loop OR End."""
         messages = state.get("messages", [])
         if not messages:
-            return "finalize"
+            return "end"
 
         last_message = messages[-1]
-        if isinstance(last_message, AIMessage) and last_message.tool_calls:
-            return "execute_tools"
 
-        return "finalize"
+        if isinstance(last_message, AIMessage):
+            if last_message.tool_calls:
+                # Check for finalize_response
+                has_finalize = any(tc["name"] == "finalize_response" for tc in last_message.tool_calls)
+                has_other_tools = any(tc["name"] != "finalize_response" for tc in last_message.tool_calls)
 
-    async def _finalize_response_node(self, state: SubroutineState) -> Dict:
-        """
-        Decides if a final summary is needed.
-        If tools were used, ask LLM to summarize findings.
-        If no tools were used, the last LLM message is already the answer.
-        """
-        messages = state.get("messages", [])
+                # If ONLY finalize is called, we end.
+                # If other tools are present, we MUST execute them first.
+                if has_finalize and not has_other_tools:
+                    return "end"
+                
+                # Otherwise (other tools present, or no finalize), execute tools
+                return "execute_tools"
 
-        # Check history to see if any tools were actually used in this session
-        has_tool_usage = any(isinstance(m, ToolMessage) for m in messages)
+            # If pure text (and cleaned), we end the turn
+            return "end"
 
-        if has_tool_usage:
-            # Instruct LLM to synthesize tool outputs into a natural response
-            final_prompt = HumanMessage(
-                content=(
-                    "The requested tools have been executed. Based on the results above, "
-                    "please provide a clear, concise final answer to my original request."
-                )
-            )
-
-            # Temporary state with the new prompt included
-            ollama_messages = await self._convert_to_ollama_messages(messages + [final_prompt])
-
-            try:
-                response = await self.ollama_request_manager.query(
-                    model=self.model,
-                    messages=ollama_messages,
-                    stream=False,
-                    tools=None,  # Disable tools for final summary
-                )
-
-                content = getattr(response, "content", "Task completed.")
-                return {"messages": [final_prompt, AIMessage(content=content)]}
-
-            except Exception as e:
-                return {
-                    "messages": [
-                        final_prompt,
-                        AIMessage(content=f"Error generating final summary: {e}"),
-                    ]
-                }
-
-        # If no tools were used, the previous AIMessage is the final answer.
-        # We return empty dict so state remains unchanged.
-        return {}
-
-    async def _convert_to_ollama_messages(self, messages: List[BaseMessage]) -> List[LLMMessage]:
-        """
-        Convert LangChain message objects to the format expected by the
-        Ollama Request Manager.
-        """
-        ollama_msgs = []
-
-        for msg in messages:
-            if isinstance(msg, HumanMessage):
-                ollama_msgs.append(LLMMessage(role="user", content=msg.content))
-
-            elif isinstance(msg, AIMessage):
-                # Handle tool calls in AI message
-                if msg.tool_calls:
-                    # Note: Depending on your specific Ollama manager implementation,
-                    # you might need to format tool_calls specifically here.
-                    # This implementation passes content and assumes the manager handles metadata,
-                    # or treats it as a standard assistant message if content exists.
-                    ollama_msgs.append(LLMMessage(role="assistant", content=msg.content or ""))
-                else:
-                    ollama_msgs.append(LLMMessage(role="assistant", content=msg.content))
-
-            elif isinstance(msg, ToolMessage):
-                # Ollama often handles tool results best as user messages
-                # with a specific prefix if native tool roles aren't fully supported
-                # by the specific manager implementation.
-                formatted_content = f"[Tool Result for ID {msg.tool_call_id}]\n{msg.content}"
-                ollama_msgs.append(LLMMessage(role="user", content=formatted_content))
-
-        return ollama_msgs
+        return "end"
 
 
 def create_user_query_handler_subroutine(
@@ -302,9 +294,6 @@ def create_user_query_handler_subroutine(
     model: str = "gemma3:12b",
     on_step_end: Any = None,
 ) -> UserQueryHandlerSubroutine:
-    """
-    Factory function to create and compile the subroutine.
-    """
     subroutine = UserQueryHandlerSubroutine(
         ollama_request_manager=ollama_request_manager,
         mcp_manager=mcp_manager,

@@ -28,6 +28,7 @@ class MessageType(Enum):
 
     THINKING = "thinking"
     CHAT = "chat"
+    AI_RESPONSE = "ai_response"
     TOOL_CALL = "tool_call"
     TOOL_CALL_RESPONSE = "tool_call_response"
 
