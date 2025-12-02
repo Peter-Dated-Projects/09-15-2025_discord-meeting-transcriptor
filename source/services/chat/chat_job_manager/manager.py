@@ -460,33 +460,35 @@ class ChatJob(Job):
                 # This helps the model see what it decided to do
                 role = "assistant"
                 content = ""  # Content is usually empty for tool calls
-                
+
                 # Convert internal tool format to Ollama tool call format
                 tool_calls = []
                 if msg.tools:
                     for t in msg.tools:
-                        tool_calls.append({
-                            "function": {
-                                "name": t.get("name"),
-                                "arguments": t.get("arguments")
-                            },
-                            "id": t.get("id", "unknown")
-                        })
-                
+                        tool_calls.append(
+                            {
+                                "function": {
+                                    "name": t.get("name"),
+                                    "arguments": t.get("arguments"),
+                                },
+                                "id": t.get("id", "unknown"),
+                            }
+                        )
+
                 messages.append(LLMMessage(role=role, content=content, tool_calls=tool_calls))
 
             elif msg.message_type == MessageType.TOOL_CALL_RESPONSE:
                 # Represent tool responses as user messages (standard for many chat formats)
                 # or as tool messages if the underlying API supports it.
                 # For Ollama/generic, we'll use 'tool' role if available, or 'user' with a prefix.
-                
+
                 # Using 'tool' role is safer if the backend supports it, but LLMMessage might not.
-                # Let's check LLMMessage definition or usage. 
+                # Let's check LLMMessage definition or usage.
                 # Usually 'tool' role is for tool outputs.
-                
-                role = "tool" 
+
+                role = "tool"
                 content = msg.message_content
-                
+
                 # We assume the message content contains the result
                 messages.append(LLMMessage(role=role, content=content))
 

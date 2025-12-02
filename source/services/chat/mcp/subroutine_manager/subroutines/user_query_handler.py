@@ -271,14 +271,18 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
         if isinstance(last_message, AIMessage):
             if last_message.tool_calls:
                 # Check for finalize_response
-                has_finalize = any(tc["name"] == "finalize_response" for tc in last_message.tool_calls)
-                has_other_tools = any(tc["name"] != "finalize_response" for tc in last_message.tool_calls)
+                has_finalize = any(
+                    tc["name"] == "finalize_response" for tc in last_message.tool_calls
+                )
+                has_other_tools = any(
+                    tc["name"] != "finalize_response" for tc in last_message.tool_calls
+                )
 
                 # If ONLY finalize is called, we end.
                 # If other tools are present, we MUST execute them first.
                 if has_finalize and not has_other_tools:
                     return "end"
-                
+
                 # Otherwise (other tools present, or no finalize), execute tools
                 return "execute_tools"
 
