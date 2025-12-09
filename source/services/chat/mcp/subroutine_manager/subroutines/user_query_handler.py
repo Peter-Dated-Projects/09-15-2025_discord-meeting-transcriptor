@@ -298,6 +298,7 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
                         elif "results" in output:
                             # Google Search tool format
                             import json
+
                             content_str = json.dumps(output["results"], indent=2)
                         elif "content" in output and "url" in output:
                             # Read Webpage tool format
@@ -305,6 +306,7 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
                         else:
                             # Generic dict fallback
                             import json
+
                             try:
                                 content_str = json.dumps(output, indent=2)
                             except Exception:
