@@ -16,7 +16,7 @@ def google_search(query, api_key, cse_id, **kwargs):
         cse_id (str): Your Programmable Search Engine ID (cx).
         **kwargs: Additional arguments (e.g., num=10, gl='us').
     """
-    service = build("customsearch", "v1", developerKey=api_key)
+    service = build("customsearch", "v1", developerKey=api_key, cache_discovery=False)
 
     # Execute the search
     res = service.cse().list(q=query, cx=cse_id, **kwargs).execute()

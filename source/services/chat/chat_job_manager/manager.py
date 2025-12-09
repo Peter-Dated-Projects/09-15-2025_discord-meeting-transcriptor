@@ -35,12 +35,36 @@ from source.services.chat.conversation_manager.in_memory_cache import (
 from source.services.manager import Manager
 from source.utils import generate_16_char_uuid, get_current_timestamp_est
 from source.services.chat.chat_job_manager.prompts import CHAT_JOB_SYSTEM_PROMPT
+from source.services.chat.mcp.subroutine_manager.subroutines.user_query_handler import (
+    create_user_query_handler_subroutine,
+)
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 # Maximum number of user messages to batch together
 MAX_MESSAGE_BATCH_SIZE = 5
 
 # Get chat model from environment variable
 OLLAMA_CHAT_MODEL = os.getenv("OLLAMA_CHAT_MODEL", "gemma3:12b")
+
+
+class LockedOllamaRequestManager:
+    """
+    Wrapper for OllamaRequestManager that acquires a GPU lock before querying.
+    """
+
+    def __init__(self, manager, gpu_manager, job_id, metadata):
+        self.manager = manager
+        self.gpu_manager = gpu_manager
+        self.job_id = job_id
+        self.metadata = metadata
+
+    async def query(self, *args, **kwargs):
+        async with self.gpu_manager.acquire_lock(
+            job_type="chatbot",
+            job_id=self.job_id,
+            metadata=self.metadata,
+        ):
+            return await self.manager.query(*args, **kwargs)
 
 
 @dataclass
@@ -180,66 +204,21 @@ class ChatJob(Job):
         # Update conversation status to thinking
         await self._set_conversation_status(ConversationStatus.THINKING)
 
-        # Build message history for LLM
-        messages = await self._build_llm_messages(conversation)
-
-        # Generate AI response WITH GPU LOCK
-        try:
-            async with self.services.gpu_resource_manager.acquire_lock(
-                job_type="chatbot",
-                job_id=self.job_id,
-                metadata={
-                    "thread_id": self.thread_id,
-                    "conversation_id": self.conversation_id,
-                    "user_id": user_id,
-                },
-            ):
-                # GPU is now locked - perform LLM inference
-                response = await self._call_llm(messages)
-
-                await self.services.logging_service.info(
-                    f"Generated AI response for thread {self.thread_id}"
-                )
-
-            # GPU lock automatically released here
-
-        except Exception as e:
-            await self.services.logging_service.error(f"Failed to generate AI response: {str(e)}")
-            # Check if this is a context length error
-            if await self._handle_context_length_error(e):
-                return
-            raise
-
-        # Parse and send AI response
-        await self._parse_and_send_response(response, conversation)
-
-        # Save conversation (AI response added)
-        await conversation.save_conversation()
-
-        # Update conversation timestamp in SQL
-        await self.services.conversations_sql_manager.update_conversation_timestamp(
-            self.conversation_id
-        )
+        # Run the subroutine to handle the conversation loop
+        await self._run_subroutine(conversation, user_id)
 
     async def _process_message_queue(self) -> None:
         """
-        Process queued messages by batching up to MAX_MESSAGE_BATCH_SIZE messages.
+        Process queued user messages.
 
-        This will:
-        1. Collect up to 5 messages from any users
-        2. Save individual messages to conversation history (without formatting)
-        3. Build formatted prompt with user identification for LLM
-        4. Generate and send AI response
+        Batches up to MAX_MESSAGE_BATCH_SIZE messages and processes them.
         """
-        if len(self.message_queue) == 0:
+        if not self.message_queue:
             return
 
-        # Update status to processing queue
-        await self._set_conversation_status(ConversationStatus.PROCESSING_QUEUE)
-
-        # Collect up to MAX_MESSAGE_BATCH_SIZE messages from the queue
+        # Get batch of messages
         messages_to_process = []
-        while len(self.message_queue) > 0 and len(messages_to_process) < MAX_MESSAGE_BATCH_SIZE:
+        while self.message_queue and len(messages_to_process) < MAX_MESSAGE_BATCH_SIZE:
             messages_to_process.append(self.message_queue.popleft())
 
         # Get conversation
@@ -277,46 +256,206 @@ class ChatJob(Job):
             f"Processing batch of {len(messages_to_process)} messages in thread {self.thread_id}"
         )
 
-        # Build message history for LLM (with user attribution)
-        messages = await self._build_llm_messages(conversation)
+        # Run the subroutine to handle the conversation loop
+        # Use the user_id of the last message for locking context
+        await self._run_subroutine(conversation, messages_to_process[-1].user_id)
 
-        # Generate AI response WITH GPU LOCK
+    async def _run_subroutine(self, conversation: Conversation, user_id: str) -> None:
+        """
+        Run the UserQueryHandlerSubroutine to process the conversation.
+        """
+        # 1. Build LangChain messages with user attribution
+        messages = self._convert_conversation_to_langchain(conversation)
+        initial_message_count = len(messages)
+
+        # 2. Create Locked Manager
+        locked_manager = LockedOllamaRequestManager(
+            self.services.ollama_request_manager,
+            self.services.gpu_resource_manager,
+            self.job_id,
+            {
+                "thread_id": self.thread_id,
+                "conversation_id": self.conversation_id,
+                "user_id": user_id,
+            },
+        )
+
+        # 3. Create Subroutine
+        subroutine = create_user_query_handler_subroutine(
+            ollama_request_manager=locked_manager,
+            mcp_manager=self.services.mcp_manager,
+            model=OLLAMA_CHAT_MODEL,
+            on_step_end=self._on_subroutine_step,
+        )
+
         try:
-            async with self.services.gpu_resource_manager.acquire_lock(
-                job_type="chatbot",
-                job_id=self.job_id,
-                metadata={
-                    "thread_id": self.thread_id,
-                    "conversation_id": self.conversation_id,
-                    "user_id": messages_to_process[-1].user_id,
-                },
-            ):
-                # GPU is now locked - perform LLM inference
-                response = await self._call_llm(messages)
+            # 4. Run Subroutine
+            # Note: BaseSubroutine.ainvoke returns the list of messages directly, not the state dict
+            final_messages = await subroutine.ainvoke({"messages": messages})
 
-                await self.services.logging_service.info(
-                    f"Generated AI response for thread {self.thread_id}"
-                )
+            if final_messages is None:
+                final_messages = []
 
-            # GPU lock automatically released here
+            # 5. Process New Messages
+            new_messages = final_messages[initial_message_count:]
+
+            for msg in new_messages:
+                if isinstance(msg, AIMessage):
+                    if msg.tool_calls:
+                        # Tool Call
+                        tools_data = []
+                        for i, tc in enumerate(msg.tool_calls):
+                            try:
+                                # DEBUG LOGGING
+                                if not isinstance(tc, dict):
+                                    await self.services.logging_service.warning(
+                                        f"Invalid tool call format at index {i}: type={type(tc)}, value={tc}"
+                                    )
+                                    continue
+
+                                tools_data.append(
+                                    {"name": tc["name"], "arguments": tc["args"], "id": tc["id"]}
+                                )
+                            except Exception as e:
+                                await self.services.logging_service.error(
+                                    f"Error processing tool call at index {i}: {e}. TC: {tc}"
+                                )
+                                continue
+
+                        conversation.add_message(
+                            Message(
+                                created_at=datetime.now(),
+                                message_type=MessageType.TOOL_CALL,
+                                message_content=f"Tool Call: {[t['name'] for t in tools_data]}",
+                                tools=tools_data,
+                            )
+                        )
+                    else:
+                        # Final Response (or intermediate thought)
+                        if msg.content:
+                            # Send to Discord
+                            await self._send_discord_message(msg.content)
+
+                            conversation.add_message(
+                                Message(
+                                    created_at=datetime.now(),
+                                    message_type=MessageType.AI_RESPONSE,
+                                    message_content=msg.content,
+                                )
+                            )
+
+                elif isinstance(msg, ToolMessage):
+                    # Tool Result
+                    conversation.add_message(
+                        Message(
+                            created_at=datetime.now(),
+                            message_type=MessageType.TOOL_CALL_RESPONSE,
+                            message_content=msg.content,
+                        )
+                    )
+
+            # Save conversation
+            await conversation.save_conversation()
+            await self.services.conversations_sql_manager.update_conversation_timestamp(
+                self.conversation_id
+            )
 
         except Exception as e:
-            await self.services.logging_service.error(f"Failed to generate AI response: {str(e)}")
-            # Check if this is a context length error
-            if await self._handle_context_length_error(e):
-                return
+            import traceback
+
+            tb = traceback.format_exc()
+            await self.services.logging_service.error(
+                f"Subroutine execution failed: {str(e)}\nTraceback:\n{tb}"
+            )
+            await self._send_discord_message(
+                "I encountered an error while processing your request."
+            )
             raise
 
-        # Parse and send AI response
-        await self._parse_and_send_response(response, conversation)
+    def _convert_conversation_to_langchain(self, conversation: Conversation) -> list:
+        """
+        Convert conversation history to LangChain messages with user attribution.
+        """
+        messages = []
 
-        # Save conversation (AI response added)
-        await conversation.save_conversation()
+        # Add system prompt
+        messages.append(SystemMessage(content=CHAT_JOB_SYSTEM_PROMPT))
 
-        # Update conversation timestamp in SQL
-        await self.services.conversations_sql_manager.update_conversation_timestamp(
-            self.conversation_id
-        )
+        for msg in conversation.history:
+            if msg.message_type == MessageType.CHAT:
+                content = msg.message_content
+                if msg.requester:
+                    content = f"[User: {msg.requester}]\n{content}"
+
+                # Note: Attachments are not currently passed to subroutine (text-only)
+                messages.append(HumanMessage(content=content))
+
+            elif msg.message_type == MessageType.AI_RESPONSE:
+                messages.append(AIMessage(content=msg.message_content))
+
+            elif msg.message_type == MessageType.TOOL_CALL:
+                # Reconstruct AIMessage with tool_calls
+                tool_calls = []
+                if msg.tools:
+                    for t in msg.tools:
+                        if isinstance(t, str):
+                            try:
+                                import json
+
+                                t = json.loads(t)
+                            except Exception:
+                                continue
+
+                        if isinstance(t, dict):
+                            tool_calls.append(
+                                {
+                                    "name": t.get("name"),
+                                    "args": t.get("arguments"),
+                                    "id": t.get("id", "unknown"),
+                                }
+                            )
+                messages.append(AIMessage(content=msg.message_content, tool_calls=tool_calls))
+
+            elif msg.message_type == MessageType.TOOL_CALL_RESPONSE:
+                # We need to link this to the tool call ID.
+                # Our history doesn't explicitly link them by ID in a way easy to retrieve here without lookback.
+                # But LangGraph needs tool_call_id.
+                # We can try to find the last tool call ID or use a placeholder if it's old history.
+                # For now, let's assume sequential integrity or use "unknown".
+                # The subroutine might be confused if IDs don't match, but for history it might be ignored.
+                messages.append(ToolMessage(content=msg.message_content, tool_call_id="unknown"))
+
+        return messages
+
+    async def _send_discord_message(self, content: str) -> None:
+        """Send a message to the Discord thread."""
+        try:
+            if not self.services.context.bot:
+                return
+
+            channel = self.services.context.bot.get_channel(int(self.thread_id))
+            if not channel:
+                # Try fetching
+                try:
+                    channel = await self.services.context.bot.fetch_channel(int(self.thread_id))
+                except Exception:
+                    pass
+
+            if channel:
+                # Split long messages
+                if len(content) > 2000:
+                    chunks = [content[i : i + 2000] for i in range(0, len(content), 2000)]
+                    for chunk in chunks:
+                        await channel.send(chunk)
+                else:
+                    await channel.send(content)
+        except Exception as e:
+            await self.services.logging_service.error(f"Failed to send Discord message: {e}")
+
+    def _on_subroutine_step(self, step_output: Any) -> None:
+        """Callback for subroutine steps."""
+        # We could log progress here
+        pass
 
     # -------------------------------------------------------------- #
     # LLM Interaction Methods
@@ -670,6 +809,7 @@ class ChatJob(Job):
                         elif "results" in tool_result:
                             # Google Search tool format
                             import json
+
                             result_str = json.dumps(tool_result["results"], indent=2)
                         elif "content" in tool_result and "url" in tool_result:
                             # Read Webpage tool format
@@ -677,13 +817,14 @@ class ChatJob(Job):
                         else:
                             # Generic dict fallback
                             import json
+
                             try:
                                 result_str = json.dumps(tool_result, indent=2)
                             except Exception:
                                 result_str = str(tool_result)
                     else:
                         result_str = str(tool_result)
-                    
+
                     # Limit result size to prevent context overflow
                     if len(result_str) > 2000:
                         result_str = result_str[:2000] + "... [truncated]"

@@ -97,6 +97,43 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
 
     # --- Helpers ---
 
+    def _parse_tool_call(self, tool_call: Any) -> Dict | None:
+        """
+        Safely parse a tool call which might be a dict or an object.
+        Returns a dict with keys: name, args, id.
+        """
+        try:
+            # Case 1: Dictionary
+            if isinstance(tool_call, dict):
+                fn = tool_call.get("function", {})
+                return {
+                    "name": fn.get("name"),
+                    "args": fn.get("arguments"),
+                    "id": tool_call.get("id", f"call_{fn.get('name', 'unknown')}"),
+                }
+
+            # Case 2: Object (Ollama/Pydantic)
+            # Check for 'function' attribute
+            if hasattr(tool_call, "function"):
+                fn = tool_call.function
+                # Function might be an object too
+                name = getattr(fn, "name", None) or (
+                    fn.get("name") if isinstance(fn, dict) else None
+                )
+                args = getattr(fn, "arguments", None) or (
+                    fn.get("arguments") if isinstance(fn, dict) else None
+                )
+
+                # ID might be on the tool_call object
+                tc_id = getattr(tool_call, "id", None) or f"call_{name}"
+
+                return {"name": name, "args": args, "id": tc_id}
+
+            return None
+        except Exception as e:
+            print(f"Error parsing tool call: {e}")
+            return None
+
     def _clean_content(self, content: str) -> str:
         """
         Cleans the model output to prevent 'thinking' leakage.
@@ -205,14 +242,11 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
             lc_tool_calls = []
             if tool_calls:
                 for tc in tool_calls:
-                    fn = tc.get("function", {})
-                    lc_tool_calls.append(
-                        {
-                            "name": fn.get("name"),
-                            "args": fn.get("arguments"),
-                            "id": tc.get("id", f"call_{fn.get('name', 'unknown')}"),
-                        }
-                    )
+                    parsed = self._parse_tool_call(tc)
+                    if parsed:
+                        lc_tool_calls.append(parsed)
+                    else:
+                        print(f"Warning: Skipping invalid tool call format: {tc}")
 
             ai_message = AIMessage(content=clean_content, tool_calls=lc_tool_calls)
             return {"messages": [ai_message]}
@@ -232,31 +266,41 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
 
         results = []
         for tool_call in last_message.tool_calls:
-            tool_name = tool_call["name"]
-            tool_args = tool_call["args"]
-            tool_id = tool_call["id"]
-
-            if tool_name == "finalize_response":
-                # Virtual tool - acknowledge and pass through
-                results.append(ToolMessage(content="Response finalized.", tool_call_id=tool_id))
-                continue
-
             try:
-                output = await self.mcp_manager.execute_tool(tool_name, tool_args)
+                # tool_call here is already a dict because it comes from AIMessage.tool_calls
+                # which we populated in _update_user_node using _parse_tool_call
+                if not isinstance(tool_call, dict):
+                    print(f"Warning: Skipping invalid tool call in execute: {tool_call}")
+                    continue
 
-                # Format output
-                if isinstance(output, dict):
-                    content_str = f"Result: {output.get('success', 'unknown')}"
-                    if output.get("message"):
-                        content_str += f" - {output['message']}"
-                    if output.get("error"):
-                        content_str += f" - Error: {output['error']}"
-                else:
-                    content_str = str(output)[:2000]
+                tool_name = tool_call["name"]
+                tool_args = tool_call["args"]
+                tool_id = tool_call["id"]
 
-                results.append(ToolMessage(content=content_str, tool_call_id=tool_id))
+                if tool_name == "finalize_response":
+                    # Virtual tool - acknowledge and pass through
+                    results.append(ToolMessage(content="Response finalized.", tool_call_id=tool_id))
+                    continue
+
+                try:
+                    output = await self.mcp_manager.execute_tool(tool_name, tool_args)
+
+                    # Format output
+                    if isinstance(output, dict):
+                        content_str = f"Result: {output.get('success', 'unknown')}"
+                        if output.get("message"):
+                            content_str += f" - {output['message']}"
+                        if output.get("error"):
+                            content_str += f" - Error: {output['error']}"
+                    else:
+                        content_str = str(output)[:2000]
+
+                    results.append(ToolMessage(content=content_str, tool_call_id=tool_id))
+                except Exception as e:
+                    results.append(ToolMessage(content=f"Error: {str(e)}", tool_call_id=tool_id))
             except Exception as e:
-                results.append(ToolMessage(content=f"Error: {str(e)}", tool_call_id=tool_id))
+                print(f"Error processing tool call execution {tool_call}: {e}")
+                continue
 
         return {"messages": results}
 
@@ -271,12 +315,16 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
         if isinstance(last_message, AIMessage):
             if last_message.tool_calls:
                 # Check for finalize_response
-                has_finalize = any(
-                    tc["name"] == "finalize_response" for tc in last_message.tool_calls
-                )
-                has_other_tools = any(
-                    tc["name"] != "finalize_response" for tc in last_message.tool_calls
-                )
+                try:
+                    has_finalize = any(
+                        tc.get("name") == "finalize_response" for tc in last_message.tool_calls
+                    )
+                    has_other_tools = any(
+                        tc.get("name") != "finalize_response" for tc in last_message.tool_calls
+                    )
+                except Exception as e:
+                    print(f"Error in router tool check: {e}")
+                    return "end"
 
                 # If ONLY finalize is called, we end.
                 # If other tools are present, we MUST execute them first.

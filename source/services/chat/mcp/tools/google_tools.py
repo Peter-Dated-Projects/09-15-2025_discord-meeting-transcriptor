@@ -22,8 +22,18 @@ if TYPE_CHECKING:
 # --- Web Page Caching ---
 
 _WEBPAGE_CACHE: Dict[str, Dict[str, Any]] = {}
-CACHE_TTL = 3600  # 1 hour
+CACHE_TTL = 300  # 5 minutes
 WORDS_PER_PAGE = 500
+
+
+def _clean_cache() -> None:
+    """Remove expired entries from the cache."""
+    current_time = time.time()
+    expired_keys = [
+        k for k, v in _WEBPAGE_CACHE.items() if current_time - v["timestamp"] > CACHE_TTL
+    ]
+    for k in expired_keys:
+        del _WEBPAGE_CACHE[k]
 
 
 def _fetch_and_parse(url: str) -> List[str]:
@@ -76,6 +86,7 @@ async def read_webpage(url: str, page: int = 1) -> dict:
     Returns:
         dict with content and pagination info
     """
+    _clean_cache()
     current_time = time.time()
 
     # Check cache
@@ -129,8 +140,10 @@ async def query_google(queries: List[str], context: Context) -> dict:
 
     results = {}
 
+    # Initialize service once to avoid rebuilding it for every query
+    service = build("customsearch", "v1", developerKey=api_key, cache_discovery=False)
+
     def _search(query):
-        service = build("customsearch", "v1", developerKey=api_key)
         res = service.cse().list(q=query, cx=cse_id, num=5).execute()
         return res.get("items", [])
 
