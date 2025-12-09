@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from source.context import Context
 
 from source.services.manager import BaseConversationFileServiceManager
+from source.utils import generate_16_char_uuid
 
 # -------------------------------------------------------------- #
 # Conversation File Manager Service
@@ -90,7 +91,11 @@ class ConversationFileManagerService(BaseConversationFileServiceManager):
         return os.path.abspath(self.temp_path)
 
     def _build_conversation_filename(
-        self, discord_user_id: str, guild_id: str, date: datetime | None = None
+        self,
+        discord_user_id: str,
+        guild_id: str,
+        thread_id: str,
+        date: datetime | None = None,
     ) -> str:
         """
         Build a standardized filename for a conversation.
@@ -98,22 +103,24 @@ class ConversationFileManagerService(BaseConversationFileServiceManager):
         Args:
             discord_user_id: The Discord user ID
             guild_id: The guild ID
+            thread_id: The Discord thread ID
             date: Optional date for the conversation (defaults to today)
 
         Returns:
-            Filename in format: yyyy-mm-dd_conversation-with-{discord_user_id}-in-{guild_id}.json
+            Filename in format: yyyy-mm-dd_conversation-in-{guild_id}_uuid-{thread_id}.json
         """
         if date is None:
             date = datetime.now()
 
         date_str = date.strftime("%Y-%m-%d")
-        return f"{date_str}_conversation-with-{discord_user_id}-in-{guild_id}.json"
+        return f"{date_str}_conversation-in-{guild_id}_uuid-{thread_id}.json"
 
     async def save_conversation(
         self,
         conversation_data: dict[str, Any],
         discord_user_id: str,
         guild_id: str,
+        thread_id: str,
         date: datetime | None = None,
     ) -> str:
         """
@@ -123,6 +130,7 @@ class ConversationFileManagerService(BaseConversationFileServiceManager):
             conversation_data: The conversation data to save
             discord_user_id: The Discord user ID
             guild_id: The guild ID
+            thread_id: The Discord thread ID
             date: Optional date for the conversation (defaults to today)
 
         Returns:
@@ -137,7 +145,7 @@ class ConversationFileManagerService(BaseConversationFileServiceManager):
             raise ValueError("Conversation data cannot be empty")
 
         # Build filename
-        filename = self._build_conversation_filename(discord_user_id, guild_id, date)
+        filename = self._build_conversation_filename(discord_user_id, guild_id, thread_id, date)
         # Build absolute path to ensure file_manager doesn't double-join
         file_path = os.path.abspath(os.path.join(self.conversation_storage_path, filename))
 
@@ -328,7 +336,11 @@ class ConversationFileManagerService(BaseConversationFileServiceManager):
             return []
 
     async def get_conversation_by_user_and_guild_and_date(
-        self, discord_user_id: str, guild_id: str, date: datetime | None = None
+        self,
+        discord_user_id: str,
+        guild_id: str,
+        thread_id: str,
+        date: datetime | None = None,
     ) -> dict[str, Any] | None:
         """
         Retrieve a conversation by user ID, guild ID, and date.
@@ -338,10 +350,11 @@ class ConversationFileManagerService(BaseConversationFileServiceManager):
         Args:
             discord_user_id: The Discord user ID
             guild_id: The guild ID
+            thread_id: The Discord thread ID
             date: Optional date for the conversation (defaults to today)
 
         Returns:
             The conversation data as a dictionary, or None if not found
         """
-        filename = self._build_conversation_filename(discord_user_id, guild_id, date)
+        filename = self._build_conversation_filename(discord_user_id, guild_id, thread_id, date)
         return await self.retrieve_conversation(filename)

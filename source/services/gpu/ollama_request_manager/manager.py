@@ -55,6 +55,57 @@ from source.services.gpu.ollama_request_manager.conversation import Conversation
 from source.services.gpu.ollama_request_manager.models import DocumentCollection
 
 # -------------------------------------------------------------- #
+# Helper Functions
+# -------------------------------------------------------------- #
+
+
+def parse_thinking_from_content(content: str) -> tuple[str, str]:
+    """
+    Parse thinking and answer content from response.
+
+    Supports various formats:
+    - <think>...</think><answer>...</answer> (OpenAI Harmony format)
+    - <thinking>...</thinking> followed by regular content
+
+    Args:
+        content: Full response content
+
+    Returns:
+        Tuple of (thinking_content, answer_content)
+    """
+    import re
+
+    thinking = ""
+    answer = content  # Default: all content is answer
+
+    # Try <think>...</think><answer>...</answer> format
+    think_match = re.search(r"<think>(.*?)</think>", content, re.DOTALL | re.IGNORECASE)
+    answer_match = re.search(r"<answer>(.*?)</answer>", content, re.DOTALL | re.IGNORECASE)
+
+    if think_match and answer_match:
+        thinking = think_match.group(1).strip()
+        answer = answer_match.group(1).strip()
+    elif think_match:
+        # Only thinking tag found
+        thinking = think_match.group(1).strip()
+        # Remove thinking tag from content
+        answer = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE).strip()
+    else:
+        # Try <thinking>...</thinking> format
+        thinking_match = re.search(
+            r"<thinking>(.*?)</thinking>", content, re.DOTALL | re.IGNORECASE
+        )
+        if thinking_match:
+            thinking = thinking_match.group(1).strip()
+            # Remove thinking tag from content
+            answer = re.sub(
+                r"<thinking>.*?</thinking>", "", content, flags=re.DOTALL | re.IGNORECASE
+            ).strip()
+
+    return thinking, answer
+
+
+# -------------------------------------------------------------- #
 # Data Models
 # -------------------------------------------------------------- #
 
@@ -63,9 +114,10 @@ from source.services.gpu.ollama_request_manager.models import DocumentCollection
 class Message:
     """A single message in a conversation."""
 
-    role: Literal["system", "user", "assistant"]
+    role: Literal["system", "user", "assistant", "tool"]
     content: str
     images: list[str] | None = None  # Base64 encoded images for vision models
+    tool_calls: list[dict] | None = None  # Tool calls for assistant messages
 
 
 @dataclass
@@ -314,6 +366,7 @@ class OllamaRequestManager(Manager):
                     role=m["role"],
                     content=m["content"],
                     images=m.get("images"),  # Preserve images field from dict
+                    tool_calls=m.get("tool_calls"),  # Preserve tool_calls field from dict
                 )
                 for m in messages
             ]
@@ -403,14 +456,25 @@ class OllamaRequestManager(Manager):
 
                 # Extract result - handle models with thinking field (like gpt-oss)
                 message = response.get("message", {})
-                content = message.get("content", "")
-                thinking = message.get("thinking", "")
+                raw_content = message.get("content", "")
+                native_thinking = message.get(
+                    "thinking", ""
+                )  # Some models have native thinking field
                 tool_calls = message.get("tool_calls")
+
+                # Parse thinking from content (for models that use tags like <think>)
+                parsed_thinking, parsed_answer = parse_thinking_from_content(raw_content)
+
+                # Determine final thinking and content
+                # Priority: native thinking field > parsed thinking from tags
+                thinking = native_thinking if native_thinking else parsed_thinking
+                content = parsed_answer if parsed_thinking else raw_content
 
                 # If content is empty but thinking exists, use thinking as fallback
                 # This handles models like gpt-oss:20b that prioritize thinking field
                 if not content and thinking:
                     content = thinking
+                    thinking = ""  # Clear thinking since we moved it to content
 
                 # Update session if applicable
                 if query_input.session_id and query_input.session_id in self._sessions:
@@ -533,6 +597,9 @@ class OllamaRequestManager(Manager):
             # Add images if present (for vision models)
             if msg.images:
                 message_dict["images"] = msg.images
+            # Add tool_calls if present
+            if msg.tool_calls:
+                message_dict["tool_calls"] = msg.tool_calls
             messages.append(message_dict)
 
         # Process DocumentCollection if provided
@@ -580,7 +647,6 @@ class OllamaRequestManager(Manager):
             "model": query_input.model,
             "messages": messages,
             "options": options,
-            "think": True,  # Enable thinking/reasoning mode
             "stream": query_input.stream,
             "keep_alive": query_input.keep_alive,
         }

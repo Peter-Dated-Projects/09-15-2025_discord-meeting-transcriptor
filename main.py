@@ -417,6 +417,13 @@ async def main():
     logger = services_manager.logging_service
     await logger.info("[OK] Initialized all services.")
 
+    # Register Discord tools with MCP manager
+    if services_manager.mcp_manager:
+        from source.services.chat.mcp.tools import register_discord_tools
+
+        await register_discord_tools(services_manager.mcp_manager, context)
+        await logger.info("[OK] Registered Discord tools with MCP manager.")
+
     # Initialize conversation manager thread ID cache
     if services_manager.conversation_manager and services_manager.conversations_sql_manager:
         thread_count = await services_manager.conversation_manager.refresh_thread_id_cache(

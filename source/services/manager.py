@@ -39,6 +39,7 @@ class ServicesManager:
         ollama_request_manager: Any | None = None,
         conversation_manager: Any | None = None,
         chat_job_manager: Any | None = None,
+        mcp_manager: Any | None = None,
     ):
         self.context = context
         # Backward compatibility - keep server reference
@@ -89,6 +90,9 @@ class ServicesManager:
 
         # Chat job manager
         self.chat_job_manager = chat_job_manager
+
+        # MCP manager
+        self.mcp_manager = mcp_manager
 
     async def initialize_all(self) -> None:
         """Initialize all service managers."""
@@ -154,6 +158,10 @@ class ServicesManager:
         # Chat job manager
         if self.chat_job_manager:
             await self.chat_job_manager.on_start(self)
+
+        # MCP manager
+        if self.mcp_manager:
+            await self.mcp_manager.on_start(self)
 
     async def shutdown_all(self, timeout: float = 60.0) -> None:
         """
@@ -265,6 +273,12 @@ class ServicesManager:
             if self.conversation_manager:
                 await self.conversation_manager.shutdown()
                 await self.logging_service.info("✓ Conversation manager closed")
+
+            # Phase 5.10: Shutdown MCP manager
+            await self.logging_service.info("Phase 5.10: Shutting down MCP manager...")
+            if self.mcp_manager:
+                await self.mcp_manager.on_close()
+                await self.logging_service.info("✓ MCP manager closed")
 
             # Phase 6: Stop FFmpeg conversions
             await self.logging_service.info("Phase 5: Stopping FFmpeg conversions...")

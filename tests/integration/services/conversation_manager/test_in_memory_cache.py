@@ -154,7 +154,8 @@ def test_conversation_filename_generation():
         requester="789",
     )
 
-    expected = "2025-11-25_conversation-with-789-in-456.json"
+    # Expected format: yyyy-mm-dd_conversation-in-{guild_id}_uuid-{thread_id}.json
+    expected = "2025-11-25_conversation-in-456_uuid-123.json"
     assert conv.filename == expected
 
 

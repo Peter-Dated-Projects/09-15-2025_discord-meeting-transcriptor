@@ -63,6 +63,7 @@ class TestConversationFileManagerService:
         return {
             "discord_user_id": "123456789012345678",
             "guild_id": "987654321098765432",
+            "thread_id": "112233445566778899",
             "conversation_data": {
                 "messages": [
                     {"role": "user", "content": "Hello, Echo!"},
@@ -91,12 +92,14 @@ class TestConversationFileManagerService:
             conversation_data=test_data["conversation_data"],
             discord_user_id=test_data["discord_user_id"],
             guild_id=test_data["guild_id"],
+            thread_id=test_data["thread_id"],
         )
 
         # Verify filename format
         assert filename.endswith(".json")
-        assert test_data["discord_user_id"] in filename
+        # assert test_data["discord_user_id"] in filename  # User ID no longer in filename
         assert test_data["guild_id"] in filename
+        assert test_data["thread_id"] in filename
 
         # Verify file exists
         exists = await conversation_manager.conversation_exists(filename)
@@ -113,6 +116,7 @@ class TestConversationFileManagerService:
             conversation_data=test_data["conversation_data"],
             discord_user_id=test_data["discord_user_id"],
             guild_id=test_data["guild_id"],
+            thread_id=test_data["thread_id"],
         )
 
         # Retrieve conversation
@@ -134,6 +138,7 @@ class TestConversationFileManagerService:
             conversation_data=test_data["conversation_data"],
             discord_user_id=test_data["discord_user_id"],
             guild_id=test_data["guild_id"],
+            thread_id=test_data["thread_id"],
         )
 
         # Update conversation with new message
@@ -160,6 +165,7 @@ class TestConversationFileManagerService:
             conversation_data=test_data["conversation_data"],
             discord_user_id=test_data["discord_user_id"],
             guild_id=test_data["guild_id"],
+            thread_id=test_data["thread_id"],
         )
 
         # Verify it exists
@@ -190,6 +196,7 @@ class TestConversationFileManagerService:
             conversation_data=test_data["conversation_data"],
             discord_user_id=test_data["discord_user_id"],
             guild_id=test_data["guild_id"],
+            thread_id=test_data["thread_id"],
         )
 
         # Check existing file
@@ -209,12 +216,14 @@ class TestConversationFileManagerService:
         # Save multiple conversations
         user_ids = ["111111111111111111", "222222222222222222", "333333333333333333"]
         guild_id = test_data["guild_id"]
+        thread_id = test_data["thread_id"]
 
-        for user_id in user_ids:
+        for i, user_id in enumerate(user_ids):
             await conversation_manager.save_conversation(
                 conversation_data=test_data["conversation_data"],
                 discord_user_id=user_id,
                 guild_id=guild_id,
+                thread_id=f"{thread_id}{i}",
             )
 
         # List conversations
@@ -236,12 +245,14 @@ class TestConversationFileManagerService:
             conversation_data=test_data["conversation_data"],
             discord_user_id=test_data["discord_user_id"],
             guild_id=test_data["guild_id"],
+            thread_id=test_data["thread_id"],
         )
 
         # Retrieve using convenience method
         retrieved_data = await conversation_manager.get_conversation_by_user_and_guild_and_date(
             discord_user_id=test_data["discord_user_id"],
             guild_id=test_data["guild_id"],
+            thread_id=test_data["thread_id"],
             date=datetime.now(),
         )
 
@@ -260,6 +271,7 @@ class TestConversationFileManagerService:
             conversation_data=test_data["conversation_data"],
             discord_user_id=test_data["discord_user_id"],
             guild_id=test_data["guild_id"],
+            thread_id=test_data["thread_id"],
         )
 
         # Try to save again with same parameters
@@ -268,6 +280,7 @@ class TestConversationFileManagerService:
                 conversation_data=test_data["conversation_data"],
                 discord_user_id=test_data["discord_user_id"],
                 guild_id=test_data["guild_id"],
+                thread_id=test_data["thread_id"],
             )
 
     @pytest.mark.asyncio
@@ -318,9 +331,12 @@ class TestConversationFileManagerService:
             conversation_data=test_data["conversation_data"],
             discord_user_id=test_data["discord_user_id"],
             guild_id=test_data["guild_id"],
+            thread_id=test_data["thread_id"],
             date=test_date,
         )
 
-        # Verify filename format: yyyy-mm-dd_conversation-with-{user_id}-in-{guild_id}.json
-        expected_format = f"2025-11-25_conversation-with-{test_data['discord_user_id']}-in-{test_data['guild_id']}.json"
-        assert filename == expected_format
+        # Verify filename format: yyyy-mm-dd_conversation-in-{guild_id}_uuid-{thread_id}.json
+        assert (
+            filename
+            == f"2025-11-25_conversation-in-{test_data['guild_id']}_uuid-{test_data['thread_id']}.json"
+        )

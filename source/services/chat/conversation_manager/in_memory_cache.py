@@ -28,6 +28,7 @@ class MessageType(Enum):
 
     THINKING = "thinking"
     CHAT = "chat"
+    AI_RESPONSE = "ai_response"
     TOOL_CALL = "tool_call"
     TOOL_CALL_RESPONSE = "tool_call_response"
 
@@ -164,9 +165,9 @@ class Conversation:
         if not self.participants:
             self.participants = [self.requester]
 
-        # Generate filename: yyyy-mm-dd_conversation-with-{user_id}-in-{guild_id}.json
+        # Generate filename: yyyy-mm-dd_conversation-in-{guild_id}_uuid-{thread_id}.json
         date_str = self.created_at.strftime("%Y-%m-%d")
-        self.filename = f"{date_str}_conversation-with-{self.requester}-in-{self.guild_id}.json"
+        self.filename = f"{date_str}_conversation-in-{self.guild_id}_uuid-{self.thread_id}.json"
 
     def add_message(self, message: Message) -> None:
         """Add a message to the conversation history.
@@ -261,6 +262,7 @@ class Conversation:
                     conversation_data=conversation_data,
                     discord_user_id=self.requester,
                     guild_id=self.guild_id,
+                    thread_id=self.thread_id,
                 )
                 success = True
 
@@ -498,6 +500,7 @@ class InMemoryConversationManager:
         thread_id: str,
         conversations_sql_manager,
         conversation_file_manager,
+        conversations_store_sql_manager=None,
     ) -> Conversation | None:
         """Load a conversation from SQL and file storage into memory.
 
@@ -511,6 +514,7 @@ class InMemoryConversationManager:
             thread_id: Discord thread ID
             conversations_sql_manager: Reference to ConversationsSQLManagerService
             conversation_file_manager: Reference to ConversationFileManagerService
+            conversations_store_sql_manager: Reference to ConversationsStoreSQLManagerService
 
         Returns:
             Conversation object if successfully loaded, None otherwise
@@ -530,7 +534,6 @@ class InMemoryConversationManager:
 
             # Get the conversation file data
             # Note: We need the conversation store to get the filename
-            # For now, we'll reconstruct the filename from the metadata
             guild_id = sql_conversation.get("discord_guild_id")
             requester_id = sql_conversation.get("discord_requester_id")
             created_at_str = sql_conversation.get("created_at")
@@ -546,9 +549,33 @@ class InMemoryConversationManager:
             else:
                 created_at = datetime.now()
 
-            # Build expected filename
-            date_str = created_at.strftime("%Y-%m-%d")
-            filename = f"{date_str}_conversation-with-{requester_id}-in-{guild_id}.json"
+            # Try to get filename from store if manager is provided
+            filename = None
+            if conversations_store_sql_manager:
+                conversation_id = sql_conversation.get("id")
+                if conversation_id:
+                    store_entries = await conversations_store_sql_manager.retrieve_conversation_store_by_session_id(
+                        conversation_id
+                    )
+                    if store_entries:
+                        # Use the most recent one if multiple exist (though should be 1:1 usually)
+                        filename = store_entries[0].get("filename")
+
+            # Fallback to old reconstruction method if filename not found
+            if not filename:
+                date_str = created_at.strftime("%Y-%m-%d")
+
+                # Try NEW FORMAT first: yyyy-mm-dd_conversation-in-{guild_id}_uuid-{thread_id}.json
+                new_filename = f"{date_str}_conversation-in-{guild_id}_uuid-{thread_id}.json"
+                new_file_path = os.path.join(
+                    conversation_file_manager.conversation_storage_path, new_filename
+                )
+
+                if os.path.exists(new_file_path):
+                    filename = new_filename
+                else:
+                    # Try OLD FORMAT: yyyy-mm-dd_conversation-with-{requester_id}-in-{guild_id}.json
+                    filename = f"{date_str}_conversation-with-{requester_id}-in-{guild_id}.json"
 
             # Try to load the conversation file
             # Note: We need to read the file directly since conversation_file_manager
@@ -568,6 +595,8 @@ class InMemoryConversationManager:
                     requester=requester_id,
                     conversation_file_manager=conversation_file_manager,
                 )
+                # Ensure filename matches what we expect/found
+                conversation.filename = filename
             else:
                 # Load conversation from file
                 loop = asyncio.get_event_loop()
@@ -580,6 +609,8 @@ class InMemoryConversationManager:
                     thread_id=thread_id,
                     conversation_file_manager=conversation_file_manager,
                 )
+                # Ensure filename matches what we expect/found
+                conversation.filename = filename
 
             # Add to memory
             self.conversations[thread_id] = conversation

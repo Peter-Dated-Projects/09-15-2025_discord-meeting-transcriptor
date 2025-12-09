@@ -72,6 +72,7 @@ class Chat(commands.Cog):
                         thread_id=thread_id,
                         conversations_sql_manager=self.services.conversations_sql_manager,
                         conversation_file_manager=self.services.conversation_file_service_manager,
+                        conversations_store_sql_manager=self.services.conversations_store_sql_manager,
                     )
                     if conversation:
                         await self.services.logging_service.info(
@@ -246,6 +247,7 @@ class Chat(commands.Cog):
                             thread_id=thread_id,
                             conversations_sql_manager=self.services.conversations_sql_manager,
                             conversation_file_manager=self.services.conversation_file_service_manager,
+                            conversations_store_sql_manager=self.services.conversations_store_sql_manager,
                         )
 
                         if conversation:

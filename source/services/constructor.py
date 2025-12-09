@@ -226,6 +226,14 @@ def construct_services_manager(
 
         chat_job_manager = ChatJobManagerService(context=context)
 
+        # -------------------------------------------------------------- #
+        # MCP Manager Setup
+        # -------------------------------------------------------------- #
+
+        from source.services.chat.mcp import MCPManager
+
+        mcp_manager = MCPManager(context=context)
+
     # TODO: https://www.notion.so/DISC-19-create-ffmpeg-service-29c5eca3b9df805a949fdcd5850eaf5a?source=copy_link
     # # create ffmpeg service manager
     # if service_type == ServerManagerType.DEVELOPMENT:
@@ -260,4 +268,5 @@ def construct_services_manager(
         ollama_request_manager=ollama_request_manager,
         conversation_manager=conversation_manager,
         chat_job_manager=chat_job_manager,
+        mcp_manager=mcp_manager,
     )
