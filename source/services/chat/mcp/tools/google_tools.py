@@ -8,12 +8,105 @@ from __future__ import annotations
 
 import os
 import asyncio
-from typing import TYPE_CHECKING, List
+import time
+import requests
+from bs4 import BeautifulSoup
+from typing import TYPE_CHECKING, List, Dict, Any
 from googleapiclient.discovery import build
 
 if TYPE_CHECKING:
     from source.context import Context
     from source.services.chat.mcp import MCPManager
+
+
+# --- Web Page Caching ---
+
+_WEBPAGE_CACHE: Dict[str, Dict[str, Any]] = {}
+CACHE_TTL = 3600  # 1 hour
+WORDS_PER_PAGE = 500
+
+
+def _fetch_and_parse(url: str) -> List[str]:
+    """
+    Fetch a webpage, parse it, and split it into pages of text.
+    """
+    try:
+        # Use a real user agent to avoid being blocked
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        # Remove script and style elements
+        for script in soup(["script", "style", "nav", "footer", "header"]):
+            script.decompose()
+
+        text = soup.get_text()
+
+        # Clean up text
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        text = "\n".join(chunk for chunk in chunks if chunk)
+
+        words = text.split()
+        pages = []
+
+        if not words:
+            return ["No readable text content found on this page."]
+
+        for i in range(0, len(words), WORDS_PER_PAGE):
+            pages.append(" ".join(words[i : i + WORDS_PER_PAGE]))
+
+        return pages
+    except Exception as e:
+        return [f"Error fetching page: {str(e)}"]
+
+
+async def read_webpage(url: str, page: int = 1) -> dict:
+    """
+    Read content from a webpage with pagination.
+
+    Args:
+        url: The URL to read
+        page: The page number to retrieve (1-based)
+
+    Returns:
+        dict with content and pagination info
+    """
+    current_time = time.time()
+
+    # Check cache
+    cached_data = _WEBPAGE_CACHE.get(url)
+    if cached_data and (current_time - cached_data["timestamp"] < CACHE_TTL):
+        pages = cached_data["pages"]
+    else:
+        # Fetch in thread to avoid blocking
+        pages = await asyncio.to_thread(_fetch_and_parse, url)
+        _WEBPAGE_CACHE[url] = {"pages": pages, "timestamp": current_time}
+
+    # Adjust page to 0-indexed
+    page_idx = page - 1
+    if page_idx < 0:
+        page_idx = 0
+
+    if page_idx >= len(pages):
+        return {
+            "error": f"Page {page} out of range. Total pages: {len(pages)}",
+            "total_pages": len(pages),
+            "current_page": page,
+            "url": url,
+        }
+
+    return {
+        "url": url,
+        "content": pages[page_idx],
+        "current_page": page,
+        "total_pages": len(pages),
+        "words_on_page": len(pages[page_idx].split()),
+    }
 
 
 async def query_google(queries: List[str], context: Context) -> dict:
@@ -87,11 +180,18 @@ async def register_google_tools(mcp_manager: MCPManager, context: Context) -> No
     mcp_manager.add_tool_from_function(
         func=google_search_tool,
         name="google_search",
-        description="Perform a Google search to retrieve information from the web. Useful for finding up-to-date information, facts, or documentation. Provide a list of specific search queries.",
+        description="Perform a Google search to retrieve information from the web. Returns titles, links, and snippets. Use 'read_webpage' to read the full content of a link.",
+    )
+
+    # Register the read_webpage tool
+    mcp_manager.add_tool_from_function(
+        func=read_webpage,
+        name="read_webpage",
+        description="Read the content of a webpage. Returns text content in pages of ~500 words. Provide the URL and optionally a page number (default 1).",
     )
 
     # Log registration
     if context.services_manager and context.services_manager.logging_service:
         await context.services_manager.logging_service.info(
-            "[MCP] Registered Google Search tool: google_search"
+            "[MCP] Registered Google Search tools: google_search, read_webpage"
         )

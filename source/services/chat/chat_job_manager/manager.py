@@ -655,18 +655,38 @@ class ChatJob(Job):
                     )
                     conversation.add_message(tool_call_message)
 
-                    # Format tool result for LLM - keep it concise
+                    # Format tool result for LLM
                     if isinstance(tool_result, dict):
-                        # For dict results, create a concise summary
-                        result_str = (
-                            f"Tool execution result: {tool_result.get('success', 'unknown')}"
-                        )
-                        if tool_result.get("error"):
-                            result_str += f" - Error: {tool_result['error']}"
-                        elif tool_result.get("message_id"):
-                            result_str += f" - Message sent (ID: {tool_result['message_id']})"
+                        # Check for specific tool result formats
+                        if "success" in tool_result:
+                            # Discord DM tool format
+                            result_str = (
+                                f"Tool execution result: {tool_result.get('success', 'unknown')}"
+                            )
+                            if tool_result.get("error"):
+                                result_str += f" - Error: {tool_result['error']}"
+                            elif tool_result.get("message_id"):
+                                result_str += f" - Message sent (ID: {tool_result['message_id']})"
+                        elif "results" in tool_result:
+                            # Google Search tool format
+                            import json
+                            result_str = json.dumps(tool_result["results"], indent=2)
+                        elif "content" in tool_result and "url" in tool_result:
+                            # Read Webpage tool format
+                            result_str = f"Content from {tool_result['url']} (Page {tool_result.get('current_page', 1)}/{tool_result.get('total_pages', '?')}):\n\n{tool_result['content']}"
+                        else:
+                            # Generic dict fallback
+                            import json
+                            try:
+                                result_str = json.dumps(tool_result, indent=2)
+                            except Exception:
+                                result_str = str(tool_result)
                     else:
-                        result_str = str(tool_result)[:500]  # Limit to 500 chars
+                        result_str = str(tool_result)
+                    
+                    # Limit result size to prevent context overflow
+                    if len(result_str) > 2000:
+                        result_str = result_str[:2000] + "... [truncated]"
 
                     # Add tool result to conversation history
                     tool_result_message = Message(
