@@ -287,11 +287,28 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
 
                     # Format output
                     if isinstance(output, dict):
-                        content_str = f"Result: {output.get('success', 'unknown')}"
-                        if output.get("message"):
-                            content_str += f" - {output['message']}"
-                        if output.get("error"):
-                            content_str += f" - Error: {output['error']}"
+                        # Check for specific tool result formats
+                        if "success" in output:
+                            # Discord DM tool format
+                            content_str = f"Result: {output.get('success', 'unknown')}"
+                            if output.get("message"):
+                                content_str += f" - {output['message']}"
+                            if output.get("error"):
+                                content_str += f" - Error: {output['error']}"
+                        elif "results" in output:
+                            # Google Search tool format
+                            import json
+                            content_str = json.dumps(output["results"], indent=2)
+                        elif "content" in output and "url" in output:
+                            # Read Webpage tool format
+                            content_str = f"Content from {output['url']} (Page {output.get('current_page', 1)}/{output.get('total_pages', '?')}):\n\n{output['content']}"
+                        else:
+                            # Generic dict fallback
+                            import json
+                            try:
+                                content_str = json.dumps(output, indent=2)
+                            except Exception:
+                                content_str = str(output)
                     else:
                         content_str = str(output)[:2000]
 
