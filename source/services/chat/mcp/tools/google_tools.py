@@ -193,7 +193,7 @@ async def register_google_tools(mcp_manager: MCPManager, context: Context) -> No
     mcp_manager.add_tool_from_function(
         func=google_search_tool,
         name="google_search",
-        description="Perform a Google search to retrieve information from the web. Returns titles, links, and snippets. It's suggested to use 'read_webpage' to read the full content of a link.",
+        description="Perform a Google search to retrieve information from the web. Returns titles, links, and snippets. It's suggested to use 'read_webpage' to read the full content of a link if the snippet is insufficient.",
     )
 
     # Register the read_webpage tool
