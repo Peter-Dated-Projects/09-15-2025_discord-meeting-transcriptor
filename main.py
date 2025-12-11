@@ -419,10 +419,11 @@ async def main():
 
     # Register Discord tools with MCP manager
     if services_manager.mcp_manager:
-        from source.services.chat.mcp.tools import register_discord_tools
+        from source.services.chat.mcp.tools import register_discord_tools, register_google_tools
 
         await register_discord_tools(services_manager.mcp_manager, context)
-        await logger.info("[OK] Registered Discord tools with MCP manager.")
+        await register_google_tools(services_manager.mcp_manager, context)
+        await logger.info("[OK] Registered Discord and Google tools with MCP manager.")
 
     # Initialize conversation manager thread ID cache
     if services_manager.conversation_manager and services_manager.conversations_sql_manager:
