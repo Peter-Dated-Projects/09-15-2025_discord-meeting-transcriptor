@@ -10,6 +10,7 @@ import os
 from typing import Any
 
 import chromadb
+from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from flask import Flask, redirect, render_template_string, request, url_for
 
 app = Flask(__name__)
@@ -17,9 +18,11 @@ app = Flask(__name__)
 # ChromaDB Configuration
 CHROMADB_HOST = os.getenv("CHROMADB_HOST", "localhost")
 CHROMADB_PORT = int(os.getenv("CHROMADB_PORT", "8000"))
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
 
 # Global client
 chroma_client = None
+embedding_function = None
 
 
 def get_client():
@@ -28,6 +31,16 @@ def get_client():
     if chroma_client is None:
         chroma_client = chromadb.HttpClient(host=CHROMADB_HOST, port=CHROMADB_PORT)
     return chroma_client
+
+
+def get_embedding_function():
+    """Get or create the embedding function."""
+    global embedding_function
+    if embedding_function is None:
+        print(f"Loading embedding model: {EMBEDDING_MODEL}...")
+        embedding_function = SentenceTransformerEmbeddingFunction(model_name=EMBEDDING_MODEL)
+        print("Embedding model loaded.")
+    return embedding_function
 
 
 # HTML Templates
@@ -569,6 +582,17 @@ COLLECTION_TEMPLATE = """
                     </button>
                 </div>
                 
+                <div class="search-box">
+                    <form action="/collection/{{ collection_name }}" method="get" style="display: flex; gap: 10px;">
+                        <input type="text" name="q" placeholder="Search documents..." value="{{ query or '' }}" style="flex-grow: 1;">
+                        <input type="number" name="threshold" placeholder="Threshold" step="0.1" min="0" value="{{ threshold or 1.5 }}" style="width: 150px; padding: 12px 20px; border: 2px solid #e9ecef; border-radius: 8px;" title="Distance threshold (lower is closer)">
+                        <button type="submit" class="btn" style="background: #667eea; color: white;">Search</button>
+                        {% if query %}
+                            <a href="/collection/{{ collection_name }}" class="btn btn-secondary" style="text-decoration: none; display: flex; align-items: center;">Clear</a>
+                        {% endif %}
+                    </form>
+                </div>
+
                 {% if documents %}
                     <div class="documents-list">
                         {% for doc in documents %}
@@ -686,50 +710,109 @@ def view_collection(collection_name):
     """Display all documents in a collection."""
     try:
         client = get_client()
+        # Get collection without specifying embedding function to avoid conflicts
+        # We will handle embedding generation manually for queries
         collection = client.get_collection(name=collection_name)
 
-        # Get the total count first
-        total_count = collection.count()
-
-        # Get all documents by specifying the limit
-        # Note: collection.get() defaults to limit=100, so we need to specify the actual count
-        results = collection.get(
-            include=["documents", "metadatas", "embeddings"],
-            limit=total_count if total_count > 0 else None,
-        )
+        # Search parameters
+        query = request.args.get("q")
+        threshold_str = request.args.get("threshold", "1.5")
+        try:
+            threshold = float(threshold_str)
+        except ValueError:
+            threshold = 1.5
 
         documents = []
         metadata_fields = set()
 
-        # Check if we have any IDs - handle both list and numpy array cases
-        if results.get("ids") is not None and len(results["ids"]) > 0:
-            for i, doc_id in enumerate(results["ids"]):
-                doc_data: dict[str, Any] = {"id": doc_id}
+        if query:
+            # Generate embedding for the query manually
+            ef = get_embedding_function()
+            query_embeddings = ef([query])
 
-                if results.get("documents") is not None and i < len(results["documents"]):
-                    doc_data["document"] = results["documents"][i]
+            # Perform semantic search using the generated embedding
+            results = collection.query(
+                query_embeddings=query_embeddings,
+                n_results=50,
+                include=["documents", "metadatas", "embeddings", "distances"],
+            )
 
-                if results.get("metadatas") is not None and i < len(results["metadatas"]):
-                    metadata = results["metadatas"][i]
-                    doc_data["metadata"] = metadata
-                    if metadata:
-                        metadata_fields.update(metadata.keys())
+            # Process query results (list of lists)
+            if results.get("ids") and len(results["ids"]) > 0:
+                ids = results["ids"][0]
+                docs = results["documents"][0] if results.get("documents") else []
+                metas = results["metadatas"][0] if results.get("metadatas") else []
+                embeddings = results["embeddings"][0] if results.get("embeddings") else []
+                distances = results["distances"][0] if results.get("distances") else []
 
-                if results.get("embeddings") is not None and i < len(results["embeddings"]):
-                    embedding = results["embeddings"][i]
-                    # Convert numpy array to list to avoid "truth value of array" errors in templates
-                    if hasattr(embedding, "tolist"):
-                        embedding = embedding.tolist()
-                    doc_data["embedding"] = embedding
+                for i, doc_id in enumerate(ids):
+                    distance = distances[i] if i < len(distances) else None
 
-                if results.get("distances") is not None and i < len(results["distances"]):
-                    distance = results["distances"][i]
-                    # Convert numpy scalar to Python float if needed
-                    if hasattr(distance, "item"):
-                        distance = distance.item()
-                    doc_data["distance"] = distance
+                    # Filter by threshold
+                    if distance is not None and distance > threshold:
+                        continue
 
-                documents.append(doc_data)
+                    doc_data = {"id": doc_id}
+
+                    if i < len(docs):
+                        doc_data["document"] = docs[i]
+
+                    if i < len(metas):
+                        metadata = metas[i]
+                        doc_data["metadata"] = metadata
+                        if metadata:
+                            metadata_fields.update(metadata.keys())
+
+                    if i < len(embeddings):
+                        embedding = embeddings[i]
+                        if hasattr(embedding, "tolist"):
+                            embedding = embedding.tolist()
+                        doc_data["embedding"] = embedding
+
+                    if distance is not None:
+                        doc_data["distance"] = distance
+
+                    documents.append(doc_data)
+        else:
+            # Get the total count first
+            total_count = collection.count()
+
+            # Get all documents by specifying the limit
+            # Note: collection.get() defaults to limit=100, so we need to specify the actual count
+            results = collection.get(
+                include=["documents", "metadatas", "embeddings"],
+                limit=total_count if total_count > 0 else None,
+            )
+
+            # Check if we have any IDs - handle both list and numpy array cases
+            if results.get("ids") is not None and len(results["ids"]) > 0:
+                for i, doc_id in enumerate(results["ids"]):
+                    doc_data: dict[str, Any] = {"id": doc_id}
+
+                    if results.get("documents") is not None and i < len(results["documents"]):
+                        doc_data["document"] = results["documents"][i]
+
+                    if results.get("metadatas") is not None and i < len(results["metadatas"]):
+                        metadata = results["metadatas"][i]
+                        doc_data["metadata"] = metadata
+                        if metadata:
+                            metadata_fields.update(metadata.keys())
+
+                    if results.get("embeddings") is not None and i < len(results["embeddings"]):
+                        embedding = results["embeddings"][i]
+                        # Convert numpy array to list to avoid "truth value of array" errors in templates
+                        if hasattr(embedding, "tolist"):
+                            embedding = embedding.tolist()
+                        doc_data["embedding"] = embedding
+
+                    if results.get("distances") is not None and i < len(results["distances"]):
+                        distance = results["distances"][i]
+                        # Convert numpy scalar to Python float if needed
+                        if hasattr(distance, "item"):
+                            distance = distance.item()
+                        doc_data["distance"] = distance
+
+                    documents.append(doc_data)
 
         return render_template_string(
             COLLECTION_TEMPLATE,
@@ -737,6 +820,8 @@ def view_collection(collection_name):
             documents=documents,
             document_count=len(documents),
             metadata_fields=sorted(metadata_fields),
+            query=query,
+            threshold=threshold,
             error=None,
         )
     except Exception as e:
@@ -746,6 +831,8 @@ def view_collection(collection_name):
             documents=[],
             document_count=0,
             metadata_fields=[],
+            query=request.args.get("q"),
+            threshold=request.args.get("threshold", 1.5),
             error=str(e),
         )
 
