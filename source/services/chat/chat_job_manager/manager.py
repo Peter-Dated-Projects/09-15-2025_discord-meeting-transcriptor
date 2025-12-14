@@ -795,7 +795,95 @@ class ChatJob(Job):
                     conversation.add_message(tool_call_message)
 
                     # Format tool result for LLM
-                    if isinstance(tool_result, dict):
+
+                    # Check if tool_result is a string that might be a JSON list of messages
+                    # This handles cases where the tool manager serialized the list result
+                    if isinstance(tool_result, str):
+                        try:
+                            import json
+
+                            parsed_result = json.loads(tool_result)
+                            if (
+                                isinstance(parsed_result, list)
+                                and len(parsed_result) > 0
+                                and isinstance(parsed_result[0], dict)
+                                and "role" in parsed_result[0]
+                            ):
+                                tool_result = parsed_result
+                        except Exception:
+                            pass
+
+                    if (
+                        isinstance(tool_result, list)
+                        and len(tool_result) > 0
+                        and isinstance(tool_result[0], dict)
+                        and "role" in tool_result[0]
+                    ):
+                        # This is a list of messages from a subroutine (Ollama format)
+                        # We should NOT stringify this into a tool response.
+                        # Instead, we should append these messages directly to the conversation history.
+
+                        # First, add a placeholder tool response to satisfy the tool call loop
+                        # (The LLM expects a response to the tool call)
+                        tool_result_message = Message(
+                            created_at=datetime.now(),
+                            message_type=MessageType.TOOL_CALL_RESPONSE,
+                            message_content="Subroutine executed. See following messages for details.",
+                            requester=None,
+                        )
+                        conversation.add_message(tool_result_message)
+
+                        # Add the tool response to the list for the immediate next LLM call
+                        tool_results.append(
+                            {
+                                "tool_call_id": tool_id,
+                                "name": tool_name,
+                                "content": "Subroutine executed. See following messages for details.",
+                            }
+                        )
+
+                        # Now append the actual subroutine messages to the conversation
+                        for msg in tool_result:
+                            role = msg.get("role")
+                            content = msg.get("content", "")
+
+                            # Map Ollama roles to our MessageTypes
+                            msg_type = MessageType.AI_RESPONSE
+                            if role == "user":
+                                msg_type = MessageType.CHAT
+                            elif role == "system":
+                                # We don't typically store system messages in history, but if needed:
+                                msg_type = MessageType.SYSTEM_PROMPT
+                            elif role == "tool":
+                                msg_type = MessageType.TOOL_CALL_RESPONSE
+
+                            # Handle tool calls within the subroutine message
+                            tools_data = None
+                            if "tool_calls" in msg:
+                                msg_type = MessageType.TOOL_CALL
+                                tools_data = []
+                                for tc in msg["tool_calls"]:
+                                    tools_data.append(
+                                        {
+                                            "name": tc["function"]["name"],
+                                            "arguments": tc["function"]["arguments"],
+                                            "id": "subroutine_inner_call",  # ID might be missing in some formats
+                                        }
+                                    )
+
+                            new_msg = Message(
+                                created_at=datetime.now(),
+                                message_type=msg_type,
+                                message_content=content,
+                                tools=tools_data,
+                                requester=None,  # Subroutine messages are internal/AI generated
+                            )
+                            conversation.add_message(new_msg)
+
+                        # We continue the loop, but we've already handled the "result" by injecting messages.
+                        continue
+
+                    elif isinstance(tool_result, dict):
                         # Check for specific tool result formats
                         if "success" in tool_result:
                             # Discord DM tool format
