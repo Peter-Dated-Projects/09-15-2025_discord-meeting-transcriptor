@@ -2662,14 +2662,12 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         Args:
             ttl_hours: Delete temp recordings older than this many hours
         """
-        cutoff_time = get_current_timestamp_est() - timedelta(hours=ttl_hours)
+        # Retrieve all sql entries that are created before the current timestamp
+        cutoff_time = get_current_timestamp_est()
 
         # Query old temp recordings using SQLAlchemy
         query = select(TempRecordingModel).where(
-            TempRecordingModel.created_at < cutoff_time,
-            TempRecordingModel.transcode_status.in_(
-                [TranscodeStatus.DONE.value, TranscodeStatus.FAILED.value]
-            ),
+            TempRecordingModel.created_at < cutoff_time
         )
 
         old_recordings = await self.server.sql_client.execute(query)
