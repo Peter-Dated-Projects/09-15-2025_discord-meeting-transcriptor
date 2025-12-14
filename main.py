@@ -139,12 +139,16 @@ async def load_cogs(context: Context):
     from cogs.chat import setup as setup_chat
     from cogs.general import setup as setup_general
     from cogs.voice import setup as setup_voice
+    from cogs.utils import setup as setup_utils
 
     setup_general(context)
     await context.services_manager.logging_service.info("✓ Loaded cogs.general")
 
     setup_voice(context)
     await context.services_manager.logging_service.info("✓ Loaded cogs.voice")
+
+    setup_utils(context)
+    await context.services_manager.logging_service.info("✓ Loaded cogs.utils")
 
     # Load chat cog and register its message handler
     chat_cog = setup_chat(context)

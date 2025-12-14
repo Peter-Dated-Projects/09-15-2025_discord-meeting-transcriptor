@@ -1389,9 +1389,7 @@ class DiscordSessionHandler:
             # Send DM to requestor only
             from source.utils import BotUtils
 
-            await BotUtils.send_dm(
-                self.services.context.bot, requestor_id, embed=embed
-            )
+            await BotUtils.send_dm(self.services.context.bot, requestor_id, embed=embed)
 
         except Exception as e:
             await self.services.logging_service.error(
@@ -2167,7 +2165,9 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Check transcode_status in temp_recordings table."
                 )
                 # Send error notification to requestor
-                await self._send_concatenation_error_dm(meeting_id, user_id, "No MP3 files available")
+                await self._send_concatenation_error_dm(
+                    meeting_id, user_id, "No MP3 files available"
+                )
                 return None
 
             await self.services.logging_service.info(
@@ -2185,7 +2185,9 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
                     f"Failed to concatenate MP3 files for user {user_id} in meeting {meeting_id}"
                 )
                 # Send error notification to requestor
-                await self._send_concatenation_error_dm(meeting_id, user_id, "MP3 concatenation failed")
+                await self._send_concatenation_error_dm(
+                    meeting_id, user_id, "MP3 concatenation failed"
+                )
                 return None
 
             # Insert persistent recording into SQL
@@ -2247,7 +2249,9 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             await self._send_concatenation_error_dm(meeting_id, user_id, str(e))
             return None
 
-    async def _send_concatenation_error_dm(self, meeting_id: str, user_id: int | str, error_details: str) -> None:
+    async def _send_concatenation_error_dm(
+        self, meeting_id: str, user_id: int | str, error_details: str
+    ) -> None:
         """Send error notification to meeting requestor when concatenation/recording processing fails."""
         try:
             # Get meeting data to retrieve requestor
@@ -2283,9 +2287,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
             # Send DM to requestor only
             from source.utils import BotUtils
 
-            await BotUtils.send_dm(
-                self.services.context.bot, requestor_id, embed=embed
-            )
+            await BotUtils.send_dm(self.services.context.bot, requestor_id, embed=embed)
 
         except Exception as e:
             await self.services.logging_service.error(
@@ -2662,15 +2664,11 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         Args:
             ttl_hours: Delete temp recordings older than this many hours
         """
-        cutoff_time = get_current_timestamp_est() - timedelta(hours=ttl_hours)
+        # Retrieve all sql entries that are created before the current timestamp
+        cutoff_time = get_current_timestamp_est()
 
         # Query old temp recordings using SQLAlchemy
-        query = select(TempRecordingModel).where(
-            TempRecordingModel.created_at < cutoff_time,
-            TempRecordingModel.transcode_status.in_(
-                [TranscodeStatus.DONE.value, TranscodeStatus.FAILED.value]
-            ),
-        )
+        query = select(TempRecordingModel).where(TempRecordingModel.created_at < cutoff_time)
 
         old_recordings = await self.server.sql_client.execute(query)
 
