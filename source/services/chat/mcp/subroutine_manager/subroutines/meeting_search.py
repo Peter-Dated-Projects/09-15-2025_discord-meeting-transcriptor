@@ -29,9 +29,28 @@ The queries should be optimized for semantic search.
 
 Output must be a JSON object with a single key "queries" containing a list of 3 strings.
 Example:
+
+User asks for "software"
 {
-    "queries": ["budget allocation 2024", "marketing strategy Q1", "project alpha kickoff"]
+    "queries": ["software development engineering", "app game mobile desktop", "webapp websites webapplication"]
 }
+"""
+
+# System prompt for synthesis
+SYNTHESIS_PROMPT = """
+You are a helpful assistant.
+Here is a list of meeting search results.
+
+Your task is to rewrite the summaries to be very concise (1 sentence, max 30 words per meeting).
+Keep the exact format: '- Meeting [<ID>]: <summary> (Distance: <val>)'
+Use list format.
+
+Do not change the Meeting IDs or Distance values.
+Do not tables.
+
+
+Input:
+{response_text}
 """
 
 
@@ -195,7 +214,17 @@ class MeetingSearchSubroutine(BaseSubroutine):
             distance_str = f" (Distance: {distance_val:.4f})" if distance_val is not None else ""
             response_text += f"- Meeting [{res['meeting_id']}]: {res['summary']}{distance_str}\n"
 
-        return {"messages": [AIMessage(content=response_text)]}
+        # Get AI to shorten the summary for each meeting to 1 sentence ~ max 30 words.
+        prompt = SYNTHESIS_PROMPT.format(response_text=response_text)
+
+        response = await self.ollama_request_manager.query(
+            messages=[{"role": "user", "content": prompt}],
+            model=self.model,
+        )
+
+        final_content = response.content if hasattr(response, "content") else str(response)
+
+        return {"messages": [AIMessage(content=final_content)]}
 
 
 def create_meeting_search_subroutine(

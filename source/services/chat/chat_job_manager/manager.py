@@ -795,6 +795,24 @@ class ChatJob(Job):
                     conversation.add_message(tool_call_message)
 
                     # Format tool result for LLM
+
+                    # Check if tool_result is a string that might be a JSON list of messages
+                    # This handles cases where the tool manager serialized the list result
+                    if isinstance(tool_result, str):
+                        try:
+                            import json
+
+                            parsed_result = json.loads(tool_result)
+                            if (
+                                isinstance(parsed_result, list)
+                                and len(parsed_result) > 0
+                                and isinstance(parsed_result[0], dict)
+                                and "role" in parsed_result[0]
+                            ):
+                                tool_result = parsed_result
+                        except Exception:
+                            pass
+
                     if (
                         isinstance(tool_result, list)
                         and len(tool_result) > 0
