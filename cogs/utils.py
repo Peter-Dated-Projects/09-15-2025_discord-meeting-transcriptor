@@ -29,19 +29,22 @@ class Utils(commands.Cog):
             except asyncio.CancelledError:
                 pass
 
+        response_msg = ""
         # 2. Run cleanup immediately
         try:
             ttl_hours = DiscordRecorderConstants.TEMP_RECORDING_TTL_HOURS
-            await recorder_manager._cleanup_old_temp_recordings_once(ttl_hours)
-            await ctx.followup.send("✅ Cleanup ran successfully.")
+            count = await recorder_manager._cleanup_old_temp_recordings_once(ttl_hours)
+            response_msg += f"✅ Cleanup ran successfully. Removed {count} files.\n"
         except Exception as e:
-            await ctx.followup.send(f"❌ Error during cleanup: {e}")
+            response_msg += f"❌ Error during cleanup: {e}\n"
 
         # 3. Restart the background task
         recorder_manager._cleanup_task = asyncio.create_task(
             recorder_manager._cleanup_old_temp_recordings()
         )
-        await ctx.followup.send("✅ Cleanup task restarted.")
+        response_msg += "✅ Cleanup task restarted."
+
+        await ctx.followup.send(response_msg)
 
 
 def setup(context: Context):

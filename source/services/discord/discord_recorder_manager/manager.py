@@ -2657,12 +2657,15 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         except asyncio.CancelledError:
             await self.services.logging_service.info("Cleanup task cancelled")
 
-    async def _cleanup_old_temp_recordings_once(self, ttl_hours: int) -> None:
+    async def _cleanup_old_temp_recordings_once(self, ttl_hours: int) -> int:
         """
         Run a single cleanup cycle.
 
         Args:
             ttl_hours: Delete temp recordings older than this many hours
+        
+        Returns:
+            Number of recordings cleaned up
         """
         # Retrieve all sql entries that are created before the current timestamp
         cutoff_time = get_current_timestamp_est()
@@ -2674,7 +2677,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
         if not old_recordings:
             await self.services.logging_service.debug("No old temp recordings to clean up")
-            return
+            return 0
 
         await self.services.logging_service.info(
             f"Found {len(old_recordings)} old temp recordings to clean up"
@@ -2729,6 +2732,8 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         await self.services.logging_service.info(
             f"Cleanup completed: {deleted_count} temp recordings removed"
         )
+        
+        return deleted_count
 
     async def _delete_temp_recordings_batch(self, temp_ids: list[str]) -> None:
         """
