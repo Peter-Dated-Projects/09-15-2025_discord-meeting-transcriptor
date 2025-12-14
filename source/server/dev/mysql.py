@@ -368,74 +368,51 @@ class MySQLServer(SQLDatabase):
 
             # Extract parameter names in order from the query
 
-            # Check for POSTCOMPILE parameters (used for IN clause expansion)
-            postcompile_pattern = re.compile(r"__\[POSTCOMPILE_(\w+)\]")
-            postcompile_matches = postcompile_pattern.findall(query)
+            # Combined regex for POSTCOMPILE and regular parameters
+            # Group 1: POSTCOMPILE name
+            # Group 2: Regular parameter name
+            combined_pattern = re.compile(r"__\[POSTCOMPILE_(\w+)\]|%\(([^)]+)\)s")
 
-            if postcompile_matches:
-                # Handle IN clause expansion
-                for param_name in postcompile_matches:
-                    param_value = processed_params.get(param_name)
-                    if isinstance(param_value, list):
-                        # Expand the list into individual placeholders
-                        placeholders = ", ".join(["%s"] * len(param_value))
-                        query = query.replace(f"__[POSTCOMPILE_{param_name}]", placeholders)
-                        # Add the list values to our params to process
-                        # Store them separately so we can build the param tuple correctly
-                        processed_params[f"_expanded_{param_name}"] = param_value
+            param_values_list = []
 
-                # Replace %(name)s with %s for regular parameters
-                param_pattern = re.compile(r"%\(([^)]+)\)s")
-                param_matches = param_pattern.findall(query)
-                query = param_pattern.sub("%s", query)
+            def replacement_handler(match):
+                if match.group(1):  # POSTCOMPILE
+                    param_name = match.group(1)
+                    val = processed_params.get(param_name)
 
-                # Now build the parameter tuple with both regular and expanded values
-                # Need to maintain the order they appear in the query
-                param_values = []
-                for param_name in param_matches:
-                    if param_name in postcompile_matches:
-                        # This is an expanded IN clause parameter
-                        expanded_key = f"_expanded_{param_name}"
-                        if expanded_key in processed_params:
-                            param_values.extend(processed_params[expanded_key])
+                    if val is None and param_name not in processed_params:
+                        logger.error(f"[{self.name}] Missing POSTCOMPILE parameter: {param_name}")
+
+                    if isinstance(val, list):
+                        param_values_list.extend(val)
+                        return ", ".join(["%s"] * len(val))
                     else:
-                        # Regular parameter
-                        param_values.append(processed_params.get(param_name))
-                param_values = tuple(param_values)
+                        # Should be a list for postcompile, but fallback
+                        param_values_list.append(val)
+                        return "%s"
+                else:  # Regular %(name)s
+                    param_name = match.group(2)
+
+                    if param_name not in processed_params:
+                        logger.error(f"[{self.name}] Missing parameter: {param_name}")
+
+                    param_values_list.append(processed_params.get(param_name))
+                    return "%s"
+
+            # Perform substitution and build param_values list simultaneously
+            # This ensures parameters are added in the exact order they appear in the query
+            if combined_pattern.search(query):
+                query = combined_pattern.sub(replacement_handler, query)
+                param_values = tuple(param_values_list)
+            elif processed_params:
+                # If no named parameters found, but we have params,
+                # the query is already using %s placeholders.
+                # For mysql_insert with ON DUPLICATE KEY UPDATE, SQLAlchemy generates %s placeholders directly
+                # and the params dict maintains the correct order.
+                # We need to provide ALL parameters in the order they appear in processed_params
+                param_values = tuple(processed_params.values())
             else:
-                # SQLAlchemy's pymysql dialect uses %(param_name)s format
-                param_pattern = re.compile(r"%\(([^)]+)\)s")
-                param_matches = param_pattern.findall(query)
-
-                logger.debug(f"[{self.name}] Found parameters in query: {param_matches}")
-
-                # Build tuple of values in the correct order based on ALL parameters found in query
-                # This includes parameters in INSERT, UPDATE, WHERE clauses, etc.
-                if param_matches:
-                    # Get values in the exact order they appear in the query
-                    param_values = tuple(processed_params.get(name) for name in param_matches)
-
-                    # Log parameter extraction for debugging
-                    logger.debug(
-                        f"[{self.name}] Param extraction: matches={param_matches}, values_count={len(param_values)}"
-                    )
-                    missing_params = [
-                        name for name in param_matches if name not in processed_params
-                    ]
-                    if missing_params:
-                        logger.error(f"[{self.name}] Missing parameters: {missing_params}")
-
-                    # Replace %(name)s with %s
-                    query = param_pattern.sub("%s", query)
-                elif processed_params:
-                    # If no named parameters found, but we have params,
-                    # the query is already using %s placeholders.
-                    # For mysql_insert with ON DUPLICATE KEY UPDATE, SQLAlchemy generates %s placeholders directly
-                    # and the params dict maintains the correct order.
-                    # We need to provide ALL parameters in the order they appear in processed_params
-                    param_values = tuple(processed_params.values())
-                else:
-                    param_values = None
+                param_values = None
 
             async with (
                 self._get_connection() as connection,
