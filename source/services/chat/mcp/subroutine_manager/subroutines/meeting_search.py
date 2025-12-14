@@ -34,24 +34,6 @@ Example:
 }
 """
 
-# System prompt for synthesis
-SYNTHESIS_PROMPT = """
-You are a helpful assistant.
-You have performed a search on meeting summaries and found the following results.
-Your task is to provide a concise answer to the user's original request based on these results.
-
-CRITICAL: You MUST include the Meeting ID for every relevant meeting you find.
-Format your response as follows:
-1. A direct answer to the user's question.
-2. A list of "Relevant Meetings" with their IDs and a 1-sentence summary.
-3. In list format (not tabular format). Display the all rows in the following format: "- Meeting [<ID>]: <summary>".
-
-User Request: {user_query}
-
-Search Results:
-{search_results}
-"""
-
 
 class MeetingSearchSubroutine(BaseSubroutine):
     def __init__(
@@ -211,8 +193,7 @@ class MeetingSearchSubroutine(BaseSubroutine):
         for res in filtered_results:
             distance_val = res.get("distance")
             distance_str = f" (Distance: {distance_val:.4f})" if distance_val is not None else ""
-            response_text += f"- **Meeting ID**: {res['meeting_id']}{distance_str}\n"
-            response_text += f"  **Summary**: {res['summary']}\n\n"
+            response_text += f"- Meeting [{res['meeting_id']}]: {res['summary']}{distance_str}\n"
 
         return {"messages": [AIMessage(content=response_text)]}
 
