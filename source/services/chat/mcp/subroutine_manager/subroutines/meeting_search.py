@@ -44,6 +44,7 @@ CRITICAL: You MUST include the Meeting ID for every relevant meeting you find.
 Format your response as follows:
 1. A direct answer to the user's question.
 2. A list of "Relevant Meetings" with their IDs and a 1-sentence summary.
+3. In list format (not tabular format). Display the all rows in the following format: "- Meeting [<ID>]: <summary>".
 
 User Request: {user_query}
 

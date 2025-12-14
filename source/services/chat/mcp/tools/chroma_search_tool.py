@@ -141,23 +141,29 @@ async def run_meeting_search_subroutine(query: str, context: Context) -> Any:
         # Use ainvoke to run the graph
         result = await subroutine.ainvoke(initial_state)
 
-        print(result)
+        # The result is a list of messages.
+        if not result:
+            return "No results found."
 
-        # The result is a list of messages. The last message should be the synthesis.
-        if result and "messages" in result and len(result["messages"]) > 0:
-            # Return the full list of messages to preserve the conversation context
-            # including internal tool calls and thoughts
-            messages = result["messages"]
-            serialized_messages = []
-            for m in messages:
-                if hasattr(m, "model_dump"):
-                    serialized_messages.append(m.model_dump())
-                elif hasattr(m, "dict"):
-                    serialized_messages.append(m.dict())
-                else:
-                    serialized_messages.append({"type": m.type, "content": m.content})
-            return serialized_messages
-        return "No results found."
+        ollama_messages = []
+        for m in result:
+            if m.type == "ai":
+                msg = {"role": "assistant", "content": m.content}
+                if hasattr(m, "tool_calls") and m.tool_calls:
+                    msg["tool_calls"] = [
+                        {
+                            "function": {
+                                "name": tc.get("name"),
+                                "arguments": tc.get("args"),
+                            }
+                        }
+                        for tc in m.tool_calls
+                    ]
+                ollama_messages.append(msg)
+            elif m.type == "tool":
+                ollama_messages.append({"role": "tool", "content": m.content})
+
+        return ollama_messages
     except Exception as e:
         if context.services_manager.logging_service:
             await context.services_manager.logging_service.error(
@@ -176,7 +182,7 @@ async def register_chroma_tools(mcp_manager: MCPManager, context: Context) -> No
     """
 
     # Create a closure that captures the context
-    async def search_meetings_tool(query: str) -> str:
+    async def search_meetings_tool(query: str) -> Any:
         """
         Search for past meetings based on a query.
         Returns meeting IDs and relevant summary snippets.
