@@ -18,18 +18,19 @@ from source.services.chat.mcp.common.langgraph_subroutine import (
     SubroutineState,
 )
 from source.services.chat.mcp.tools.chroma_search_tool import query_chroma_summaries
+from source.services.chat.mcp.tools.common import RELEVANCE_TOOLS
 
 # System prompt for generating queries
 GENERATE_QUERIES_PROMPT = """
 You are an expert search query generator.
-Your task is to generate 2 distinct search queries based on the user's request.
+Your task is to generate 3 distinct search queries based on the user's request.
 These queries will be used to search a vector database of meeting summaries.
 The queries should be optimized for semantic search.
 
-Output must be a JSON object with a single key "queries" containing a list of 2 strings.
+Output must be a JSON object with a single key "queries" containing a list of 3 strings.
 Example:
 {
-    "queries": ["budget allocation 2024", "marketing strategy Q1"]
+    "queries": ["budget allocation 2024", "marketing strategy Q1", "project alpha kickoff"]
 }
 """
 
@@ -38,14 +39,18 @@ SYNTHESIS_PROMPT = """
 You are a helpful assistant.
 You have performed a search on meeting summaries and found the following results.
 Your task is to provide a concise answer to the user's original request based on these results.
-Include the meeting IDs and a short 1-2 sentence summary for each relevant meeting.
-If no relevant information is found, state that.
+
+CRITICAL: You MUST include the Meeting ID for every relevant meeting you find.
+Format your response as follows:
+1. A direct answer to the user's question.
+2. A list of "Relevant Meetings" with their IDs and a 1-sentence summary.
 
 User Request: {user_query}
 
 Search Results:
 {search_results}
 """
+
 
 class MeetingSearchSubroutine(BaseSubroutine):
     def __init__(
@@ -75,12 +80,14 @@ class MeetingSearchSubroutine(BaseSubroutine):
     def _build_graph(self):
         self.add_node("generate_queries", self._generate_queries_node)
         self.add_node("execute_search", self._execute_search_node)
+        self.add_node("filter_results", self._filter_results_node)
         self.add_node("synthesize", self._synthesize_node)
 
         self.set_entry_point("generate_queries")
 
         self.add_edge("generate_queries", "execute_search")
-        self.add_edge("execute_search", "synthesize")
+        self.add_edge("execute_search", "filter_results")
+        self.add_edge("filter_results", "synthesize")
         self.add_edge("synthesize", END)
 
     async def _generate_queries_node(self, state: SubroutineState) -> Dict:
@@ -89,9 +96,10 @@ class MeetingSearchSubroutine(BaseSubroutine):
         # or we can extract it from the last message if it's the start
         user_query = messages[-1].content
 
+        # Convert to Ollama-compatible message format (dicts)
         prompt = [
-            SystemMessage(content=GENERATE_QUERIES_PROMPT),
-            HumanMessage(content=f"User Request: {user_query}"),
+            {"role": "system", "content": GENERATE_QUERIES_PROMPT},
+            {"role": "user", "content": f"User Request: {user_query}"},
         ]
 
         response = await self.ollama_request_manager.query(
@@ -99,55 +107,113 @@ class MeetingSearchSubroutine(BaseSubroutine):
             model=self.model,
             format="json",
         )
-        
+
         # Store the generated queries in the state (as an AIMessage for history)
-        return {"messages": [AIMessage(content=response)]}
+        return {
+            "messages": [
+                AIMessage(
+                    content=response.content if hasattr(response, "content") else str(response)
+                )
+            ]
+        }
 
     async def _execute_search_node(self, state: SubroutineState) -> Dict:
         messages = state["messages"]
         last_message = messages[-1]
-        
+
         try:
             data = json.loads(last_message.content)
             queries = data.get("queries", [])
         except json.JSONDecodeError:
             # Fallback if JSON parsing fails
-            queries = [messages[0].content] # Use original query
+            queries = [messages[0].content]  # Use original query
 
         all_results = []
-        for query in queries:
-            result = await query_chroma_summaries(query, self.context, n_results=3)
-            if "results" in result:
-                all_results.extend(result["results"])
-        
-        # Deduplicate results based on meeting_id
-        seen_meetings = set()
-        unique_results = []
-        for res in all_results:
-            if res["meeting_id"] not in seen_meetings:
-                seen_meetings.add(res["meeting_id"])
-                unique_results.append(res)
-        
+        errors = []
+
+        # Execute all queries in a single batch to save on model loading time
+        result = await query_chroma_summaries(queries, self.context, n_results=3)
+
+        if "results" in result:
+            all_results.extend(result["results"])
+        if "error" in result:
+            errors.append(f"Batch search failed: {result['error']}")
+            return {"messages": [AIMessage(content=json.dumps({"errors": errors}, indent=2))]}
+
+        # Sort all results by distance (ascending) to prioritize best matches
+        all_results.sort(key=lambda x: x.get("distance", 1.0))
+
+        # Limit to top 10 results to avoid context overflow
+        final_results = all_results[:10]
+
+        # Truncate summary text to avoid token limits
+        for res in final_results:
+            if "summary_text" in res and len(res["summary_text"]) > 1000:
+                res["summary_text"] = res["summary_text"][:1000] + "...(truncated)"
+
         # Store results as a JSON string in an AIMessage
-        results_json = json.dumps(unique_results, indent=2)
+        results_json = json.dumps(final_results, indent=2)
         return {"messages": [AIMessage(content=results_json)]}
+
+    async def _filter_results_node(self, state: SubroutineState) -> Dict:
+        messages = state["messages"]
+        results_json = messages[-1].content
+        user_query = messages[0].content  # Assuming first message is user query
+
+        try:
+            results = json.loads(results_json)
+        except json.JSONDecodeError:
+            return {"messages": [AIMessage(content="[]")]}
+
+        filtered_results = []
+
+        print(results_json)
+
+        # Iterate through each result and ask LLM for relevance
+        for res in results:
+            summary = res.get("summary_text", "")
+            meeting_id = res.get("meeting_id", "unknown")
+            distance = res.get("distance", 1.0)
+
+            # Filter by distance
+            if distance >= 1:
+                continue
+
+            filtered_results.append(
+                {
+                    "meeting_id": meeting_id,
+                    "summary": summary,
+                    "distance": distance,
+                }
+            )
+
+        # Store filtered results as JSON
+        return {"messages": [AIMessage(content=json.dumps(filtered_results, indent=2))]}
 
     async def _synthesize_node(self, state: SubroutineState) -> Dict:
         messages = state["messages"]
         results_json = messages[-1].content
-        user_query = messages[0].content # Assuming first message is user query
 
-        prompt = SYNTHESIS_PROMPT.format(
-            user_query=user_query,
-            search_results=results_json
-        )
+        # The filtered results are already in the format we want (list of dicts with summary)
+        # We just need to wrap it in the final response format
 
-        response = await self.ollama_request_manager.query(
-            messages=[HumanMessage(content=prompt)],
-            model=self.model,
-        )
+        try:
+            filtered_results = json.loads(results_json)
+        except json.JSONDecodeError:
+            filtered_results = []
 
-        return {"messages": [AIMessage(content=response)]}
+        if not filtered_results:
+            return {"messages": [AIMessage(content="No relevant meetings found.")]}
+
+        # Construct the final response directly
+        response_text = "Here are the relevant meetings found:\n\n"
+        for res in filtered_results:
+            distance_val = res.get("distance")
+            distance_str = f" (Distance: {distance_val:.4f})" if distance_val is not None else ""
+            response_text += f"- **Meeting ID**: {res['meeting_id']}{distance_str}\n"
+            response_text += f"  **Summary**: {res['summary']}\n\n"
+
+        return {"messages": [AIMessage(content=response_text)]}
 
 
 def create_meeting_search_subroutine(

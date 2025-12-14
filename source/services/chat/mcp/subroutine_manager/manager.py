@@ -76,7 +76,17 @@ class SubroutineManager:
 
         # 4. Invoke the subroutine with the prepared state
         initial_state = {"messages": langchain_messages}
-        return subroutine.invoke(initial_state)
+        result = subroutine.invoke(initial_state)
+
+        # Extract the final response from the state
+        if isinstance(result, dict) and "messages" in result:
+            messages = result["messages"]
+            if messages and len(messages) > 0:
+                last_message = messages[-1]
+                if hasattr(last_message, "content"):
+                    return last_message.content
+
+        return result
 
     async def _execute_subroutine_with_context_async(
         self, subroutine_name: str, thread_id: str, tool_kwargs: Dict[str, Any]
@@ -115,9 +125,21 @@ class SubroutineManager:
 
         # Use ainvoke if available, otherwise fall back to invoke
         if hasattr(subroutine, "ainvoke"):
-            return await subroutine.ainvoke(initial_state)
+            result = await subroutine.ainvoke(initial_state)
         else:
-            return subroutine.invoke(initial_state)
+            result = subroutine.invoke(initial_state)
+
+        # Extract the final response from the state
+        # The result is typically a dict with "messages" key containing the conversation history
+        # We want to return the content of the last message as the tool result
+        if isinstance(result, dict) and "messages" in result:
+            messages = result["messages"]
+            if messages and len(messages) > 0:
+                last_message = messages[-1]
+                if hasattr(last_message, "content"):
+                    return last_message.content
+
+        return result
 
     def add_subroutine(
         self,
