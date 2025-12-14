@@ -1,0 +1,221 @@
+"""
+Meeting Details Search Subroutine
+
+Flow:
+1. Generate Queries -> LLM generates 3 search queries based on user request
+2. Execute Search -> Run chroma search on transcriptions for the specific meeting
+3. Synthesize -> LLM summarizes results
+"""
+
+import json
+from typing import Any, Dict, List
+
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.graph import END
+
+from source.services.chat.mcp.common.langgraph_subroutine import (
+    BaseSubroutine,
+    SubroutineState,
+)
+from source.services.chat.mcp.tools.chroma_search_tool import query_chroma_transcriptions
+
+# System prompt for generating queries
+GENERATE_QUERIES_PROMPT = """
+You are an expert search query generator.
+Your task is to generate 3 distinct search queries based on the user's request to find specific details within a meeting.
+These queries will be used to search the transcript segments of a specific meeting.
+The queries should be optimized for semantic search.
+
+Output must be a JSON object with a single key "queries" containing a list of 3 strings.
+Example:
+
+User asks for "what did they say about the budget?"
+{
+    "queries": ["budget discussion financial plan", "cost expenses money allocation", "fiscal year budget constraints"]
+}
+"""
+
+# System prompt for synthesis
+SYNTHESIS_PROMPT = """
+You are a helpful assistant.
+Here are the relevant transcript segments found in the meeting.
+
+Your task is to answer the user's question based on these segments.
+Be concise and direct.
+If the segments don't contain the answer, state that clearly.
+
+Input:
+{response_text}
+"""
+
+
+class MeetingDetailsSearchSubroutine(BaseSubroutine):
+    def __init__(
+        self,
+        ollama_request_manager: Any,
+        context: Any,
+        model: str = "gemma3:12b",
+        on_step_end: Any = None,
+    ):
+        super().__init__(
+            name="meeting_details_search",
+            description="Search for specific details within a meeting's transcript.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "meeting_id": {
+                        "type": "string",
+                        "description": "The ID of the meeting to search",
+                    },
+                    "user_query": {
+                        "type": "string",
+                        "description": "The user's query about the meeting",
+                    },
+                },
+                "required": ["meeting_id", "user_query"],
+            },
+            on_step_end=on_step_end,
+        )
+
+        self.ollama_request_manager = ollama_request_manager
+        self.context = context
+        self.model = model
+
+        self._build_graph()
+
+    def _build_graph(self):
+        self.add_node("generate_queries", self._generate_queries_node)
+        self.add_node("execute_search", self._execute_search_node)
+        self.add_node("synthesize", self._synthesize_node)
+
+        self.set_entry_point("generate_queries")
+
+        self.add_edge("generate_queries", "execute_search")
+        self.add_edge("execute_search", "synthesize")
+        self.add_edge("synthesize", END)
+
+    async def _generate_queries_node(self, state: SubroutineState) -> Dict:
+        messages = state["messages"]
+        # The first message is expected to be the user query (HumanMessage)
+        # containing JSON with meeting_id and user_query
+        first_message = messages[0]
+        try:
+            input_data = json.loads(first_message.content)
+            user_query = input_data.get("user_query")
+            # meeting_id = input_data.get("meeting_id") # Not used in this step
+        except json.JSONDecodeError:
+            # Fallback if not JSON (shouldn't happen if tool wrapper is correct)
+            user_query = first_message.content
+
+        # Convert to Ollama-compatible message format (dicts)
+        prompt = [
+            {"role": "system", "content": GENERATE_QUERIES_PROMPT},
+            {"role": "user", "content": f"User Request: {user_query}"},
+        ]
+
+        response = await self.ollama_request_manager.query(
+            messages=prompt,
+            model=self.model,
+            format="json",
+        )
+
+        # Store the generated queries in the state
+        return {
+            "messages": [
+                AIMessage(
+                    content=response.content if hasattr(response, "content") else str(response)
+                )
+            ]
+        }
+
+    async def _execute_search_node(self, state: SubroutineState) -> Dict:
+        messages = state["messages"]
+
+        # Get meeting_id from first message
+        try:
+            input_data = json.loads(messages[0].content)
+            meeting_id = input_data.get("meeting_id")
+            user_query = input_data.get("user_query")
+        except:
+            return {
+                "messages": [AIMessage(content="Error: Could not retrieve meeting ID from input.")]
+            }
+
+        # Get queries from last message (generated by LLM)
+        last_message = messages[-1]
+        try:
+            data = json.loads(last_message.content)
+            queries = data.get("queries", [])
+        except json.JSONDecodeError:
+            queries = [user_query]
+
+        all_results = []
+        errors = []
+
+        # Execute search
+        result = await query_chroma_transcriptions(meeting_id, queries, self.context, n_results=5)
+
+        if "results" in result:
+            all_results.extend(result["results"])
+        if "error" in result:
+            errors.append(f"Search failed: {result['error']}")
+            return {"messages": [AIMessage(content=json.dumps({"errors": errors}, indent=2))]}
+
+        # Sort by distance
+        all_results.sort(key=lambda x: x.get("distance", 1.0))
+        final_results = all_results[:15]  # Top 15 segments
+
+        # Store results
+        results_json = json.dumps(final_results, indent=2)
+        return {"messages": [AIMessage(content=results_json)]}
+
+    async def _synthesize_node(self, state: SubroutineState) -> Dict:
+        messages = state["messages"]
+        results_json = messages[-1].content
+
+        try:
+            results = json.loads(results_json)
+        except:
+            results = []
+
+        if isinstance(results, dict) and "errors" in results:
+            return {"messages": [AIMessage(content=f"Error during search: {results['errors']}")]}
+
+        if not results:
+            return {
+                "messages": [
+                    AIMessage(content="No relevant details found in the meeting transcript.")
+                ]
+            }
+
+        # Construct context for LLM
+        response_text = "Relevant Transcript Segments:\n\n"
+        for res in results:
+            text = res.get("text", "").strip()
+            response_text += f"- {text}\n"
+
+        prompt = SYNTHESIS_PROMPT.format(response_text=response_text)
+
+        response = await self.ollama_request_manager.query(
+            messages=[{"role": "user", "content": prompt}],
+            model=self.model,
+        )
+
+        final_content = response.content if hasattr(response, "content") else str(response)
+
+        return {"messages": [AIMessage(content=final_content)]}
+
+
+def create_meeting_details_search_subroutine(
+    ollama_request_manager: Any,
+    context: Any,
+    model: str = "gemma3:12b",
+) -> MeetingDetailsSearchSubroutine:
+    """
+    Factory function to create a MeetingDetailsSearchSubroutine.
+    """
+    return MeetingDetailsSearchSubroutine(
+        ollama_request_manager=ollama_request_manager,
+        context=context,
+        model=model,
+    )
