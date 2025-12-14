@@ -169,18 +169,11 @@ class MeetingSearchSubroutine(BaseSubroutine):
 
         filtered_results = []
 
-        print(results_json)
-
         # Iterate through each result and ask LLM for relevance
         for res in results:
             summary = res.get("summary_text", "")
             meeting_id = res.get("meeting_id", "unknown")
             distance = res.get("distance", 1.0)
-
-            # Filter by distance
-            if distance >= 1:
-                continue
-
             filtered_results.append(
                 {
                     "meeting_id": meeting_id,

@@ -422,13 +422,15 @@ async def main():
         from source.services.chat.mcp.tools import (
             register_discord_tools,
             register_google_tools,
-            register_chroma_tools,
+            register_meeting_search_tool,
         )
 
         await register_discord_tools(services_manager.mcp_manager, context)
         await register_google_tools(services_manager.mcp_manager, context)
-        await register_chroma_tools(services_manager.mcp_manager, context)
-        await logger.info("[OK] Registered Discord, Google, and ChromaDB tools with MCP manager.")
+        await register_meeting_search_tool(services_manager.mcp_manager, context)
+        await logger.info(
+            "[OK] Registered Discord, Google, and Meeting Search tools with MCP manager."
+        )
 
     # Initialize conversation manager thread ID cache
     if services_manager.conversation_manager and services_manager.conversations_sql_manager:
