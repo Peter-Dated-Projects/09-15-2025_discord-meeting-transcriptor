@@ -135,6 +135,10 @@ class ChatJob(Job):
 
         await self.services.logging_service.info(f"Starting chat job for thread {self.thread_id}")
 
+        # Get conversation to track message count
+        conversation = self.services.conversation_manager.get_conversation(self.thread_id)
+        start_count = len(conversation.history) if conversation else 0
+
         try:
             # Process initial message if present (user attribution will be added when building LLM messages)
             if self.initial_message:
@@ -143,6 +147,16 @@ class ChatJob(Job):
             # Process queue until empty
             while len(self.message_queue) > 0:
                 await self._process_message_queue()
+
+            # Check if we need to run the periodic context job (every 20 messages)
+            if not conversation:
+                conversation = self.services.conversation_manager.get_conversation(self.thread_id)
+
+            if conversation:
+                end_count = len(conversation.history)
+                # Check if we crossed a multiple of 20
+                if (start_count // 20) < (end_count // 20):
+                    await self._run_periodic_context_job(conversation)
 
             # Mark conversation as idle
             await self._set_conversation_status(ConversationStatus.IDLE)
@@ -158,6 +172,16 @@ class ChatJob(Job):
             # Mark conversation as idle even on error
             await self._set_conversation_status(ConversationStatus.IDLE)
             raise
+
+    async def _run_periodic_context_job(self, conversation: Conversation) -> None:
+        """
+        Run a periodic job every 20 messages.
+
+        Args:
+            conversation: The full conversation object with context
+        """
+        # TODO: Implement periodic context job (e.g. summarization, cleanup)
+        pass
 
     # -------------------------------------------------------------- #
     # Message Processing Methods
@@ -381,7 +405,7 @@ class ChatJob(Job):
         # Add system prompt
         messages.append(SystemMessage(content=CHAT_JOB_SYSTEM_PROMPT))
 
-        for msg in conversation.history:
+        for msg in conversation.get_context_messages():
             if msg.message_type == MessageType.CHAT:
                 content = msg.message_content
                 if msg.requester:
