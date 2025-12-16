@@ -240,6 +240,11 @@ class ContextCleaningSubroutine(BaseSubroutine):
 
             ollama_messages.append(msg_dict)
 
+        if self.logging_service:
+            await self.logging_service.debug(
+                f"[ContextCleaning] Sending {len(ollama_messages)} messages to LLM."
+            )
+
         # Call Ollama
         response = await self.ollama_request_manager.query(
             model=self.model,
@@ -253,6 +258,11 @@ class ContextCleaningSubroutine(BaseSubroutine):
         tool_calls = []
 
         if hasattr(response, "tool_calls") and response.tool_calls:
+            if self.logging_service:
+                await self.logging_service.info(
+                    f"[ContextCleaning] LLM Tool Calls: {response.tool_calls}"
+                )
+
             for tc in response.tool_calls:
                 tool_calls.append(
                     {
@@ -261,6 +271,9 @@ class ContextCleaningSubroutine(BaseSubroutine):
                         "id": tc.get("id", "unknown"),
                     }
                 )
+
+        if self.logging_service:
+            await self.logging_service.debug(f"[ContextCleaning] LLM Response Content: {content}")
 
         ai_message = AIMessage(content=content, tool_calls=tool_calls)
 
@@ -288,7 +301,9 @@ class ContextCleaningSubroutine(BaseSubroutine):
                     if self.conversation.set_message_context(idx, False):
                         result_content = f"Message {idx} excluded from context."
                         if self.logging_service:
-                            await self.logging_service.debug(f"[ContextCleaning] Excluded message {idx}")
+                            await self.logging_service.debug(
+                                f"[ContextCleaning] Excluded message {idx}"
+                            )
                     else:
                         result_content = f"Error: Message index {idx} out of bounds."
 
@@ -297,7 +312,9 @@ class ContextCleaningSubroutine(BaseSubroutine):
                     if self.conversation.set_message_context(idx, True):
                         result_content = f"Message {idx} included in context."
                         if self.logging_service:
-                            await self.logging_service.debug(f"[ContextCleaning] Included message {idx}")
+                            await self.logging_service.debug(
+                                f"[ContextCleaning] Included message {idx}"
+                            )
                     else:
                         result_content = f"Error: Message index {idx} out of bounds."
 
@@ -320,7 +337,9 @@ class ContextCleaningSubroutine(BaseSubroutine):
                         else:
                             # 2. Run Summarization Job
                             if self.logging_service:
-                                await self.logging_service.info(f"[ContextCleaning] Summarizing {len(messages_to_summarize)} messages...")
+                                await self.logging_service.info(
+                                    f"[ContextCleaning] Summarizing {len(messages_to_summarize)} messages..."
+                                )
 
                             summary_text = await self._run_summarization_job(messages_to_summarize)
 
@@ -348,7 +367,9 @@ class ContextCleaningSubroutine(BaseSubroutine):
 
                             result_content = f"Summarized {len(messages_to_summarize)} messages. Summary added and originals excluded from context."
                             if self.logging_service:
-                                await self.logging_service.info(f"[ContextCleaning] Summarization complete. Summary inserted at {last_index + 1}.")
+                                await self.logging_service.info(
+                                    f"[ContextCleaning] Summarization complete. Summary inserted at {last_index + 1}."
+                                )
 
                 elif tool_name == "finished":
                     self.decisions_made = True
@@ -362,7 +383,9 @@ class ContextCleaningSubroutine(BaseSubroutine):
             except Exception as e:
                 result_content = f"Error executing {tool_name}: {str(e)}"
                 if self.logging_service:
-                    await self.logging_service.error(f"[ContextCleaning] Error executing {tool_name}: {e}")
+                    await self.logging_service.error(
+                        f"[ContextCleaning] Error executing {tool_name}: {e}"
+                    )
 
             results.append(ToolMessage(content=result_content, tool_call_id=tool_call_id))
 
@@ -410,6 +433,11 @@ class ContextCleaningSubroutine(BaseSubroutine):
             },
         ]
 
+        if self.logging_service:
+            await self.logging_service.debug(
+                f"[ContextCleaning] Sending summarization request for {len(messages)} messages."
+            )
+
         # Call LLM
         response = await self.ollama_request_manager.query(
             model=self.model,
@@ -417,4 +445,9 @@ class ContextCleaningSubroutine(BaseSubroutine):
             temperature=0.3,
         )
 
-        return response.content if hasattr(response, "content") else "No summary generated."
+        content = response.content if hasattr(response, "content") else "No summary generated."
+
+        if self.logging_service:
+            await self.logging_service.debug(f"[ContextCleaning] Summarization response: {content}")
+
+        return content
