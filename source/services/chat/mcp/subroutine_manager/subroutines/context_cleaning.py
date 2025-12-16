@@ -21,7 +21,11 @@ from source.services.chat.mcp.common.langgraph_subroutine import (
     BaseSubroutine,
     SubroutineState,
 )
-from source.services.chat.conversation_manager.in_memory_cache import Conversation, MessageType, Message
+from source.services.chat.conversation_manager.in_memory_cache import (
+    Conversation,
+    MessageType,
+    Message,
+)
 from source.services.gpu.ollama_request_manager.manager import LockedOllamaRequestManager
 from source.services.chat.mcp.tools.common import get_finalize_tool_definition
 from datetime import datetime
@@ -146,7 +150,7 @@ class ContextCleaningSubroutine(BaseSubroutine):
 
         # 3. Define Flow
         self.add_edge("prepare_input", "call_llm")
-        
+
         # Router: Execute Tools or End
         self.add_conditional_edges(
             "call_llm",
@@ -181,22 +185,22 @@ class ContextCleaningSubroutine(BaseSubroutine):
                 sender = "Tool Result"
             elif msg.message_type == MessageType.THINKING:
                 sender = "AI Thought"
-            
+
             # Status
             status = "[KEPT]" if msg.is_context else "[EXCLUDED]"
-            
+
             # Truncate content for display if too long
             content = msg.message_content
             if len(content) > 200:
                 content = content[:200] + "..."
-            
+
             history_text += f"[{i}] (ID: {msg.uuid}) {status} {sender}: {content}\n"
 
         messages = [
             SystemMessage(content=CONTEXT_CLEANING_SYSTEM_PROMPT),
-            HumanMessage(content=history_text)
+            HumanMessage(content=history_text),
         ]
-        
+
         return {"messages": messages}
 
     async def _call_llm_node(self, state: SubroutineState) -> Dict:
@@ -204,7 +208,7 @@ class ContextCleaningSubroutine(BaseSubroutine):
         Calls the LLM with the current state.
         """
         messages = state["messages"]
-        
+
         # Convert LangChain messages to Ollama format
         ollama_messages = []
         for msg in messages:
@@ -215,24 +219,23 @@ class ContextCleaningSubroutine(BaseSubroutine):
                 role = "assistant"
             elif isinstance(msg, ToolMessage):
                 role = "tool"
-            
+
             content = str(msg.content)
-            
+
             msg_dict = {"role": role, "content": content}
-            
+
             # Handle tool calls in AIMessage
             if isinstance(msg, AIMessage) and msg.tool_calls:
                 tool_calls = []
                 for tc in msg.tool_calls:
-                    tool_calls.append({
-                        "function": {
-                            "name": tc["name"],
-                            "arguments": tc["args"]
-                        },
-                        "id": tc.get("id", "unknown")
-                    })
+                    tool_calls.append(
+                        {
+                            "function": {"name": tc["name"], "arguments": tc["args"]},
+                            "id": tc.get("id", "unknown"),
+                        }
+                    )
                 msg_dict["tool_calls"] = tool_calls
-                
+
             ollama_messages.append(msg_dict)
 
         # Call Ollama
@@ -240,23 +243,25 @@ class ContextCleaningSubroutine(BaseSubroutine):
             model=self.model,
             messages=ollama_messages,
             tools=self.tools,
-            temperature=0.1, # Low temperature for deterministic logic
+            temperature=0.1,  # Low temperature for deterministic logic
         )
 
         # Convert response back to LangChain AIMessage
         content = response.content if hasattr(response, "content") else ""
         tool_calls = []
-        
+
         if hasattr(response, "tool_calls") and response.tool_calls:
             for tc in response.tool_calls:
-                tool_calls.append({
-                    "name": tc["function"]["name"],
-                    "args": tc["function"]["arguments"],
-                    "id": tc.get("id", "unknown")
-                })
-        
+                tool_calls.append(
+                    {
+                        "name": tc["function"]["name"],
+                        "args": tc["function"]["arguments"],
+                        "id": tc.get("id", "unknown"),
+                    }
+                )
+
         ai_message = AIMessage(content=content, tool_calls=tool_calls)
-        
+
         return {"messages": [ai_message]}
 
     async def _execute_tools_node(self, state: SubroutineState) -> Dict:
@@ -272,9 +277,9 @@ class ContextCleaningSubroutine(BaseSubroutine):
             tool_name = tool_call["name"]
             args = tool_call["args"]
             tool_call_id = tool_call["id"]
-            
+
             result_content = ""
-            
+
             try:
                 if tool_name == "exclude_message":
                     idx = args.get("message_index")
@@ -282,7 +287,7 @@ class ContextCleaningSubroutine(BaseSubroutine):
                         result_content = f"Message {idx} excluded from context."
                     else:
                         result_content = f"Error: Message index {idx} out of bounds."
-                        
+
                 elif tool_name == "include_message":
                     idx = args.get("message_index")
                     if self.conversation.set_message_context(idx, True):
@@ -298,32 +303,32 @@ class ContextCleaningSubroutine(BaseSubroutine):
                         # 1. Identify messages
                         messages_to_summarize = []
                         indices_to_hide = []
-                        
+
                         for i, msg in enumerate(self.conversation.history):
                             if msg.uuid in uuids:
                                 messages_to_summarize.append(msg)
                                 indices_to_hide.append(i)
-                        
+
                         if not messages_to_summarize:
                             result_content = "Error: No matching messages found for provided UUIDs."
                         else:
                             # 2. Run Summarization Job
                             summary_text = await self._run_summarization_job(messages_to_summarize)
-                            
+
                             # 3. Create Summary Message
                             summary_msg = Message(
                                 created_at=datetime.now(),
                                 message_type=MessageType.SUMMARY,
                                 message_content=summary_text,
                                 summarized_content=uuids,
-                                is_context=True
+                                is_context=True,
                             )
-                            
+
                             # 4. Insert Summary Message
                             # We insert it after the last message being summarized
                             last_index = max(indices_to_hide)
                             self.conversation.history.insert(last_index + 1, summary_msg)
-                            
+
                             # 5. Hide original messages
                             # Note: Indices shift after insertion, but since we insert AFTER the last one,
                             # the indices of the messages BEFORE it (which are the ones we are hiding) remain valid?
@@ -331,16 +336,16 @@ class ContextCleaningSubroutine(BaseSubroutine):
                             # So we can safely use indices_to_hide.
                             for idx in indices_to_hide:
                                 self.conversation.set_message_context(idx, False)
-                                
+
                             result_content = f"Summarized {len(messages_to_summarize)} messages. Summary added and originals excluded from context."
 
                 elif tool_name == "finished":
                     self.decisions_made = True
                     result_content = "Context cleaning finalized."
-                    
+
                 else:
                     result_content = f"Unknown tool: {tool_name}"
-                    
+
             except Exception as e:
                 result_content = f"Error executing {tool_name}: {str(e)}"
 
@@ -354,12 +359,12 @@ class ContextCleaningSubroutine(BaseSubroutine):
         """
         if self.decisions_made:
             return "end"
-            
+
         last_message = state["messages"][-1]
         if isinstance(last_message, AIMessage) and last_message.tool_calls:
             return "execute_tools"
-            
-        # If no tool calls, maybe the model just chatted. 
+
+        # If no tool calls, maybe the model just chatted.
         # We should probably prompt it to finish or just end if it seems done.
         # For now, let's end to prevent infinite loops if it refuses to call tools.
         return "end"
@@ -376,19 +381,25 @@ class ContextCleaningSubroutine(BaseSubroutine):
                 sender = f"User ({msg.requester})"
             elif msg.message_type == MessageType.AI_RESPONSE:
                 sender = "AI"
-            
+
             context_text += f"{sender}: {msg.message_content}\n"
-            
+
         prompt = [
-            {"role": "system", "content": "You are a helpful assistant that summarizes conversation segments."},
-            {"role": "user", "content": f"Please summarize the following conversation segment in concise point form:\n\n{context_text}"}
+            {
+                "role": "system",
+                "content": "You are a helpful assistant that summarizes conversation segments.",
+            },
+            {
+                "role": "user",
+                "content": f"Please summarize the following conversation segment in concise point form:\n\n{context_text}",
+            },
         ]
-        
+
         # Call LLM
         response = await self.ollama_request_manager.query(
             model=self.model,
             messages=prompt,
             temperature=0.3,
         )
-        
+
         return response.content if hasattr(response, "content") else "No summary generated."
