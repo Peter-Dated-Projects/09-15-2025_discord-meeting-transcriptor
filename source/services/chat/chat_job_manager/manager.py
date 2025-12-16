@@ -209,48 +209,48 @@ class ChatJob(Job):
                 # If we use LockedOllamaRequestManager here, it will try to acquire the lock AGAIN.
                 # If the lock is reentrant for the same job_id, it might work.
                 # But our GPU manager might not support reentrancy or might block.
-                
+
                 # Actually, the LockedOllamaRequestManager is designed to WRAP the call in a lock.
                 # If we are already holding the lock here, we should probably use a manager that DOESN'T lock,
-                # OR we should let the subroutine handle the locking via LockedOllamaRequestManager 
+                # OR we should let the subroutine handle the locking via LockedOllamaRequestManager
                 # and NOT acquire the lock here in the outer scope?
-                
+
                 # However, the requirement was "create a new GPU job called 'CONTEXT_CLEANING'".
                 # If we let the subroutine acquire the lock, it will use the job_id passed to LockedOllamaRequestManager.
-                
+
                 # Let's use the LockedOllamaRequestManager and NOT acquire the lock in the outer scope manually,
                 # OR (better) pass a "NoOpLockManager" or similar if we want to hold the lock for the whole duration.
-                
+
                 # But wait, the `LockedOllamaRequestManager` acquires the lock for *each query*.
                 # If we want to hold the lock for the *entire subroutine execution* (which involves multiple queries),
                 # we should acquire it here.
-                
+
                 # If we acquire it here, and then `LockedOllamaRequestManager` tries to acquire it again...
                 # If the GPU manager blocks on the second acquire, we deadlock.
-                
+
                 # Let's assume for now we want to hold the lock for the whole duration.
                 # We need a version of OllamaRequestManager that doesn't lock, or we need to trust the reentrancy.
                 # Looking at `LockedOllamaRequestManager` in this file:
                 # async with self.gpu_manager.acquire_lock(...): return await self.manager.query(...)
-                
+
                 # If we are already holding the lock, we can just pass `self.services.ollama_request_manager` directly?
                 # The subroutine expects an object with a `.query()` method.
                 # `self.services.ollama_request_manager` has `.query()`.
-                
+
                 # So we can pass the raw manager!
-                
+
                 subroutine = ContextCleaningSubroutine(
                     ollama_request_manager=self.services.ollama_request_manager,
                     conversation=conversation,
                     model=OLLAMA_CHAT_MODEL,
                 )
-                
+
                 await subroutine.ainvoke({"messages": []})
-                
+
                 await self.services.logging_service.info(
                     f"Context cleaning completed for thread {self.thread_id}"
                 )
-                
+
                 # Save the updated conversation (context flags changed)
                 await conversation.save_conversation()
 
