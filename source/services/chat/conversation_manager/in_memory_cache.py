@@ -7,6 +7,7 @@ with automatic cleanup after idle periods.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -62,6 +63,7 @@ class Message:
         tools: List of tool calls (only for tool_call type)
         requester: Discord user ID of the requester (only for user messages)
         attachments: List of attachment metadata (URLs, images, files)
+        uuid: Unique identifier for the message (16 chars)
     """
 
     created_at: datetime
@@ -70,6 +72,7 @@ class Message:
     tools: list[dict[str, Any]] | None = None
     requester: str | None = None
     attachments: list[dict[str, Any]] | None = None
+    uuid: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
 
     def to_json(self) -> dict[str, Any]:
         """Convert the message to JSON-serializable format.
@@ -78,6 +81,7 @@ class Message:
             Dictionary representation of the message
         """
         json_data: dict[str, Any] = {
+            "uuid": self.uuid,
             "created_at": self.created_at.isoformat(),
             "message_type": self.message_type.value,
             "message_content": self.message_content,
@@ -110,7 +114,13 @@ class Message:
         """
         meta = data.get("meta", {})
 
+        # Get or generate UUID
+        msg_uuid = data.get("uuid")
+        if not msg_uuid:
+            msg_uuid = uuid.uuid4().hex[:16]
+
         return cls(
+            uuid=msg_uuid,
             created_at=datetime.fromisoformat(data["created_at"]),
             message_type=MessageType(data["message_type"]),
             message_content=data["message_content"],
