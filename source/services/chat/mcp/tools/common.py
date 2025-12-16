@@ -26,3 +26,27 @@ RELEVANCE_TOOLS = [
         },
     }
 ]
+
+
+def get_finalize_tool_definition(
+    name: str = "finalize",
+    description: str = "Call this tool to indicate that you have completed the task.",
+) -> dict:
+    """
+    Get a standardized definition for a finalize/finish tool.
+
+    Args:
+        name: The name of the tool (default: "finalize")
+        description: The description of the tool
+
+    Returns:
+        Tool definition dictionary
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    }
