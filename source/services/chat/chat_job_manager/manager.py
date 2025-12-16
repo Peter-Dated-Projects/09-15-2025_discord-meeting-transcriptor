@@ -48,6 +48,7 @@ MAX_MESSAGE_BATCH_SIZE = 5
 
 # Get chat model from environment variable
 OLLAMA_CHAT_MODEL = os.getenv("OLLAMA_CHAT_MODEL", "gemma3:12b")
+OLLAMA_CONTEXT_CLEANER_MODEL = os.getenv("OLLAMA_CONTEXT_CLEANER_MODEL", "gemma3:12b")
 
 
 class LockedOllamaRequestManager:
@@ -242,7 +243,7 @@ class ChatJob(Job):
                 subroutine = ContextCleaningSubroutine(
                     ollama_request_manager=self.services.ollama_request_manager,
                     conversation=conversation,
-                    model=OLLAMA_CHAT_MODEL,
+                    model=OLLAMA_CONTEXT_CLEANER_MODEL,
                 )
 
                 await subroutine.ainvoke({"messages": []})

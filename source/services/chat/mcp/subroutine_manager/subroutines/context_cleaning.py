@@ -21,15 +21,19 @@ from source.services.chat.mcp.common.langgraph_subroutine import (
     BaseSubroutine,
     SubroutineState,
 )
-from source.services.chat.conversation_manager.in_memory_cache import Conversation, MessageType
+from source.services.chat.conversation_manager.in_memory_cache import Conversation, MessageType, Message
 from source.services.gpu.ollama_request_manager.manager import LockedOllamaRequestManager
 from source.services.chat.mcp.tools.common import get_finalize_tool_definition
+from datetime import datetime
 
 # System prompt for the context cleaning specialist
 CONTEXT_CLEANING_SYSTEM_PROMPT = """
 You are a Context Management Specialist. Your goal is to optimize the conversation context for an AI assistant.
 You will be provided with a numbered list of messages from the current conversation.
 Your task is to identify messages that are no longer relevant, redundant, or trivial, and exclude them from the context.
+
+The goal is to reduce the context to approximately 10-15 high-value messages.
+Currently, all messages are marked as context. You must summarize or remove messages to reach this target.
 
 Rules:
 1.  Keep the most recent messages (last 5-10) to maintain immediate flow.
@@ -38,7 +42,8 @@ Rules:
 4.  Exclude intermediate "thinking" or "tool call" messages if they don't add value to the final result.
 5.  Use the `exclude_message(index)` tool to remove a message from context.
 6.  Use the `include_message(index)` tool to explicitly keep a message (if it was previously excluded or to be safe).
-7.  When you are finished optimizing the context, call the `finished()` tool.
+7.  Use the `summarize_messages(message_uuids)` tool to replace a group of messages with a concise summary. This is useful for older parts of the conversation.
+8.  When you are finished optimizing the context and have reached the target size (10-15 messages), call the `finished()` tool.
 
 You must iterate through the messages and make decisions. You can process multiple messages in one turn by calling tools multiple times.
 """
@@ -101,6 +106,24 @@ class ContextCleaningSubroutine(BaseSubroutine):
                             }
                         },
                         "required": ["message_index"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "summarize_messages",
+                    "description": "Summarize a group of messages and replace them with a summary message.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "message_uuids": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "The UUIDs of the messages to summarize.",
+                            }
+                        },
+                        "required": ["message_uuids"],
                     },
                 },
             },
@@ -167,7 +190,7 @@ class ContextCleaningSubroutine(BaseSubroutine):
             if len(content) > 200:
                 content = content[:200] + "..."
             
-            history_text += f"[{i}] {status} {sender}: {content}\n"
+            history_text += f"[{i}] (ID: {msg.uuid}) {status} {sender}: {content}\n"
 
         messages = [
             SystemMessage(content=CONTEXT_CLEANING_SYSTEM_PROMPT),
@@ -266,7 +289,51 @@ class ContextCleaningSubroutine(BaseSubroutine):
                         result_content = f"Message {idx} included in context."
                     else:
                         result_content = f"Error: Message index {idx} out of bounds."
+
+                elif tool_name == "summarize_messages":
+                    uuids = args.get("message_uuids", [])
+                    if not uuids:
+                        result_content = "Error: No message UUIDs provided."
+                    else:
+                        # 1. Identify messages
+                        messages_to_summarize = []
+                        indices_to_hide = []
                         
+                        for i, msg in enumerate(self.conversation.history):
+                            if msg.uuid in uuids:
+                                messages_to_summarize.append(msg)
+                                indices_to_hide.append(i)
+                        
+                        if not messages_to_summarize:
+                            result_content = "Error: No matching messages found for provided UUIDs."
+                        else:
+                            # 2. Run Summarization Job
+                            summary_text = await self._run_summarization_job(messages_to_summarize)
+                            
+                            # 3. Create Summary Message
+                            summary_msg = Message(
+                                created_at=datetime.now(),
+                                message_type=MessageType.SUMMARY,
+                                message_content=summary_text,
+                                summarized_content=uuids,
+                                is_context=True
+                            )
+                            
+                            # 4. Insert Summary Message
+                            # We insert it after the last message being summarized
+                            last_index = max(indices_to_hide)
+                            self.conversation.history.insert(last_index + 1, summary_msg)
+                            
+                            # 5. Hide original messages
+                            # Note: Indices shift after insertion, but since we insert AFTER the last one,
+                            # the indices of the messages BEFORE it (which are the ones we are hiding) remain valid?
+                            # Wait, if we insert at last_index + 1, the indices <= last_index are unchanged.
+                            # So we can safely use indices_to_hide.
+                            for idx in indices_to_hide:
+                                self.conversation.set_message_context(idx, False)
+                                
+                            result_content = f"Summarized {len(messages_to_summarize)} messages. Summary added and originals excluded from context."
+
                 elif tool_name == "finished":
                     self.decisions_made = True
                     result_content = "Context cleaning finalized."
@@ -296,3 +363,32 @@ class ContextCleaningSubroutine(BaseSubroutine):
         # We should probably prompt it to finish or just end if it seems done.
         # For now, let's end to prevent infinite loops if it refuses to call tools.
         return "end"
+
+    async def _run_summarization_job(self, messages: List[Any]) -> str:
+        """
+        Runs a summarization job on the provided messages.
+        """
+        # Format messages for summarization
+        context_text = ""
+        for msg in messages:
+            sender = "User"
+            if msg.requester:
+                sender = f"User ({msg.requester})"
+            elif msg.message_type == MessageType.AI_RESPONSE:
+                sender = "AI"
+            
+            context_text += f"{sender}: {msg.message_content}\n"
+            
+        prompt = [
+            {"role": "system", "content": "You are a helpful assistant that summarizes conversation segments."},
+            {"role": "user", "content": f"Please summarize the following conversation segment in concise point form:\n\n{context_text}"}
+        ]
+        
+        # Call LLM
+        response = await self.ollama_request_manager.query(
+            model=self.model,
+            messages=prompt,
+            temperature=0.3,
+        )
+        
+        return response.content if hasattr(response, "content") else "No summary generated."
