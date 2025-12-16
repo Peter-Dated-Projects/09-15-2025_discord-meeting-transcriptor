@@ -2663,7 +2663,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
 
         Args:
             ttl_hours: Delete temp recordings older than this many hours
-        
+
         Returns:
             Number of recordings cleaned up
         """
@@ -2732,7 +2732,7 @@ class DiscordRecorderManagerService(BaseDiscordRecorderServiceManager):
         await self.services.logging_service.info(
             f"Cleanup completed: {deleted_count} temp recordings removed"
         )
-        
+
         return deleted_count
 
     async def _delete_temp_recordings_batch(self, temp_ids: list[str]) -> None:
