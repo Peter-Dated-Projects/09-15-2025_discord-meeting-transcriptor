@@ -32,6 +32,7 @@ class MessageType(Enum):
     AI_RESPONSE = "ai_response"
     TOOL_CALL = "tool_call"
     TOOL_CALL_RESPONSE = "tool_call_response"
+    SUMMARY = "summary"
 
 
 # -------------------------------------------------------------- #
@@ -74,6 +75,7 @@ class Message:
     attachments: list[dict[str, Any]] | None = None
     is_context: bool = True
     uuid: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
+    summarized_content: list[str] | None = None
 
     def to_json(self) -> dict[str, Any]:
         """Convert the message to JSON-serializable format.
@@ -101,6 +103,10 @@ class Message:
         # Add attachments to meta if present
         if self.attachments:
             json_data["meta"]["attachments"] = self.attachments
+
+        # Add summarized_content to meta if present
+        if self.summarized_content:
+            json_data["meta"]["summarized_content"] = self.summarized_content
 
         return json_data
 
@@ -130,6 +136,7 @@ class Message:
             requester=meta.get("requester"),
             attachments=meta.get("attachments"),
             is_context=data.get("is_context", True),
+            summarized_content=meta.get("summarized_content"),
         )
 
 

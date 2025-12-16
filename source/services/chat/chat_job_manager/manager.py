@@ -525,6 +525,11 @@ class ChatJob(Job):
                 # The subroutine might be confused if IDs don't match, but for history it might be ignored.
                 messages.append(ToolMessage(content=msg.message_content, tool_call_id="unknown"))
 
+            elif msg.message_type == MessageType.SUMMARY:
+                # Treat summary as an assistant message with special formatting
+                content = f"[Summary of previous messages: {msg.message_content}]"
+                messages.append(AIMessage(content=content))
+
         return messages
 
     async def _send_discord_message(self, content: str) -> None:
@@ -735,6 +740,12 @@ class ChatJob(Job):
                 content = msg.message_content
 
                 # We assume the message content contains the result
+                messages.append({"role": role, "content": content})
+
+            elif msg.message_type == MessageType.SUMMARY:
+                # Treat summary as an assistant message with special formatting
+                role = "assistant"
+                content = f"[Summary of previous messages: {msg.message_content}]"
                 messages.append({"role": role, "content": content})
 
             elif msg.message_type == MessageType.THINKING:
