@@ -60,6 +60,7 @@ class ContextCleaningSubroutine(BaseSubroutine):
         conversation: Conversation,
         model: str = "gemma3:12b",
         on_step_end: Any = None,
+        logging_service: Any = None,
     ):
         super().__init__(
             name="context_cleaning",
@@ -75,6 +76,7 @@ class ContextCleaningSubroutine(BaseSubroutine):
         self.ollama_request_manager = ollama_request_manager
         self.conversation = conversation
         self.model = model
+        self.logging_service = logging_service
         self.decisions_made = False
 
         # Define tools
@@ -285,6 +287,8 @@ class ContextCleaningSubroutine(BaseSubroutine):
                     idx = args.get("message_index")
                     if self.conversation.set_message_context(idx, False):
                         result_content = f"Message {idx} excluded from context."
+                        if self.logging_service:
+                            await self.logging_service.debug(f"[ContextCleaning] Excluded message {idx}")
                     else:
                         result_content = f"Error: Message index {idx} out of bounds."
 
@@ -292,6 +296,8 @@ class ContextCleaningSubroutine(BaseSubroutine):
                     idx = args.get("message_index")
                     if self.conversation.set_message_context(idx, True):
                         result_content = f"Message {idx} included in context."
+                        if self.logging_service:
+                            await self.logging_service.debug(f"[ContextCleaning] Included message {idx}")
                     else:
                         result_content = f"Error: Message index {idx} out of bounds."
 
@@ -313,6 +319,9 @@ class ContextCleaningSubroutine(BaseSubroutine):
                             result_content = "Error: No matching messages found for provided UUIDs."
                         else:
                             # 2. Run Summarization Job
+                            if self.logging_service:
+                                await self.logging_service.info(f"[ContextCleaning] Summarizing {len(messages_to_summarize)} messages...")
+
                             summary_text = await self._run_summarization_job(messages_to_summarize)
 
                             # 3. Create Summary Message
@@ -338,16 +347,22 @@ class ContextCleaningSubroutine(BaseSubroutine):
                                 self.conversation.set_message_context(idx, False)
 
                             result_content = f"Summarized {len(messages_to_summarize)} messages. Summary added and originals excluded from context."
+                            if self.logging_service:
+                                await self.logging_service.info(f"[ContextCleaning] Summarization complete. Summary inserted at {last_index + 1}.")
 
                 elif tool_name == "finished":
                     self.decisions_made = True
                     result_content = "Context cleaning finalized."
+                    if self.logging_service:
+                        await self.logging_service.info("[ContextCleaning] Cleaning finalized.")
 
                 else:
                     result_content = f"Unknown tool: {tool_name}"
 
             except Exception as e:
                 result_content = f"Error executing {tool_name}: {str(e)}"
+                if self.logging_service:
+                    await self.logging_service.error(f"[ContextCleaning] Error executing {tool_name}: {e}")
 
             results.append(ToolMessage(content=result_content, tool_call_id=tool_call_id))
 

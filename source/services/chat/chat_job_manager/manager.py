@@ -210,6 +210,7 @@ class ChatJob(Job):
                     ollama_request_manager=self.services.ollama_request_manager,
                     conversation=conversation,
                     model=OLLAMA_CONTEXT_CLEANER_MODEL,
+                    logging_service=self.services.logging_service,
                 )
 
                 await subroutine.ainvoke({"messages": []})
