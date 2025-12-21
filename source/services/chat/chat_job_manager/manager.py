@@ -157,9 +157,9 @@ class ChatJob(Job):
                 conversation = self.services.conversation_manager.get_conversation(self.thread_id)
 
             if conversation:
-                end_count = len(conversation.history)
-                # Check if we crossed a multiple of 20
-                if (start_count // 20) < (end_count // 20):
+                # Check if context size exceeds 30 messages
+                context_messages = conversation.get_context_messages()
+                if len(context_messages) > 30:
                     await self._run_periodic_context_job(conversation)
 
             # Mark conversation as idle
@@ -191,7 +191,7 @@ class ChatJob(Job):
         try:
             # Acquire GPU lock for context cleaning
             async with self.services.gpu_resource_manager.acquire_lock(
-                job_type=JobsType.CONTEXT_CLEANING.value,
+                job_type=JobsType.CHATBOT.value,
                 job_id=f"{self.job_id}_cleanup",
                 metadata={
                     "thread_id": self.thread_id,

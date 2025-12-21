@@ -26,7 +26,6 @@ from source.services.chat.conversation_manager.in_memory_cache import (
     MessageType,
     Message,
 )
-from source.services.gpu.ollama_request_manager.manager import LockedOllamaRequestManager
 from source.services.chat.mcp.tools.common import get_finalize_tool_definition
 from datetime import datetime
 
@@ -56,7 +55,7 @@ You must iterate through the messages and make decisions. You can process multip
 class ContextCleaningSubroutine(BaseSubroutine):
     def __init__(
         self,
-        ollama_request_manager: LockedOllamaRequestManager,
+        ollama_request_manager: Any,
         conversation: Conversation,
         model: str = "gemma3:12b",
         on_step_end: Any = None,
