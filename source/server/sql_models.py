@@ -31,6 +31,7 @@ class JobsType(enum.Enum):
     TEXT_EMBEDDING = "text_embedding"
     CLEANING = "cleaning"
     CHATBOT = "chatbot"
+    CONTEXT_CLEANING = "context_cleaning"
 
 
 class JobsStatus(enum.Enum):

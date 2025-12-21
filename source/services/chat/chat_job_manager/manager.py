@@ -38,6 +38,9 @@ from source.services.chat.chat_job_manager.prompts import CHAT_JOB_SYSTEM_PROMPT
 from source.services.chat.mcp.subroutine_manager.subroutines.user_query_handler import (
     create_user_query_handler_subroutine,
 )
+from source.services.chat.mcp.subroutine_manager.subroutines.context_cleaning import (
+    ContextCleaningSubroutine,
+)
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 # Maximum number of user messages to batch together
@@ -45,6 +48,7 @@ MAX_MESSAGE_BATCH_SIZE = 5
 
 # Get chat model from environment variable
 OLLAMA_CHAT_MODEL = os.getenv("OLLAMA_CHAT_MODEL", "gemma3:12b")
+OLLAMA_CONTEXT_CLEANER_MODEL = os.getenv("OLLAMA_CONTEXT_CLEANER_MODEL", "gemma3:12b")
 
 
 class LockedOllamaRequestManager:
@@ -135,6 +139,10 @@ class ChatJob(Job):
 
         await self.services.logging_service.info(f"Starting chat job for thread {self.thread_id}")
 
+        # Get conversation to track message count
+        conversation = self.services.conversation_manager.get_conversation(self.thread_id)
+        start_count = len(conversation.history) if conversation else 0
+
         try:
             # Process initial message if present (user attribution will be added when building LLM messages)
             if self.initial_message:
@@ -143,6 +151,16 @@ class ChatJob(Job):
             # Process queue until empty
             while len(self.message_queue) > 0:
                 await self._process_message_queue()
+
+            # Check if we need to run the periodic context job (every 20 messages)
+            if not conversation:
+                conversation = self.services.conversation_manager.get_conversation(self.thread_id)
+
+            if conversation:
+                # Check if context size exceeds 30 messages
+                context_messages = conversation.get_context_messages()
+                if len(context_messages) > 30:
+                    await self._run_periodic_context_job(conversation)
 
             # Mark conversation as idle
             await self._set_conversation_status(ConversationStatus.IDLE)
@@ -158,6 +176,56 @@ class ChatJob(Job):
             # Mark conversation as idle even on error
             await self._set_conversation_status(ConversationStatus.IDLE)
             raise
+
+    async def _run_periodic_context_job(self, conversation: Conversation) -> None:
+        """
+        Run a periodic job every 20 messages.
+
+        Args:
+            conversation: The full conversation object with context
+        """
+        await self.services.logging_service.info(
+            f"Running periodic context cleaning job for thread {self.thread_id}"
+        )
+
+        try:
+            # Acquire GPU lock for context cleaning
+            async with self.services.gpu_resource_manager.acquire_lock(
+                job_type=JobsType.CHATBOT.value,
+                job_id=f"{self.job_id}_cleanup",
+                metadata={
+                    "thread_id": self.thread_id,
+                    "conversation_id": self.conversation_id,
+                    "message_count": len(conversation.history),
+                },
+            ):
+                await self.services.logging_service.info(
+                    f"Acquired GPU lock for context cleaning in thread {self.thread_id}"
+                )
+
+                # We are already holding the lock for the entire duration of the cleaning job.
+                # We pass the raw ollama_request_manager to the subroutine to avoid double-locking/deadlocks
+                # that would occur if we used LockedOllamaRequestManager (which locks per-query).
+                subroutine = ContextCleaningSubroutine(
+                    ollama_request_manager=self.services.ollama_request_manager,
+                    conversation=conversation,
+                    model=OLLAMA_CONTEXT_CLEANER_MODEL,
+                    logging_service=self.services.logging_service,
+                )
+
+                await subroutine.ainvoke({"messages": []})
+
+                await self.services.logging_service.info(
+                    f"Context cleaning completed for thread {self.thread_id}"
+                )
+
+                # Save the updated conversation (context flags changed)
+                await conversation.save_conversation()
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Failed to run periodic context cleaning job: {e}"
+            )
 
     # -------------------------------------------------------------- #
     # Message Processing Methods
@@ -381,7 +449,7 @@ class ChatJob(Job):
         # Add system prompt
         messages.append(SystemMessage(content=CHAT_JOB_SYSTEM_PROMPT))
 
-        for msg in conversation.history:
+        for msg in conversation.get_context_messages():
             if msg.message_type == MessageType.CHAT:
                 content = msg.message_content
                 if msg.requester:
@@ -424,6 +492,11 @@ class ChatJob(Job):
                 # For now, let's assume sequential integrity or use "unknown".
                 # The subroutine might be confused if IDs don't match, but for history it might be ignored.
                 messages.append(ToolMessage(content=msg.message_content, tool_call_id="unknown"))
+
+            elif msg.message_type == MessageType.SUMMARY:
+                # Treat summary as an assistant message with special formatting
+                content = f"[Summary of previous messages: {msg.message_content}]"
+                messages.append(AIMessage(content=content))
 
         return messages
 
@@ -635,6 +708,12 @@ class ChatJob(Job):
                 content = msg.message_content
 
                 # We assume the message content contains the result
+                messages.append({"role": role, "content": content})
+
+            elif msg.message_type == MessageType.SUMMARY:
+                # Treat summary as an assistant message with special formatting
+                role = "assistant"
+                content = f"[Summary of previous messages: {msg.message_content}]"
                 messages.append({"role": role, "content": content})
 
             elif msg.message_type == MessageType.THINKING:

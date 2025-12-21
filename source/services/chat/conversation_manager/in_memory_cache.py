@@ -32,6 +32,7 @@ class MessageType(Enum):
     AI_RESPONSE = "ai_response"
     TOOL_CALL = "tool_call"
     TOOL_CALL_RESPONSE = "tool_call_response"
+    SUMMARY = "summary"
 
 
 # -------------------------------------------------------------- #
@@ -72,7 +73,9 @@ class Message:
     tools: list[dict[str, Any]] | None = None
     requester: str | None = None
     attachments: list[dict[str, Any]] | None = None
+    is_context: bool = True
     uuid: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
+    summarized_content: list[str] | None = None
 
     def to_json(self) -> dict[str, Any]:
         """Convert the message to JSON-serializable format.
@@ -85,6 +88,7 @@ class Message:
             "created_at": self.created_at.isoformat(),
             "message_type": self.message_type.value,
             "message_content": self.message_content,
+            "is_context": self.is_context,
             "meta": {},
         }
 
@@ -99,6 +103,10 @@ class Message:
         # Add attachments to meta if present
         if self.attachments:
             json_data["meta"]["attachments"] = self.attachments
+
+        # Add summarized_content to meta if present
+        if self.summarized_content:
+            json_data["meta"]["summarized_content"] = self.summarized_content
 
         return json_data
 
@@ -127,6 +135,8 @@ class Message:
             tools=meta.get("tools"),
             requester=meta.get("requester"),
             attachments=meta.get("attachments"),
+            is_context=data.get("is_context", True),
+            summarized_content=meta.get("summarized_content"),
         )
 
 
@@ -191,6 +201,30 @@ class Conversation:
         # Add to participants if it's a user message with a requester
         if message.requester and message.requester not in self.participants:
             self.participants.append(message.requester)
+
+    def get_context_messages(self) -> list[Message]:
+        """Retrieve messages that are marked as part of the context chain.
+
+        Returns:
+            List of messages with is_context=True
+        """
+        return [msg for msg in self.history if msg.is_context]
+
+    def set_message_context(self, message_index: int, is_context: bool) -> bool:
+        """Set the context flag for a specific message.
+
+        Args:
+            message_index: Index of the message in history
+            is_context: Boolean value to set
+
+        Returns:
+            True if successful, False if index out of bounds
+        """
+        if 0 <= message_index < len(self.history):
+            self.history[message_index].is_context = is_context
+            self.updated_at = datetime.now()
+            return True
+        return False
 
     def to_json(self) -> dict[str, Any]:
         """Convert the conversation to JSON-serializable format.
