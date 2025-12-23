@@ -1,5 +1,5 @@
 """
-Meeting Details Search Subroutine
+Meeting Search by Transcription Subroutine
 
 Flow:
 1. Generate Queries -> LLM generates 3 search queries based on user request
@@ -49,7 +49,7 @@ Input:
 """
 
 
-class MeetingDetailsSearchSubroutine(BaseSubroutine):
+class MeetingSearchByTranscriptionSubroutine(BaseSubroutine):
     def __init__(
         self,
         ollama_request_manager: Any,
@@ -58,7 +58,7 @@ class MeetingDetailsSearchSubroutine(BaseSubroutine):
         on_step_end: Any = None,
     ):
         super().__init__(
-            name="meeting_details_search",
+            name="meeting_search_by_transcription",
             description="Search for specific details within a meeting's transcript.",
             input_schema={
                 "type": "object",
@@ -206,15 +206,15 @@ class MeetingDetailsSearchSubroutine(BaseSubroutine):
         return {"messages": [AIMessage(content=final_content)]}
 
 
-def create_meeting_details_search_subroutine(
+def create_meeting_search_by_transcription_subroutine(
     ollama_request_manager: Any,
     context: Any,
     model: str = "gemma3:12b",
-) -> MeetingDetailsSearchSubroutine:
+) -> MeetingSearchByTranscriptionSubroutine:
     """
-    Factory function to create a MeetingDetailsSearchSubroutine.
+    Factory function to create a MeetingSearchByTranscriptionSubroutine.
     """
-    return MeetingDetailsSearchSubroutine(
+    return MeetingSearchByTranscriptionSubroutine(
         ollama_request_manager=ollama_request_manager,
         context=context,
         model=model,

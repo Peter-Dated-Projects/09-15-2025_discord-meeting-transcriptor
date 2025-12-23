@@ -1,7 +1,7 @@
 """
-Meeting Search Tool.
+Meeting Search by Summary Tool.
 
-This tool allows the bot to search for past meetings using the meeting search subroutine.
+This tool allows the bot to search for past meetings using the meeting search by summary subroutine.
 """
 
 from __future__ import annotations
@@ -15,14 +15,14 @@ if TYPE_CHECKING:
     from source.context import Context
     from source.services.chat.mcp import MCPManager
 
-from source.services.chat.mcp.subroutine_manager.subroutines.meeting_search import (
-    create_meeting_search_subroutine,
+from source.services.chat.mcp.subroutine_manager.subroutines.meeting_search_by_summary import (
+    create_meeting_search_by_summary_subroutine,
 )
 
 
-async def run_meeting_search_subroutine(query: str, context: Context) -> Any:
+async def run_meeting_search_by_summary_subroutine(query: str, context: Context) -> Any:
     """
-    Run the meeting search subroutine to find and summarize meetings.
+    Run the meeting search by summary subroutine to find and summarize meetings.
     """
     if not context.services_manager:
         return "Error: Services manager not available"
@@ -31,7 +31,7 @@ async def run_meeting_search_subroutine(query: str, context: Context) -> Any:
     model = os.getenv("OLLAMA_CHAT_MODEL", "gemma3:12b")
 
     # Create subroutine
-    subroutine = create_meeting_search_subroutine(
+    subroutine = create_meeting_search_by_summary_subroutine(
         ollama_request_manager=ollama_manager, context=context, model=model
     )
 
@@ -84,14 +84,14 @@ async def run_meeting_search_subroutine(query: str, context: Context) -> Any:
     except Exception as e:
         if context.services_manager.logging_service:
             await context.services_manager.logging_service.error(
-                f"Error running meeting search subroutine: {e}"
+                f"Error running meeting search by summary subroutine: {e}"
             )
         return f"Error: {str(e)}"
 
 
-async def register_meeting_search_tool(mcp_manager: MCPManager, context: Context) -> None:
+async def register_meeting_search_by_summary_tool(mcp_manager: MCPManager, context: Context) -> None:
     """
-    Register the Meeting Search tool with the MCP manager.
+    Register the Meeting Search by Summary tool with the MCP manager.
 
     Args:
         mcp_manager: The MCP manager instance to register tools with
@@ -99,25 +99,25 @@ async def register_meeting_search_tool(mcp_manager: MCPManager, context: Context
     """
 
     # Create a closure that captures the context
-    async def search_meetings_tool(query: str) -> Any:
+    async def search_meetings_by_summary_tool(query: str) -> Any:
         """
-        Search for past meetings based on a query.
+        Search for past meetings based on a query using summaries.
         Returns meeting IDs and relevant summary snippets.
 
         Args:
             query: The search query (e.g., "budget discussion", "project alpha launch").
         """
-        return await run_meeting_search_subroutine(query, context)
+        return await run_meeting_search_by_summary_subroutine(query, context)
 
     # Register the tool with MCP manager
     mcp_manager.add_tool_from_function(
-        func=search_meetings_tool,
-        name="search_meetings",
+        func=search_meetings_by_summary_tool,
+        name="search_meetings_by_summary",
         description="Search the database of past meeting summaries for relevant discussions. Returns meeting IDs and summary snippets.",
     )
 
     # Log registration
     if context.services_manager and context.services_manager.logging_service:
         await context.services_manager.logging_service.info(
-            "[MCP] Registered Meeting Search tool: search_meetings"
+            "[MCP] Registered Meeting Search by Summary tool: search_meetings_by_summary"
         )

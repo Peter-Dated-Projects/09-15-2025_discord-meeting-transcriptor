@@ -1,5 +1,5 @@
 """
-Meeting Details Search Tool.
+Meeting Search by Transcription Tool.
 
 This tool allows the bot to search for specific details within a meeting's transcript.
 """
@@ -16,14 +16,14 @@ if TYPE_CHECKING:
     from source.context import Context
     from source.services.chat.mcp import MCPManager
 
-from source.services.chat.mcp.subroutine_manager.subroutines.meeting_details_search import (
-    create_meeting_details_search_subroutine,
+from source.services.chat.mcp.subroutine_manager.subroutines.meeting_search_by_transcription import (
+    create_meeting_search_by_transcription_subroutine,
 )
 
 
-async def run_meeting_details_subroutine(meeting_id: str, query: str, context: Context) -> Any:
+async def run_meeting_search_by_transcription_subroutine(meeting_id: str, query: str, context: Context) -> Any:
     """
-    Run the meeting details search subroutine.
+    Run the meeting search by transcription subroutine.
     """
     if not context.services_manager:
         return "Error: Services manager not available"
@@ -32,7 +32,7 @@ async def run_meeting_details_subroutine(meeting_id: str, query: str, context: C
     model = os.getenv("OLLAMA_CHAT_MODEL", "gemma3:12b")
 
     # Create subroutine
-    subroutine = create_meeting_details_search_subroutine(
+    subroutine = create_meeting_search_by_transcription_subroutine(
         ollama_request_manager=ollama_manager, context=context, model=model
     )
 
@@ -80,14 +80,14 @@ async def run_meeting_details_subroutine(meeting_id: str, query: str, context: C
     except Exception as e:
         if context.services_manager.logging_service:
             await context.services_manager.logging_service.error(
-                f"Error running meeting details search subroutine: {e}"
+                f"Error running meeting search by transcription subroutine: {e}"
             )
         return f"Error: {str(e)}"
 
 
-async def register_meeting_details_tool(mcp_manager: MCPManager, context: Context) -> None:
+async def register_meeting_search_by_transcription_tool(mcp_manager: MCPManager, context: Context) -> None:
     """
-    Register the Meeting Details Search tool with the MCP manager.
+    Register the Meeting Search by Transcription tool with the MCP manager.
 
     Args:
         mcp_manager: The MCP manager instance to register tools with
@@ -95,7 +95,7 @@ async def register_meeting_details_tool(mcp_manager: MCPManager, context: Contex
     """
 
     # Create a closure that captures the context
-    async def search_meeting_details_tool(meeting_id: str, query: str) -> Any:
+    async def search_meetings_by_transcription_tool(meeting_id: str, query: str) -> Any:
         """
         Search for specific details within a meeting's transcript.
         Useful for answering questions like "What did they say about X in meeting Y?".
@@ -104,17 +104,17 @@ async def register_meeting_details_tool(mcp_manager: MCPManager, context: Contex
             meeting_id: The ID of the meeting to search.
             query: The specific question or topic to search for within the meeting.
         """
-        return await run_meeting_details_subroutine(meeting_id, query, context)
+        return await run_meeting_search_by_transcription_subroutine(meeting_id, query, context)
 
     # Register the tool with MCP manager
     mcp_manager.add_tool_from_function(
-        func=search_meeting_details_tool,
-        name="search_meeting_details",
+        func=search_meetings_by_transcription_tool,
+        name="search_meetings_by_transcription",
         description="Search for specific details within a meeting's transcript. Returns relevant segments and an answer.",
     )
 
     # Log registration
     if context.services_manager and context.services_manager.logging_service:
         await context.services_manager.logging_service.info(
-            "[MCP] Registered Meeting Details Search tool: search_meeting_details"
+            "[MCP] Registered Meeting Search by Transcription tool: search_meetings_by_transcription"
         )
