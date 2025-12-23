@@ -115,7 +115,7 @@ async def register_meeting_search_by_summary_tool(
     mcp_manager.add_tool_from_function(
         func=search_meetings_by_summary_tool,
         name="search_meetings_by_summary",
-        description="Search the database of past meeting summaries for relevant discussions. Returns meeting IDs and summary snippets.",
+        description="Search the database of past meeting summaries for relevant discussions. Returns meeting IDs and summary snippets. Best for short and quick general queries.",
     )
 
     # Log registration

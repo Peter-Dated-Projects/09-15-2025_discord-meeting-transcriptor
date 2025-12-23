@@ -86,9 +86,7 @@ class MeetingSearchByTranscriptionSubroutine(BaseSubroutine):
         try:
             input_data = json.loads(first_message.content)
             user_query = input_data.get("user_query")
-            # meeting_id = input_data.get("meeting_id") # Not used in this step
         except json.JSONDecodeError:
-            # Fallback if not JSON (shouldn't happen if tool wrapper is correct)
             user_query = first_message.content
 
         # Convert to Ollama-compatible message format (dicts)
