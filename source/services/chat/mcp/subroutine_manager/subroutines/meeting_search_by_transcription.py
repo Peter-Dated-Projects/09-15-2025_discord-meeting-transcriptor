@@ -4,7 +4,6 @@ Meeting Search by Transcription Subroutine
 Flow:
 1. Generate Queries -> LLM generates 3 search queries based on user request
 2. Execute Search -> Run chroma search on transcriptions for the specific meeting
-3. Synthesize -> LLM summarizes results
 """
 
 import json
@@ -33,19 +32,6 @@ User asks for "what did they say about the budget?"
 {
     "queries": ["budget discussion financial plan", "cost expenses money allocation", "fiscal year budget constraints"]
 }
-"""
-
-# System prompt for synthesis
-SYNTHESIS_PROMPT = """
-You are a helpful assistant.
-Here are the relevant transcript segments found in the meeting.
-
-Your task is to answer the user's question based on these segments.
-Be concise and direct.
-If the segments don't contain the answer, state that clearly.
-
-Input:
-{response_text}
 """
 
 
@@ -86,13 +72,11 @@ class MeetingSearchByTranscriptionSubroutine(BaseSubroutine):
     def _build_graph(self):
         self.add_node("generate_queries", self._generate_queries_node)
         self.add_node("execute_search", self._execute_search_node)
-        self.add_node("synthesize", self._synthesize_node)
 
         self.set_entry_point("generate_queries")
 
         self.add_edge("generate_queries", "execute_search")
-        self.add_edge("execute_search", "synthesize")
-        self.add_edge("synthesize", END)
+        self.add_edge("execute_search", END)
 
     async def _generate_queries_node(self, state: SubroutineState) -> Dict:
         messages = state["messages"]
@@ -168,42 +152,6 @@ class MeetingSearchByTranscriptionSubroutine(BaseSubroutine):
         # Store results
         results_json = json.dumps(final_results, indent=2)
         return {"messages": [AIMessage(content=results_json)]}
-
-    async def _synthesize_node(self, state: SubroutineState) -> Dict:
-        messages = state["messages"]
-        results_json = messages[-1].content
-
-        try:
-            results = json.loads(results_json)
-        except:
-            results = []
-
-        if isinstance(results, dict) and "errors" in results:
-            return {"messages": [AIMessage(content=f"Error during search: {results['errors']}")]}
-
-        if not results:
-            return {
-                "messages": [
-                    AIMessage(content="No relevant details found in the meeting transcript.")
-                ]
-            }
-
-        # Construct context for LLM
-        response_text = "Relevant Transcript Segments:\n\n"
-        for res in results:
-            text = res.get("text", "").strip()
-            response_text += f"- {text}\n"
-
-        prompt = SYNTHESIS_PROMPT.format(response_text=response_text)
-
-        response = await self.ollama_request_manager.query(
-            messages=[{"role": "user", "content": prompt}],
-            model=self.model,
-        )
-
-        final_content = response.content if hasattr(response, "content") else str(response)
-
-        return {"messages": [AIMessage(content=final_content)]}
 
 
 def create_meeting_search_by_transcription_subroutine(

@@ -89,7 +89,9 @@ async def run_meeting_search_by_summary_subroutine(query: str, context: Context)
         return f"Error: {str(e)}"
 
 
-async def register_meeting_search_by_summary_tool(mcp_manager: MCPManager, context: Context) -> None:
+async def register_meeting_search_by_summary_tool(
+    mcp_manager: MCPManager, context: Context
+) -> None:
     """
     Register the Meeting Search by Summary tool with the MCP manager.
 

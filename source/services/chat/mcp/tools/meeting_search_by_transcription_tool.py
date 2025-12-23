@@ -21,7 +21,9 @@ from source.services.chat.mcp.subroutine_manager.subroutines.meeting_search_by_t
 )
 
 
-async def run_meeting_search_by_transcription_subroutine(meeting_id: str, query: str, context: Context) -> Any:
+async def run_meeting_search_by_transcription_subroutine(
+    meeting_id: str, query: str, context: Context
+) -> Any:
     """
     Run the meeting search by transcription subroutine.
     """
@@ -85,7 +87,9 @@ async def run_meeting_search_by_transcription_subroutine(meeting_id: str, query:
         return f"Error: {str(e)}"
 
 
-async def register_meeting_search_by_transcription_tool(mcp_manager: MCPManager, context: Context) -> None:
+async def register_meeting_search_by_transcription_tool(
+    mcp_manager: MCPManager, context: Context
+) -> None:
     """
     Register the Meeting Search by Transcription tool with the MCP manager.
 
@@ -110,7 +114,7 @@ async def register_meeting_search_by_transcription_tool(mcp_manager: MCPManager,
     mcp_manager.add_tool_from_function(
         func=search_meetings_by_transcription_tool,
         name="search_meetings_by_transcription",
-        description="Search for specific details within a meeting's transcript. Returns relevant segments and an answer.",
+        description="Search for specific details within a meeting's transcript. Returns relevant segments.",
     )
 
     # Log registration
