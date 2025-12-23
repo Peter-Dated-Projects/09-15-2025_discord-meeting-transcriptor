@@ -1,12 +1,13 @@
 """
-Meeting Search Tool.
+Meeting Search by Transcription Tool.
 
-This tool allows the bot to search for past meetings using the meeting search subroutine.
+This tool allows the bot to search for specific details within a meeting's transcript.
 """
 
 from __future__ import annotations
 
 import os
+import json
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage
@@ -15,14 +16,16 @@ if TYPE_CHECKING:
     from source.context import Context
     from source.services.chat.mcp import MCPManager
 
-from source.services.chat.mcp.subroutine_manager.subroutines.meeting_search import (
-    create_meeting_search_subroutine,
+from source.services.chat.mcp.subroutine_manager.subroutines.meeting_search_by_transcription import (
+    create_meeting_search_by_transcription_subroutine,
 )
 
 
-async def run_meeting_search_subroutine(query: str, context: Context) -> Any:
+async def run_meeting_search_by_transcription_subroutine(
+    meeting_id: str, query: str, context: Context
+) -> Any:
     """
-    Run the meeting search subroutine to find and summarize meetings.
+    Run the meeting search by transcription subroutine.
     """
     if not context.services_manager:
         return "Error: Services manager not available"
@@ -31,14 +34,16 @@ async def run_meeting_search_subroutine(query: str, context: Context) -> Any:
     model = os.getenv("OLLAMA_CHAT_MODEL", "gemma3:12b")
 
     # Create subroutine
-    subroutine = create_meeting_search_subroutine(
+    subroutine = create_meeting_search_by_transcription_subroutine(
         ollama_request_manager=ollama_manager, context=context, model=model
     )
 
     # Run subroutine
     try:
-        # The input state expects "messages"
-        initial_state = {"messages": [HumanMessage(content=query)]}
+        # Pass arguments as JSON in the first message
+        input_data = json.dumps({"meeting_id": meeting_id, "user_query": query})
+        initial_state = {"messages": [HumanMessage(content=input_data)]}
+
         # Use ainvoke to run the graph
         result = await subroutine.ainvoke(initial_state)
 
@@ -46,15 +51,9 @@ async def run_meeting_search_subroutine(query: str, context: Context) -> Any:
         if not result:
             return "No results found."
 
-        # We return the raw messages list (or serialized version)
-        # The ChatJobManager is now capable of handling list of messages
-        # and injecting them into the conversation history.
-
         ollama_messages = []
-        # The result["messages"] contains the full history of the subroutine
-        # We want to return this to the main chat loop.
 
-        # If result is a dict with "messages", extract it
+        # Extract messages
         messages = result.get("messages", []) if isinstance(result, dict) else result
 
         for m in messages:
@@ -74,9 +73,8 @@ async def run_meeting_search_subroutine(query: str, context: Context) -> Any:
             elif m.type == "tool":
                 ollama_messages.append({"role": "tool", "content": m.content})
             elif m.type == "human":
-                # We generally don't need to return the human message that started it
-                # as it's already in the main history, but for completeness of the subroutine trace:
-                ollama_messages.append({"role": "user", "content": m.content})
+                # We can skip the input JSON message to keep history clean
+                pass
             elif m.type == "system":
                 ollama_messages.append({"role": "system", "content": m.content})
 
@@ -84,14 +82,16 @@ async def run_meeting_search_subroutine(query: str, context: Context) -> Any:
     except Exception as e:
         if context.services_manager.logging_service:
             await context.services_manager.logging_service.error(
-                f"Error running meeting search subroutine: {e}"
+                f"Error running meeting search by transcription subroutine: {e}"
             )
         return f"Error: {str(e)}"
 
 
-async def register_meeting_search_tool(mcp_manager: MCPManager, context: Context) -> None:
+async def register_meeting_search_by_transcription_tool(
+    mcp_manager: MCPManager, context: Context
+) -> None:
     """
-    Register the Meeting Search tool with the MCP manager.
+    Register the Meeting Search by Transcription tool with the MCP manager.
 
     Args:
         mcp_manager: The MCP manager instance to register tools with
@@ -99,25 +99,26 @@ async def register_meeting_search_tool(mcp_manager: MCPManager, context: Context
     """
 
     # Create a closure that captures the context
-    async def search_meetings_tool(query: str) -> Any:
+    async def search_meetings_by_transcription_tool(meeting_id: str, query: str) -> Any:
         """
-        Search for past meetings based on a query.
-        Returns meeting IDs and relevant summary snippets.
+        Search for specific details within a meeting's transcript.
+        Useful for answering questions like "What did they say about X in meeting Y?".
 
         Args:
-            query: The search query (e.g., "budget discussion", "project alpha launch").
+            meeting_id: The ID of the meeting to search.
+            query: The specific question or topic to search for within the meeting.
         """
-        return await run_meeting_search_subroutine(query, context)
+        return await run_meeting_search_by_transcription_subroutine(meeting_id, query, context)
 
     # Register the tool with MCP manager
     mcp_manager.add_tool_from_function(
-        func=search_meetings_tool,
-        name="search_meetings",
-        description="Search the database of past meeting summaries for relevant discussions. Returns meeting IDs and summary snippets.",
+        func=search_meetings_by_transcription_tool,
+        name="search_meetings_by_transcription",
+        description="Search for specific details within a meeting's transcript. Returns relevant segments. Best for in-depth and specific queries.",
     )
 
     # Log registration
     if context.services_manager and context.services_manager.logging_service:
         await context.services_manager.logging_service.info(
-            "[MCP] Registered Meeting Search tool: search_meetings"
+            "[MCP] Registered Meeting Search by Transcription tool: search_meetings_by_transcription"
         )

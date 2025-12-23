@@ -1,10 +1,9 @@
 """
-Meeting Search Subroutine
+Meeting Search by Summary Subroutine
 
 Flow:
 1. Generate Queries -> LLM generates 2 search queries
 2. Execute Search -> Run chroma search for each query
-3. Synthesize -> LLM summarizes results
 """
 
 import json
@@ -36,25 +35,8 @@ User asks for "software"
 }
 """
 
-# System prompt for synthesis
-SYNTHESIS_PROMPT = """
-You are a helpful assistant.
-Here is a list of meeting search results.
 
-Your task is to rewrite the summaries to be very concise (1 sentence, max 30 words per meeting).
-Keep the exact format: '- Meeting [<ID>]: <summary> (Distance: <val>)'
-Use list format.
-
-Do not change the Meeting IDs or Distance values.
-Do not tables.
-
-
-Input:
-{response_text}
-"""
-
-
-class MeetingSearchSubroutine(BaseSubroutine):
+class MeetingSearchBySummarySubroutine(BaseSubroutine):
     def __init__(
         self,
         ollama_request_manager: Any,
@@ -63,7 +45,7 @@ class MeetingSearchSubroutine(BaseSubroutine):
         on_step_end: Any = None,
     ):
         super().__init__(
-            name="meeting_search",
+            name="meeting_search_by_summary",
             description="Search for past meetings and summarize results.",
             input_schema={
                 "type": "object",
@@ -83,14 +65,12 @@ class MeetingSearchSubroutine(BaseSubroutine):
         self.add_node("generate_queries", self._generate_queries_node)
         self.add_node("execute_search", self._execute_search_node)
         self.add_node("filter_results", self._filter_results_node)
-        self.add_node("synthesize", self._synthesize_node)
 
         self.set_entry_point("generate_queries")
 
         self.add_edge("generate_queries", "execute_search")
         self.add_edge("execute_search", "filter_results")
-        self.add_edge("filter_results", "synthesize")
-        self.add_edge("synthesize", END)
+        self.add_edge("filter_results", END)
 
     async def _generate_queries_node(self, state: SubroutineState) -> Dict:
         messages = state["messages"]
@@ -185,50 +165,16 @@ class MeetingSearchSubroutine(BaseSubroutine):
         # Store filtered results as JSON
         return {"messages": [AIMessage(content=json.dumps(filtered_results, indent=2))]}
 
-    async def _synthesize_node(self, state: SubroutineState) -> Dict:
-        messages = state["messages"]
-        results_json = messages[-1].content
 
-        # The filtered results are already in the format we want (list of dicts with summary)
-        # We just need to wrap it in the final response format
-
-        try:
-            filtered_results = json.loads(results_json)
-        except json.JSONDecodeError:
-            filtered_results = []
-
-        if not filtered_results:
-            return {"messages": [AIMessage(content="No relevant meetings found.")]}
-
-        # Construct the final response directly
-        response_text = "Here are the relevant meetings found:\n\n"
-        for res in filtered_results:
-            distance_val = res.get("distance")
-            distance_str = f" (Distance: {distance_val:.4f})" if distance_val is not None else ""
-            response_text += f"- Meeting [{res['meeting_id']}]: {res['summary']}{distance_str}\n"
-
-        # Get AI to shorten the summary for each meeting to 1 sentence ~ max 30 words.
-        prompt = SYNTHESIS_PROMPT.format(response_text=response_text)
-
-        response = await self.ollama_request_manager.query(
-            messages=[{"role": "user", "content": prompt}],
-            model=self.model,
-        )
-
-        final_content = response.content if hasattr(response, "content") else str(response)
-
-        return {"messages": [AIMessage(content=final_content)]}
-
-
-def create_meeting_search_subroutine(
+def create_meeting_search_by_summary_subroutine(
     ollama_request_manager: Any,
     context: Any,
     model: str = "gemma3:12b",
-) -> MeetingSearchSubroutine:
+) -> MeetingSearchBySummarySubroutine:
     """
-    Factory function to create a MeetingSearchSubroutine.
+    Factory function to create a MeetingSearchBySummarySubroutine.
     """
-    return MeetingSearchSubroutine(
+    return MeetingSearchBySummarySubroutine(
         ollama_request_manager=ollama_request_manager,
         context=context,
         model=model,
