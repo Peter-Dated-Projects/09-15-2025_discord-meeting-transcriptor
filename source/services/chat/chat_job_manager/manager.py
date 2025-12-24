@@ -557,7 +557,7 @@ class ChatJob(Job):
 
         # Collect all unique user IDs from conversation history
         user_ids = set()
-        for msg in conversation.history:
+        for msg in conversation.get_context_messages():
             if msg.message_type == MessageType.CHAT and msg.requester:
                 user_ids.add(msg.requester)
 
@@ -567,7 +567,7 @@ class ChatJob(Job):
             user_display_names = await self._get_user_display_names(list(user_ids))
 
         # Add conversation history with user attribution and timestamps
-        for msg in conversation.history:
+        for msg in conversation.get_context_messages():
             if msg.message_type == MessageType.CHAT:
                 # Format timestamp as [yyyy-mm-dd_hh-mm]
                 timestamp_str = msg.created_at.strftime("[%Y-%m-%d_%H-%M]")

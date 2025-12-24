@@ -19,6 +19,64 @@ from source.server.sql_models import MeetingModel
 from source.services.transcription.text_embedding_manager.manager import EmbeddingModelHandler
 
 
+# Cache for Discord usernames: {user_id: username}
+USERNAME_CACHE: Dict[str, str] = {}
+# Cache for Discord guilds: {guild_id: guild_name}
+GUILD_CACHE: Dict[str, str] = {}
+
+
+async def _get_username(user_id: str | int, context: Context) -> str:
+    """Helper to get username from Discord ID with caching."""
+    str_id = str(user_id)
+    if str_id in USERNAME_CACHE:
+        return USERNAME_CACHE[str_id]
+
+    if not context.bot:
+        return "Unknown User"
+
+    try:
+        # Try to get from cache first
+        user = context.bot.get_user(int(user_id))
+        if not user:
+            # Fetch from API
+            user = await context.bot.fetch_user(int(user_id))
+
+        if user:
+            username = user.name
+            USERNAME_CACHE[str_id] = username
+            return username
+    except Exception:
+        pass
+
+    return "Unknown User"
+
+
+async def get_guild_name(guild_id: str | int, context: Context) -> str:
+    """Helper to get guild name from Discord ID with caching."""
+    str_id = str(guild_id)
+    if str_id in GUILD_CACHE:
+        return GUILD_CACHE[str_id]
+
+    if not context.bot:
+        return "Unknown Guild"
+
+    try:
+        # Try to get from cache first
+        guild = context.bot.get_guild(int(guild_id))
+        if not guild:
+            # Fetch from API
+            guild = await context.bot.fetch_guild(int(guild_id))
+
+        if guild:
+            guild_name = guild.name
+            GUILD_CACHE[str_id] = guild_name
+            return guild_name
+    except Exception:
+        pass
+
+    return "Unknown Guild"
+
+
 async def query_chroma_summaries(
     query: str | List[str], context: Context, n_results: int = 5
 ) -> dict:
@@ -206,13 +264,24 @@ async def query_chroma_transcriptions(
                     if not ids[i]:
                         continue
 
+                    # Process metadata for original content and speaker
+                    metadata = metadatas[i]
+                    original_content = metadata.get("original_content", documents[i])
+                    speaker_id = metadata.get("user_id")
+
+                    formatted_text = original_content
+                    if speaker_id:
+                        username = await _get_username(speaker_id, context)
+                        formatted_text = f"[{username}] <{speaker_id}>: {original_content}"
+
                     formatted_results.append(
                         {
                             "segment_id": ids[i],
-                            "text": documents[i],
+                            "text": formatted_text,
                             "distance": distances[i],
                             "metadata": metadatas[i],
                             "query": queries[q_idx],
+                            "guild_id": guild_id,
                         }
                     )
 
