@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Dict, List
 
 import discord
 
-from source.request_context import current_guild_id
+from source.request_context import current_guild_id, current_thread_id
 
 if TYPE_CHECKING:
     from source.context import Context
@@ -200,6 +200,26 @@ async def get_current_guild_id(context: Context) -> str:
     return guild_id
 
 
+async def get_current_thread_id(context: Context) -> str:
+    """
+    Get the thread ID of the current context.
+
+    Args:
+        context: Application context
+
+    Returns:
+        Thread ID as string, or error message.
+    """
+    if not context or not context.bot:
+        return "Error: Bot instance not available"
+
+    thread_id = current_thread_id.get()
+    if not thread_id:
+        return "Error: No current thread context available"
+
+    return thread_id
+
+
 async def register_discord_info_tools(mcp_manager: MCPManager, context: Context) -> None:
     """
     Register Discord info tools with the MCP manager.
@@ -219,6 +239,9 @@ async def register_discord_info_tools(mcp_manager: MCPManager, context: Context)
 
     async def get_current_guild_id_tool() -> str:
         return await get_current_guild_id(context)
+
+    async def get_current_thread_id_tool() -> str:
+        return await get_current_thread_id(context)
 
     mcp_manager.add_tool_from_function(
         get_usernames_tool,
@@ -246,4 +269,10 @@ async def register_discord_info_tools(mcp_manager: MCPManager, context: Context)
         get_current_guild_id_tool,
         name="get_current_guild_id",
         description="Get the guild ID of the current context (if applicable).",
+    )
+
+    mcp_manager.add_tool_from_function(
+        get_current_thread_id_tool,
+        name="get_current_thread_id",
+        description="Get the thread ID of the current context (if applicable).",
     )
