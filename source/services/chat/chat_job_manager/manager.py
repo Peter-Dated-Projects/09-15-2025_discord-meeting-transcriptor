@@ -41,6 +41,7 @@ from source.services.chat.mcp.subroutine_manager.subroutines.user_query_handler 
 from source.services.chat.mcp.subroutine_manager.subroutines.context_cleaning import (
     ContextCleaningSubroutine,
 )
+from source.request_context import set_request_context, clear_request_context
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 # Maximum number of user messages to batch together
@@ -108,6 +109,7 @@ class ChatJob(Job):
         initial_user_id: Discord user ID of initial requester
         services: Reference to ServicesManager for accessing services
         message_queue: Queue of user messages received while AI is processing
+        guild_id: Optional Discord guild ID for context
     """
 
     thread_id: str = ""
@@ -116,6 +118,7 @@ class ChatJob(Job):
     initial_user_id: str = ""
     services: ServicesManager = None  # type: ignore
     message_queue: deque[QueuedUserMessage] = field(default_factory=deque)
+    guild_id: str | None = None
     _downloaded_attachments: list[dict] = field(default_factory=list)  # Track for cleanup
     _downloaded_attachments: list[dict] = field(default_factory=list)  # Track for cleanup
 
@@ -142,6 +145,23 @@ class ChatJob(Job):
         # Get conversation to track message count
         conversation = self.services.conversation_manager.get_conversation(self.thread_id)
         start_count = len(conversation.history) if conversation else 0
+
+        # Set request context
+        # Use the explicitly passed guild_id if available, otherwise try to fetch it
+        guild_id = self.guild_id
+        if not guild_id and self.services.context.bot:
+            try:
+                thread = await self.services.context.bot.fetch_channel(int(self.thread_id))
+                if hasattr(thread, "guild"):
+                    guild_id = str(thread.guild.id)
+            except Exception:
+                pass
+        
+        set_request_context(
+            guild_id=guild_id,
+            thread_id=self.thread_id,
+            user_id=self.initial_user_id
+        )
 
         try:
             # Process initial message if present (user attribution will be added when building LLM messages)
@@ -176,6 +196,8 @@ class ChatJob(Job):
             # Mark conversation as idle even on error
             await self._set_conversation_status(ConversationStatus.IDLE)
             raise
+        finally:
+            clear_request_context()
 
     async def _run_periodic_context_job(self, conversation: Conversation) -> None:
         """
@@ -1526,6 +1548,7 @@ class ChatJobManagerService(Manager):
         message: str,
         user_id: str,
         attachments: list[dict] | None = None,
+        guild_id: str | None = None,
     ) -> str:
         """
         Create and queue a new chat job.
@@ -1536,6 +1559,7 @@ class ChatJobManagerService(Manager):
             message: User message to process
             user_id: Discord user ID
             attachments: Optional list of attachment metadata
+            guild_id: Optional Discord guild ID
 
         Returns:
             Job ID of the created job
@@ -1549,8 +1573,9 @@ class ChatJobManagerService(Manager):
             conversation_id=conversation_id,
             initial_message=message,
             initial_user_id=user_id,
-            services=self.services,
+            guild_id=guild_id,
         )
+        chat_job.services = self.services
 
         # If there are attachments, add them to the initial message queue
         if attachments:

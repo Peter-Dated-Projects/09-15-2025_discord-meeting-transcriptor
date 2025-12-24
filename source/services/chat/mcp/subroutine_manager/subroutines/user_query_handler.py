@@ -106,9 +106,13 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
             # Case 1: Dictionary
             if isinstance(tool_call, dict):
                 fn = tool_call.get("function", {})
+                args = fn.get("arguments")
+                if args is None:
+                    args = {}
+                
                 return {
                     "name": fn.get("name"),
-                    "args": fn.get("arguments"),
+                    "args": args,
                     "id": tool_call.get("id", f"call_{fn.get('name', 'unknown')}"),
                 }
 
@@ -123,6 +127,9 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
                 args = getattr(fn, "arguments", None) or (
                     fn.get("arguments") if isinstance(fn, dict) else None
                 )
+                
+                if args is None:
+                    args = {}
 
                 # ID might be on the tool_call object
                 tc_id = getattr(tool_call, "id", None) or f"call_{name}"

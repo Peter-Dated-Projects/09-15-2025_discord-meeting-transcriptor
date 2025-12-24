@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Dict, List
 
 import discord
 
+from source.request_context import current_guild_id
+
 if TYPE_CHECKING:
     from source.context import Context
     from source.services.chat.mcp import MCPManager
@@ -43,11 +45,11 @@ async def get_usernames_from_ids(user_ids: List[str], context: Context) -> Dict[
                 except Exception:
                     results[user_id] = "Error Fetching User"
                     continue
-            
+
             results[user_id] = user.display_name
         except ValueError:
             results[user_id] = "Invalid ID"
-    
+
     return results
 
 
@@ -76,7 +78,7 @@ async def get_guild_name(guild_id: str, context: Context) -> str:
                 return "Guild Not Found"
             except discord.Forbidden:
                 return "Guild Access Forbidden"
-        
+
         return guild.name
     except ValueError:
         return "Invalid Guild ID"
@@ -103,7 +105,7 @@ async def get_thread_members(thread_id: str, context: Context) -> List[str]:
         tid = int(thread_id)
         # Threads are channels in discord.py
         thread = bot.get_channel(tid)
-        
+
         if not thread:
             try:
                 thread = await bot.fetch_channel(tid)
@@ -111,14 +113,14 @@ async def get_thread_members(thread_id: str, context: Context) -> List[str]:
                 return ["Thread Not Found"]
             except discord.Forbidden:
                 return ["Thread Access Forbidden"]
-        
+
         if not isinstance(thread, discord.Thread):
-             return ["Channel is not a thread"]
+            return ["Channel is not a thread"]
 
         members = await thread.fetch_members()
-        # fetch_members returns ThreadMember objects, which have an id. 
+        # fetch_members returns ThreadMember objects, which have an id.
         # We need to resolve these to users to get names.
-        
+
         usernames = []
         for member in members:
             # ThreadMember might have a member attribute if cached, or we fetch user
@@ -130,7 +132,7 @@ async def get_thread_members(thread_id: str, context: Context) -> List[str]:
                     usernames.append(f"Unknown User ({member.id})")
                     continue
             usernames.append(user.display_name)
-            
+
         return usernames
 
     except ValueError:
@@ -139,17 +141,16 @@ async def get_thread_members(thread_id: str, context: Context) -> List[str]:
         return [f"Error: {str(e)}"]
 
 
-async def get_active_guild_members(guild_id: str, context: Context) -> Dict[str, str]:
+async def get_guild_members(guild_id: str, context: Context) -> Dict[str, str]:
     """
-    Get all active users and their usernames in a guild.
-    'Active' is interpreted as online/idle/dnd (not offline).
+    Get all users and their usernames in a guild.
 
     Args:
         guild_id: Discord guild ID
         context: Application context
 
     Returns:
-        Dictionary of user_id: username for active members.
+        Dictionary of user_id: {username: str, status: str} for all members.
     """
     if not context or not context.bot:
         return {"error": "Bot instance not available"}
@@ -163,20 +164,15 @@ async def get_active_guild_members(guild_id: str, context: Context) -> Dict[str,
                 guild = await bot.fetch_guild(gid)
             except:
                 return {"error": "Guild Not Found or Inaccessible"}
-        
+
         # We need to ensure members are chunked/cached if intents are enabled
         if not guild.chunked:
             await guild.chunk()
 
-        active_members = {}
-        for member in guild.members:
-            # Filter for active status if possible. 
-            # If presences intent is not enabled, status might be None or offline.
-            # We'll include everyone if we can't determine status, or just filter offline.
-            if str(member.status) != "offline":
-                active_members[str(member.id)] = member.display_name
-        
-        return active_members
+        return {
+            str(member.id): {"name": member.display_name, "status": str(member.status)}
+            for member in guild.members
+        }
 
     except ValueError:
         return {"error": "Invalid Guild ID"}
@@ -184,11 +180,31 @@ async def get_active_guild_members(guild_id: str, context: Context) -> Dict[str,
         return {"error": f"Error: {str(e)}"}
 
 
+async def get_current_guild_id(context: Context) -> str:
+    """
+    Get the guild ID of the current context.
+
+    Args:
+        context: Application context
+
+    Returns:
+        Guild ID as string, or error message.
+    """
+    if not context or not context.bot:
+        return "Error: Bot instance not available"
+
+    guild_id = current_guild_id.get()
+    if not guild_id:
+        return "Error: No current guild context available"
+
+    return guild_id
+
+
 async def register_discord_info_tools(mcp_manager: MCPManager, context: Context) -> None:
     """
     Register Discord info tools with the MCP manager.
     """
-    
+
     async def get_usernames_tool(user_ids: List[str]) -> Dict[str, str]:
         return await get_usernames_from_ids(user_ids, context)
 
@@ -198,29 +214,36 @@ async def register_discord_info_tools(mcp_manager: MCPManager, context: Context)
     async def get_thread_members_tool(thread_id: str) -> List[str]:
         return await get_thread_members(thread_id, context)
 
-    async def get_active_guild_members_tool(guild_id: str) -> Dict[str, str]:
-        return await get_active_guild_members(guild_id, context)
+    async def get_guild_members_tool(guild_id: str) -> Dict[str, str]:
+        return await get_guild_members(guild_id, context)
+
+    async def get_current_guild_id_tool() -> str:
+        return await get_current_guild_id(context)
 
     mcp_manager.add_tool_from_function(
         get_usernames_tool,
         name="get_usernames_from_ids",
-        description="Get usernames for a list of Discord user IDs."
+        description="Get usernames for a list of Discord user IDs.",
     )
-    
+
     mcp_manager.add_tool_from_function(
-        get_guild_name_tool,
-        name="get_guild_name",
-        description="Get the name of a guild by its ID."
+        get_guild_name_tool, name="get_guild_name", description="Get the name of a guild by its ID."
     )
 
     mcp_manager.add_tool_from_function(
         get_thread_members_tool,
         name="get_thread_members",
-        description="Get the usernames of members in a Discord thread."
+        description="Get the usernames of members in a Discord thread.",
     )
 
     mcp_manager.add_tool_from_function(
-        get_active_guild_members_tool,
-        name="get_active_guild_members",
-        description="Get all active (online/idle/dnd) users and their usernames in a guild."
+        get_guild_members_tool,
+        name="get_guild_members",
+        description="Get all users and their usernames in a guild.",
+    )
+
+    mcp_manager.add_tool_from_function(
+        get_current_guild_id_tool,
+        name="get_current_guild_id",
+        description="Get the guild ID of the current context (if applicable).",
     )
