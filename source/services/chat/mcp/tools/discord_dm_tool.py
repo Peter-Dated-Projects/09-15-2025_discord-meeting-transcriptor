@@ -68,6 +68,7 @@ async def send_discord_dm(user_id: str, message: str, context: Context) -> dict:
 
             return {
                 "success": True,
+                "message": f"Successfully sent DM to {user.name}",
                 "message_id": str(dm_message.id),
                 "recipient": (
                     f"{user.name}#{user.discriminator}" if user.discriminator != "0" else user.name
