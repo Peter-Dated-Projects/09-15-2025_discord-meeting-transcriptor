@@ -56,6 +56,7 @@ DEBUG_GUILD_IDS = [
 
 intents = discord.Intents.default()
 intents.voice_states = True
+intents.members = True
 intents.message_content = True  # Required for reading message content and detecting mentions
 
 # If DEBUG_GUILD_IDS is not empty, commands will register instantly in those guilds
