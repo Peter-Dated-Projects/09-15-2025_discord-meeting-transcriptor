@@ -57,16 +57,24 @@ class InMemoryLogger:
         self.logs = []
 
     async def debug(self, message: str):
-        self.logs.append({"level": "DEBUG", "message": message, "timestamp": datetime.now().isoformat()})
+        self.logs.append(
+            {"level": "DEBUG", "message": message, "timestamp": datetime.now().isoformat()}
+        )
 
     async def info(self, message: str):
-        self.logs.append({"level": "INFO", "message": message, "timestamp": datetime.now().isoformat()})
+        self.logs.append(
+            {"level": "INFO", "message": message, "timestamp": datetime.now().isoformat()}
+        )
 
     async def error(self, message: str):
-        self.logs.append({"level": "ERROR", "message": message, "timestamp": datetime.now().isoformat()})
-    
+        self.logs.append(
+            {"level": "ERROR", "message": message, "timestamp": datetime.now().isoformat()}
+        )
+
     async def warning(self, message: str):
-        self.logs.append({"level": "WARNING", "message": message, "timestamp": datetime.now().isoformat()})
+        self.logs.append(
+            {"level": "WARNING", "message": message, "timestamp": datetime.now().isoformat()}
+        )
 
 
 class ContextCleaningSubroutine(BaseSubroutine):
@@ -475,34 +483,34 @@ class ContextCleaningSubroutine(BaseSubroutine):
         Async execution of the graph with logging interception.
         """
         start_time = datetime.now().isoformat()
-        
+
         # Swap logger
         original_logger = self.logging_service
         memory_logger = InMemoryLogger()
         self.logging_service = memory_logger
-        
+
         try:
             result = await super().ainvoke(initial_state, config)
         finally:
             # Restore logger
             self.logging_service = original_logger
-            
+
             end_time = datetime.now().isoformat()
-            
+
             # Collect active objects (messages in context)
             active_objects = [msg.to_json() for msg in self.conversation.history if msg.is_context]
-            
+
             log_entry = {
                 "start_time": start_time,
                 "end_time": end_time,
                 "active_objects_after_clean": active_objects,
-                "logs": memory_logger.logs
+                "logs": memory_logger.logs,
             }
-            
+
             self.conversation.cleanup_log.append(log_entry)
-            
+
             # Save conversation
             if self.conversation.conversation_file_manager:
                 await self.conversation.save_conversation()
-            
+
         return result
