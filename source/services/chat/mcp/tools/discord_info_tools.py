@@ -141,16 +141,17 @@ async def get_thread_members(thread_id: str, context: Context) -> List[str]:
         return [f"Error: {str(e)}"]
 
 
-async def get_guild_members(guild_id: str, context: Context) -> Dict[str, str]:
+async def get_guild_members(guild_id: str, context: Context, page: int = 1) -> Dict[str, Any]:
     """
-    Get all users and their usernames in a guild.
+    Get users and their usernames in a guild, paginated.
 
     Args:
         guild_id: Discord guild ID
         context: Application context
+        page: Page number (1-based), default 1. Fixed page size of 50.
 
     Returns:
-        Dictionary of user_id: {username: str, status: str} for all members.
+        Dictionary containing 'members' and 'pagination' info.
     """
     if not context or not context.bot:
         return {"error": "Bot instance not available"}
@@ -169,9 +170,33 @@ async def get_guild_members(guild_id: str, context: Context) -> Dict[str, str]:
         if not guild.chunked:
             await guild.chunk()
 
+        # Sort members for consistent pagination
+        all_members = sorted(guild.members, key=lambda m: m.display_name)
+
+        page_size = 50
+        total_count = len(all_members)
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+
+        members_slice = all_members[start_idx:end_idx]
+
+        members_data = {
+            str(member.id): {
+                "name": member.display_name,
+                "status": str(member.status),
+                "roles": [{"id": str(role.id), "name": role.name} for role in member.roles],
+            }
+            for member in members_slice
+        }
+
         return {
-            str(member.id): {"name": member.display_name, "status": str(member.status)}
-            for member in guild.members
+            "members": members_data,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_members": total_count,
+                "total_pages": (total_count + page_size - 1) // page_size,
+            },
         }
 
     except ValueError:
@@ -248,9 +273,7 @@ async def get_guild_roles(context: Context) -> List[Dict[str, Any]]:
 
         roles = []
         for role in guild.roles:
-            roles.append(
-                {"id": str(role.id), "name": role.name, "position": role.position}
-            )
+            roles.append({"id": str(role.id), "name": role.name, "position": role.position})
 
         # Sort by position (descending)
         roles.sort(key=lambda x: x["position"], reverse=True)
@@ -336,8 +359,8 @@ async def register_discord_info_tools(mcp_manager: MCPManager, context: Context)
     async def get_thread_members_tool(thread_id: str) -> List[str]:
         return await get_thread_members(thread_id, context)
 
-    async def get_guild_members_tool(guild_id: str) -> Dict[str, str]:
-        return await get_guild_members(guild_id, context)
+    async def get_guild_members_tool(guild_id: str, page: int = 1) -> Dict[str, Any]:
+        return await get_guild_members(guild_id, context, page)
 
     async def get_current_guild_id_tool() -> str:
         return await get_current_guild_id(context)
@@ -370,7 +393,7 @@ async def register_discord_info_tools(mcp_manager: MCPManager, context: Context)
     mcp_manager.add_tool_from_function(
         get_guild_members_tool,
         name="get_guild_members",
-        description="Get all users and their usernames in a guild.",
+        description="Get users and their usernames in a guild (paginated, 50 per page).",
     )
 
     mcp_manager.add_tool_from_function(
