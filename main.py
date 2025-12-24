@@ -425,17 +425,19 @@ async def main():
     if services_manager.mcp_manager:
         from source.services.chat.mcp.tools import (
             register_discord_tools,
+            register_discord_info_tools,
             register_google_tools,
             register_meeting_search_by_summary_tool,
             register_meeting_search_by_transcription_tool,
         )
 
         await register_discord_tools(services_manager.mcp_manager, context)
+        await register_discord_info_tools(services_manager.mcp_manager, context)
         await register_google_tools(services_manager.mcp_manager, context)
         await register_meeting_search_by_summary_tool(services_manager.mcp_manager, context)
         await register_meeting_search_by_transcription_tool(services_manager.mcp_manager, context)
         await logger.info(
-            "[OK] Registered Discord, Google, Meeting Search by Summary, and Meeting Search by Transcription tools with MCP manager."
+            "[OK] Registered Discord, Discord Info, Google, Meeting Search by Summary, and Meeting Search by Transcription tools with MCP manager."
         )
 
     # Initialize conversation manager thread ID cache
