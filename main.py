@@ -61,8 +61,11 @@ intents.members = True
 intents.presences = True
 intents.message_content = True  # Required for reading message content and detecting mentions
 
+# Allow user replies and direct mentions, but BLOCK everyone/here
+allowed = discord.AllowedMentions(everyone=False, users=False, roles=False, replied_user=True)
+
 # If DEBUG_GUILD_IDS is not empty, commands will register instantly in those guilds
-bot = discord.Bot(intents=intents, debug_guilds=DEBUG_GUILD_IDS)
+bot = discord.Bot(intents=intents, debug_guilds=DEBUG_GUILD_IDS, allowed_mentions=allowed)
 
 
 # -------------------------------------------------------------- #

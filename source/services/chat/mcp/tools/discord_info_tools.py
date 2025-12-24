@@ -4,7 +4,7 @@ Discord Info Tools for retrieving information about users, guilds, and threads.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 import discord
 
@@ -220,6 +220,108 @@ async def get_current_thread_id(context: Context) -> str:
     return thread_id
 
 
+async def get_guild_roles(context: Context) -> List[Dict[str, Any]]:
+    """
+    Get all roles in the current guild.
+
+    Args:
+        context: Application context
+
+    Returns:
+        List of dictionaries containing role id, name, and position.
+    """
+    if not context or not context.bot:
+        return [{"error": "Bot instance not available"}]
+
+    guild_id = current_guild_id.get()
+    if not guild_id:
+        return [{"error": "No current guild context available"}]
+
+    try:
+        gid = int(guild_id)
+        guild = context.bot.get_guild(gid)
+        if not guild:
+            try:
+                guild = await context.bot.fetch_guild(gid)
+            except Exception as e:
+                return [{"error": f"Failed to fetch guild: {str(e)}"}]
+
+        roles = []
+        for role in guild.roles:
+            roles.append(
+                {"id": str(role.id), "name": role.name, "position": role.position}
+            )
+
+        # Sort by position (descending)
+        roles.sort(key=lambda x: x["position"], reverse=True)
+
+        return roles
+
+    except ValueError:
+        return [{"error": "Invalid Guild ID format"}]
+    except Exception as e:
+        return [{"error": f"Unexpected error: {str(e)}"}]
+
+
+async def get_users_with_role(role_id: str, context: Context) -> List[Dict[str, str]]:
+    """
+    Get all users with a specific role in the current guild.
+
+    Args:
+        role_id: The ID of the role
+        context: Application context
+
+    Returns:
+        List of dictionaries containing user id, name, and display_name.
+    """
+    if not context or not context.bot:
+        return [{"error": "Bot instance not available"}]
+
+    guild_id = current_guild_id.get()
+    if not guild_id:
+        return [{"error": "No current guild context available"}]
+
+    try:
+        gid = int(guild_id)
+        guild = context.bot.get_guild(gid)
+        if not guild:
+            try:
+                guild = await context.bot.fetch_guild(gid)
+            except Exception as e:
+                return [{"error": f"Failed to fetch guild: {str(e)}"}]
+
+        try:
+            rid = int(role_id)
+        except ValueError:
+            return [{"error": "Invalid Role ID format"}]
+
+        role = guild.get_role(rid)
+        if not role:
+            try:
+                roles = await guild.fetch_roles()
+                role = discord.utils.get(roles, id=rid)
+            except Exception as e:
+                return [{"error": f"Failed to fetch roles: {str(e)}"}]
+
+        if not role:
+            return [{"error": "Role not found in guild"}]
+
+        users = []
+        for member in role.members:
+            users.append(
+                {
+                    "id": str(member.id),
+                    "name": member.name,
+                    "display_name": member.display_name,
+                }
+            )
+
+        return users
+
+    except Exception as e:
+        return [{"error": f"Unexpected error: {str(e)}"}]
+
+
 async def register_discord_info_tools(mcp_manager: MCPManager, context: Context) -> None:
     """
     Register Discord info tools with the MCP manager.
@@ -242,6 +344,12 @@ async def register_discord_info_tools(mcp_manager: MCPManager, context: Context)
 
     async def get_current_thread_id_tool() -> str:
         return await get_current_thread_id(context)
+
+    async def get_guild_roles_tool() -> List[Dict[str, Any]]:
+        return await get_guild_roles(context)
+
+    async def get_users_with_role_tool(role_id: str) -> List[Dict[str, str]]:
+        return await get_users_with_role(role_id, context)
 
     mcp_manager.add_tool_from_function(
         get_usernames_tool,
@@ -275,4 +383,16 @@ async def register_discord_info_tools(mcp_manager: MCPManager, context: Context)
         get_current_thread_id_tool,
         name="get_current_thread_id",
         description="Get the thread ID of the current context (if applicable).",
+    )
+
+    mcp_manager.add_tool_from_function(
+        get_guild_roles_tool,
+        name="get_guild_roles",
+        description="Get all roles in the current guild, including their IDs, names, and positions.",
+    )
+
+    mcp_manager.add_tool_from_function(
+        get_users_with_role_tool,
+        name="get_users_with_role",
+        description="Get all users who have a specific role in the current guild.",
     )

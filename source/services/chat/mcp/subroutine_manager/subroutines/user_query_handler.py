@@ -56,7 +56,9 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
                 "name": "finalize_response",
                 "description": (
                     "Call this tool ONLY when you have completed the user's request "
-                    "and have nothing left to do. This ends the conversation."
+                    "and have nothing left to do. You MUST provide a final response "
+                    "message to the user explaining what you did or answering their "
+                    "question BEFORE calling this tool. This ends the conversation."
                 ),
                 "parameters": {"type": "object", "properties": {}, "required": []},
             },
@@ -242,7 +244,27 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
 
             # Safety fallback for empty content
             if tool_calls and not clean_content:
-                clean_content = "I am processing your request..."
+                # Check if finalize_response is being called
+                is_finalizing = False
+                for tc in tool_calls:
+                    fn_name = None
+                    if isinstance(tc, dict):
+                        fn_name = tc.get("function", {}).get("name")
+                    elif hasattr(tc, "function"):
+                        fn = tc.function
+                        if isinstance(fn, dict):
+                            fn_name = fn.get("name")
+                        else:
+                            fn_name = getattr(fn, "name", None)
+
+                    if fn_name == "finalize_response":
+                        is_finalizing = True
+                        break
+
+                if is_finalizing:
+                    clean_content = "I have completed your request."
+                else:
+                    clean_content = "I am processing your request..."
             elif not clean_content and not tool_calls:
                 clean_content = "I have finished processing."
 
