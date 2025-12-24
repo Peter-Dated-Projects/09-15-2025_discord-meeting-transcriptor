@@ -68,6 +68,7 @@ async def send_discord_dm(user_id: str, message: str, context: Context) -> dict:
 
             return {
                 "success": True,
+                "message": f"Successfully sent DM to {user.name}",
                 "message_id": str(dm_message.id),
                 "recipient": (
                     f"{user.name}#{user.discriminator}" if user.discriminator != "0" else user.name
@@ -114,7 +115,7 @@ async def register_discord_tools(mcp_manager: MCPManager, context: Context) -> N
     mcp_manager.add_tool_from_function(
         func=send_dm_tool,
         name="send_discord_dm",
-        description="Send a direct message to a Discord user by their user ID. The message will be sent as plaintext (no embeds). Use this to notify users, send private information, or communicate outside of public channels.",
+        description="Send a direct message to a Discord user by their user ID. The message will be sent as plaintext (no embeds). Use this ONLY when you have the COMPLETE content ready to send. Do NOT use this tool to ask for clarification, to say 'hello', or to start a conversation without specific content. If you need to ask the user a question, do it in the current channel, NOT via DM.",
     )
 
     # Log registration

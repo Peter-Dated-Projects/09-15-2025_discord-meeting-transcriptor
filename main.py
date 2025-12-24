@@ -50,16 +50,22 @@ DEBUG_GUILD_IDS = [
     1266931275047108691,
     1235590570773057566,
     1391829654847094975,  # homeless shelter
-]  # Example: [123456789012345678]
+]
+
 # Leave empty [] for global commands (takes up to 1 hour to register)
 # Or add your guild IDs for instant registration during development
 
 intents = discord.Intents.default()
 intents.voice_states = True
+intents.members = True
+intents.presences = True
 intents.message_content = True  # Required for reading message content and detecting mentions
 
+# Allow user replies and direct mentions, but BLOCK everyone/here
+allowed = discord.AllowedMentions(everyone=False, users=False, roles=False, replied_user=True)
+
 # If DEBUG_GUILD_IDS is not empty, commands will register instantly in those guilds
-bot = discord.Bot(intents=intents, debug_guilds=DEBUG_GUILD_IDS)
+bot = discord.Bot(intents=intents, debug_guilds=DEBUG_GUILD_IDS, allowed_mentions=allowed)
 
 
 # -------------------------------------------------------------- #
@@ -425,17 +431,19 @@ async def main():
     if services_manager.mcp_manager:
         from source.services.chat.mcp.tools import (
             register_discord_tools,
+            register_discord_info_tools,
             register_google_tools,
             register_meeting_search_by_summary_tool,
             register_meeting_search_by_transcription_tool,
         )
 
         await register_discord_tools(services_manager.mcp_manager, context)
+        await register_discord_info_tools(services_manager.mcp_manager, context)
         await register_google_tools(services_manager.mcp_manager, context)
         await register_meeting_search_by_summary_tool(services_manager.mcp_manager, context)
         await register_meeting_search_by_transcription_tool(services_manager.mcp_manager, context)
         await logger.info(
-            "[OK] Registered Discord, Google, Meeting Search by Summary, and Meeting Search by Transcription tools with MCP manager."
+            "[OK] Registered Discord, Discord Info, Google, Meeting Search by Summary, and Meeting Search by Transcription tools with MCP manager."
         )
 
     # Initialize conversation manager thread ID cache
