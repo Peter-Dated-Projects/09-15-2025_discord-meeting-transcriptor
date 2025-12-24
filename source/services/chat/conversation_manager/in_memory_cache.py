@@ -174,6 +174,7 @@ class Conversation:
     summary: str = ""
     participants: list[str] = field(default_factory=list)
     history: list[Message] = field(default_factory=list)
+    cleanup_log: list[dict[str, Any]] = field(default_factory=list)
     filename: str = ""
     status: ConversationStatus = ConversationStatus.IDLE
 
@@ -240,6 +241,7 @@ class Conversation:
             "guild_name": self.guild_name,
             "requester": self.requester,
             "participants": self.participants,
+            "cleanup_log": self.cleanup_log,
             "history": [message.to_json() for message in self.history],
         }
 
@@ -273,6 +275,7 @@ class Conversation:
             guild_name=data["guild_name"],
             requester=data["requester"],
             participants=data.get("participants", []),
+            cleanup_log=data.get("cleanup_log", []),
             history=history,
             conversation_file_manager=conversation_file_manager,
         )

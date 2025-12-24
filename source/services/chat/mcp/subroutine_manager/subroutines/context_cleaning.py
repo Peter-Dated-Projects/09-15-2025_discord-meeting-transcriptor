@@ -12,7 +12,7 @@ Flow:
 4. Loop until done
 """
 
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END
@@ -50,6 +50,23 @@ Rules:
 
 You must iterate through the messages and make decisions. You can process multiple messages in one turn by calling tools multiple times.
 """
+
+
+class InMemoryLogger:
+    def __init__(self):
+        self.logs = []
+
+    async def debug(self, message: str):
+        self.logs.append({"level": "DEBUG", "message": message, "timestamp": datetime.now().isoformat()})
+
+    async def info(self, message: str):
+        self.logs.append({"level": "INFO", "message": message, "timestamp": datetime.now().isoformat()})
+
+    async def error(self, message: str):
+        self.logs.append({"level": "ERROR", "message": message, "timestamp": datetime.now().isoformat()})
+    
+    async def warning(self, message: str):
+        self.logs.append({"level": "WARNING", "message": message, "timestamp": datetime.now().isoformat()})
 
 
 class ContextCleaningSubroutine(BaseSubroutine):
@@ -450,3 +467,42 @@ class ContextCleaningSubroutine(BaseSubroutine):
             await self.logging_service.debug(f"[ContextCleaning] Summarization response: {content}")
 
         return content
+
+    async def ainvoke(
+        self, initial_state: Dict, config: Dict = None
+    ) -> Optional[List[BaseMessage]]:
+        """
+        Async execution of the graph with logging interception.
+        """
+        start_time = datetime.now().isoformat()
+        
+        # Swap logger
+        original_logger = self.logging_service
+        memory_logger = InMemoryLogger()
+        self.logging_service = memory_logger
+        
+        try:
+            result = await super().ainvoke(initial_state, config)
+        finally:
+            # Restore logger
+            self.logging_service = original_logger
+            
+            end_time = datetime.now().isoformat()
+            
+            # Collect active objects (messages in context)
+            active_objects = [msg.to_json() for msg in self.conversation.history if msg.is_context]
+            
+            log_entry = {
+                "start_time": start_time,
+                "end_time": end_time,
+                "active_objects_after_clean": active_objects,
+                "logs": memory_logger.logs
+            }
+            
+            self.conversation.cleanup_log.append(log_entry)
+            
+            # Save conversation
+            if self.conversation.conversation_file_manager:
+                await self.conversation.save_conversation()
+            
+        return result
