@@ -16,7 +16,10 @@ from source.services.chat.mcp.common.langgraph_subroutine import (
     BaseSubroutine,
     SubroutineState,
 )
-from source.services.chat.mcp.tools.chroma_search_tool import query_chroma_transcriptions
+from source.services.chat.mcp.tools.chroma_search_tool import (
+    query_chroma_transcriptions,
+    get_guild_name,
+)
 
 # System prompt for generating queries
 GENERATE_QUERIES_PROMPT = """
@@ -72,11 +75,13 @@ class MeetingSearchByTranscriptionSubroutine(BaseSubroutine):
     def _build_graph(self):
         self.add_node("generate_queries", self._generate_queries_node)
         self.add_node("execute_search", self._execute_search_node)
+        self.add_node("synthesize_results", self._synthesize_results_node)
 
         self.set_entry_point("generate_queries")
 
         self.add_edge("generate_queries", "execute_search")
-        self.add_edge("execute_search", END)
+        self.add_edge("execute_search", "synthesize_results")
+        self.add_edge("synthesize_results", END)
 
     async def _generate_queries_node(self, state: SubroutineState) -> Dict:
         messages = state["messages"]
@@ -150,6 +155,38 @@ class MeetingSearchByTranscriptionSubroutine(BaseSubroutine):
         # Store results
         results_json = json.dumps(final_results, indent=2)
         return {"messages": [AIMessage(content=results_json)]}
+
+    async def _synthesize_results_node(self, state: SubroutineState) -> Dict:
+        messages = state["messages"]
+        last_message = messages[-1]
+
+        try:
+            results = json.loads(last_message.content)
+        except json.JSONDecodeError:
+            return {"messages": [AIMessage(content="Error: Could not parse search results.")]}
+
+        # Check if results is a dict with "errors"
+        if isinstance(results, dict) and "errors" in results:
+            return {"messages": [AIMessage(content=json.dumps(results))]}
+
+        if not results or not isinstance(results, list):
+            return {"messages": [AIMessage(content="No results found.")]}
+
+        # Get guild_id from first result (assuming all from same meeting/guild)
+        guild_id = results[0].get("guild_id")
+        guild_name = "Unknown Guild"
+        if guild_id:
+            guild_name = await get_guild_name(guild_id, self.context)
+
+        formatted_lines = [f"[{guild_name}]"]
+
+        for res in results:
+            text = res.get("text", "")
+            formatted_lines.append(f"- {text}")
+
+        final_response = "\n".join(formatted_lines)
+
+        return {"messages": [AIMessage(content=final_response)]}
 
 
 def create_meeting_search_by_transcription_subroutine(

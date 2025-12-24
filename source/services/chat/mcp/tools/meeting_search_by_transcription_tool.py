@@ -114,7 +114,7 @@ async def register_meeting_search_by_transcription_tool(
     mcp_manager.add_tool_from_function(
         func=search_meetings_by_transcription_tool,
         name="search_meetings_by_transcription",
-        description="Search for specific details within a meeting's transcript. Returns relevant segments. Best for in-depth and specific queries.",
+        description="Search for specific details within a meeting's transcript. Returns relevant segments. Best for in-depth and specific queries. Contains speaker information.",
     )
 
     # Log registration

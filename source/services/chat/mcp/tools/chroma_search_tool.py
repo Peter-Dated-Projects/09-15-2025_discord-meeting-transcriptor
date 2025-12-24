@@ -21,6 +21,8 @@ from source.services.transcription.text_embedding_manager.manager import Embeddi
 
 # Cache for Discord usernames: {user_id: username}
 USERNAME_CACHE: Dict[str, str] = {}
+# Cache for Discord guilds: {guild_id: guild_name}
+GUILD_CACHE: Dict[str, str] = {}
 
 
 async def _get_username(user_id: str | int, context: Context) -> str:
@@ -47,6 +49,32 @@ async def _get_username(user_id: str | int, context: Context) -> str:
         pass
 
     return "Unknown User"
+
+
+async def get_guild_name(guild_id: str | int, context: Context) -> str:
+    """Helper to get guild name from Discord ID with caching."""
+    str_id = str(guild_id)
+    if str_id in GUILD_CACHE:
+        return GUILD_CACHE[str_id]
+
+    if not context.bot:
+        return "Unknown Guild"
+
+    try:
+        # Try to get from cache first
+        guild = context.bot.get_guild(int(guild_id))
+        if not guild:
+            # Fetch from API
+            guild = await context.bot.fetch_guild(int(guild_id))
+
+        if guild:
+            guild_name = guild.name
+            GUILD_CACHE[str_id] = guild_name
+            return guild_name
+    except Exception:
+        pass
+
+    return "Unknown Guild"
 
 
 async def query_chroma_summaries(
@@ -253,6 +281,7 @@ async def query_chroma_transcriptions(
                             "distance": distances[i],
                             "metadata": metadatas[i],
                             "query": queries[q_idx],
+                            "guild_id": guild_id,
                         }
                     )
 

@@ -52,7 +52,7 @@ class SubroutineManager:
 
         # 1. Fetch conversation history
         conversation = self._conversation_manager.get_conversation(thread_id)
-        history = conversation.history if conversation else []
+        history = conversation.get_context_messages() if conversation else []
 
         # 2. Convert to LangChain messages
         langchain_messages = convert_to_langchain_messages(history)
@@ -100,7 +100,7 @@ class SubroutineManager:
 
         # 1. Fetch conversation history
         conversation = self._conversation_manager.get_conversation(thread_id)
-        history = conversation.history if conversation else []
+        history = conversation.get_context_messages() if conversation else []
 
         # 2. Convert to LangChain messages
         langchain_messages = convert_to_langchain_messages(history)
