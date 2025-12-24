@@ -141,7 +141,7 @@ async def get_thread_members(thread_id: str, context: Context) -> List[str]:
         return [f"Error: {str(e)}"]
 
 
-async def get_guild_members(guild_id: str, context: Context) -> Dict[str, str]:
+async def get_guild_members(guild_id: str, context: Context) -> Dict[str, Any]:
     """
     Get all users and their usernames in a guild.
 
@@ -150,7 +150,7 @@ async def get_guild_members(guild_id: str, context: Context) -> Dict[str, str]:
         context: Application context
 
     Returns:
-        Dictionary of user_id: {username: str, status: str} for all members.
+        Dictionary of user_id: {username: str, status: str, roles: List[Dict]} for all members.
     """
     if not context or not context.bot:
         return {"error": "Bot instance not available"}
@@ -170,7 +170,11 @@ async def get_guild_members(guild_id: str, context: Context) -> Dict[str, str]:
             await guild.chunk()
 
         return {
-            str(member.id): {"name": member.display_name, "status": str(member.status)}
+            str(member.id): {
+                "name": member.display_name,
+                "status": str(member.status),
+                "roles": [{"id": str(role.id), "name": role.name} for role in member.roles],
+            }
             for member in guild.members
         }
 
@@ -336,7 +340,7 @@ async def register_discord_info_tools(mcp_manager: MCPManager, context: Context)
     async def get_thread_members_tool(thread_id: str) -> List[str]:
         return await get_thread_members(thread_id, context)
 
-    async def get_guild_members_tool(guild_id: str) -> Dict[str, str]:
+    async def get_guild_members_tool(guild_id: str) -> Dict[str, Any]:
         return await get_guild_members(guild_id, context)
 
     async def get_current_guild_id_tool() -> str:

@@ -146,6 +146,15 @@ class ChatJob(Job):
         conversation = self.services.conversation_manager.get_conversation(self.thread_id)
         start_count = len(conversation.history) if conversation else 0
 
+        # Emergency cleanup if context is already too large (preventing model failure)
+        if conversation:
+            context_messages = conversation.get_context_messages()
+            if len(context_messages) > 30:
+                await self.services.logging_service.warning(
+                    f"Context size ({len(context_messages)}) is too large before processing. Running emergency cleanup."
+                )
+                await self._run_periodic_context_job(conversation)
+
         # Set request context
         # Use the explicitly passed guild_id if available, otherwise try to fetch it
         guild_id = self.guild_id
