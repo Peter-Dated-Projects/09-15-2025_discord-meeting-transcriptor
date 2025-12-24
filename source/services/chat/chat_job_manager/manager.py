@@ -156,11 +156,9 @@ class ChatJob(Job):
                     guild_id = str(thread.guild.id)
             except Exception:
                 pass
-        
+
         set_request_context(
-            guild_id=guild_id,
-            thread_id=self.thread_id,
-            user_id=self.initial_user_id
+            guild_id=guild_id, thread_id=self.thread_id, user_id=self.initial_user_id
         )
 
         try:

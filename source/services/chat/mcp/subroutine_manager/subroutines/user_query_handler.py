@@ -109,7 +109,7 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
                 args = fn.get("arguments")
                 if args is None:
                     args = {}
-                
+
                 return {
                     "name": fn.get("name"),
                     "args": args,
@@ -127,7 +127,7 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
                 args = getattr(fn, "arguments", None) or (
                     fn.get("arguments") if isinstance(fn, dict) else None
                 )
-                
+
                 if args is None:
                     args = {}
 
