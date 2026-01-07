@@ -113,9 +113,7 @@ class GPUResourceManager(Manager):
         self._total_summarization_locks = 0
         self._total_chatbot_locks = 0
         self._total_vector_reranker_locks = 0
-        self._total_misc_chatocks = 0
-        self._total_chatbot_locks = 0
-        self._total_vector_reranker_locks = 0
+        self._total_misc_chat_locks = 0
 
     # -------------------------------------------------------------- #
     # Manager Lifecycle

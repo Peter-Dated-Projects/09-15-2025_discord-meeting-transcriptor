@@ -146,9 +146,9 @@ class AsyncLoggingService(Manager):
         # Get the root logger
         root_logger = logging.getLogger()
 
-        # Remove existing file handlers to avoid duplicate writes
-        handlers_to_remove = [h for h in root_logger.handlers if isinstance(h, logging.FileHandler)]
-        for handler in handlers_to_remove:
+        # Remove existing handlers to avoid duplicate writes/output
+        # We handle both file writing and console output
+        for handler in list(root_logger.handlers):
             root_logger.removeHandler(handler)
             handler.close()
 
