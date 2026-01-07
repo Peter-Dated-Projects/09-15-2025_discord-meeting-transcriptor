@@ -226,7 +226,7 @@ def construct_services_manager(
         from source.services.chat.chat_job_manager.manager import ChatJobManagerService
         from source.services.misc.instagram_reels.manager import InstagramReelsManager
 
-        chat_job_manager = ChatJobManager(context=context)
+        chat_job_manager = ChatJobManagerService(context=context)
         instagram_reels_manager = InstagramReelsManager(context=context)
 
         # -------------------------------------------------------------- #

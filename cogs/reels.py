@@ -5,35 +5,43 @@ from source.context import Context
 
 logger = logging.getLogger(__name__)
 
+
 class Reels(commands.Cog):
     def __init__(self, context: Context):
         self.context = context
         self.bot = context.bot
         self.services = context.services_manager
-    
-    @discord.slash_command(name="monitor-reels", description="Set the current channel for Instagram Reels monitoring")
+
+    @discord.slash_command(
+        name="monitor-reels", description="Set the current channel for Instagram Reels monitoring"
+    )
     @commands.has_permissions(administrator=True)
     async def monitor_reels(self, ctx: discord.ApplicationContext):
         channel_id = ctx.channel.id
-        
+
         # Check if already monitored
         if self.services.instagram_reels_manager.is_channel_monitored(channel_id):
-             await ctx.respond("This channel is already being monitored for Instagram Reels.", ephemeral=True)
-             return
+            await ctx.respond(
+                "This channel is already being monitored for Instagram Reels.", ephemeral=True
+            )
+            return
 
         # TODO: Check if channel is used for other purposes (e.g. Chatbot)
-        
+
         self.services.instagram_reels_manager.add_channel(channel_id)
-        self.services.instagram_reels_manager.save_config() # Save explicitly to be safe
-        
-        await ctx.respond(f"✅ Channel {ctx.channel.mention} is now being monitored for Instagram Reels.", ephemeral=False)
+        self.services.instagram_reels_manager.save_config()  # Save explicitly to be safe
+
+        await ctx.respond(
+            f"✅ Channel {ctx.channel.mention} is now being monitored for Instagram Reels.",
+            ephemeral=False,
+        )
 
     # Message handler logic
     async def filter_message(self, message: discord.Message) -> bool:
         # Check if channel is monitored
         if not self.services.instagram_reels_manager.is_channel_monitored(message.channel.id):
             return False
-        
+
         if message.author.bot:
             return False
 
@@ -41,59 +49,66 @@ class Reels(commands.Cog):
         # Basic check, detailed check later
         if "instagram.com" in message.content:
             return True
-             
+
         return False
 
     async def handle_message(self, message: discord.Message):
-         # "run ministral-3:3b with the verification cool to check if the message has an instragram reel URL"
-         import re
-         import json
-         
-         content = message.content
-         # Basic check to avoid processing every message
-         # Regex for Instagram Reel URL
-         url_match = re.search(r'(https?://www\.instagram\.com/(?:reel|p)/[\w-]+)', content)
-         
-         if not url_match:
-             return
+        # "run ministral-3:3b with the verification cool to check if the message has an instragram reel URL"
+        import re
+        import json
 
-         url = url_match.group(1)
-         logger.info(f"Reel detected: {url}")
-         
-         status_msg = await message.reply("🔄 Processing Instagram Reel...", mention_author=False)
+        content = message.content
+        # Basic check to avoid processing every message
+        # Regex for Instagram Reel URL
+        url_match = re.search(r"(https?://www\.instagram\.com/(?:reel|p)/[\w-]+)", content)
 
-         try:
-             # Run full analysis via manager
-             data = await self.services.instagram_reels_manager.run_analysis_workflow(url, job_id_suffix=str(message.id))
-             
-             # Create Embed
-             embed = discord.Embed(
-                 title="Reel Summary", 
-                 description=data.get("topic", "No Topic Processed"), 
-                 color=discord.Color.green(),
-                 url=url
-             )
-             
-             embed.add_field(name="Category", value=data.get("category", "N/A"), inline=True)
-             
-             if data.get("is_promotional"):
-                 embed.add_field(name="Type", value="⚠️ Promotional", inline=True)
-             
-             summary_points = data.get("summary_points", [])
-             if summary_points:
-                embed.add_field(name="Key Takeaways", value="\n".join([f"• {p}" for p in summary_points]), inline=False)
-             
-             entities = data.get("entities", {})
-             if entities.get("products"):
-                 embed.add_field(name="Products", value=", ".join(entities["products"]), inline=False)
-             
-             await status_msg.edit(content="", embed=embed)
+        if not url_match:
+            return
 
-         except Exception as e:
+        url = url_match.group(1)
+        logger.info(f"Reel detected: {url}")
 
-         except Exception as e:
-             logger.error(f"Error processing reel: {e}", exc_info=True)
-             await status_msg.edit(content=f"❌ Error processing reel: {str(e)}")
+        status_msg = await message.reply("🔄 Processing Instagram Reel...", mention_author=False)
+
+        try:
+            # Run full analysis via manager
+            data = await self.services.instagram_reels_manager.run_analysis_workflow(
+                url, job_id_suffix=str(message.id)
+            )
+
+            # Create Embed
+            embed = discord.Embed(
+                title="Reel Summary",
+                description=data.get("topic", "No Topic Processed"),
+                color=discord.Color.green(),
+                url=url,
+            )
+
+            embed.add_field(name="Category", value=data.get("category", "N/A"), inline=True)
+
+            if data.get("is_promotional"):
+                embed.add_field(name="Type", value="⚠️ Promotional", inline=True)
+
+            summary_points = data.get("summary_points", [])
+            if summary_points:
+                embed.add_field(
+                    name="Key Takeaways",
+                    value="\n".join([f"• {p}" for p in summary_points]),
+                    inline=False,
+                )
+
+            entities = data.get("entities", {})
+            if entities.get("products"):
+                embed.add_field(
+                    name="Products", value=", ".join(entities["products"]), inline=False
+                )
+
+            await status_msg.edit(content="", embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error processing reel: {e}", exc_info=True)
+            await status_msg.edit(content=f"❌ Error processing reel: {str(e)}")
+
 
 def setup(context: Context):
     cog = Reels(context)
