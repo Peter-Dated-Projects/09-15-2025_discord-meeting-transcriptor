@@ -146,6 +146,7 @@ async def load_cogs(context: Context):
     from cogs.general import setup as setup_general
     from cogs.voice import setup as setup_voice
     from cogs.utils import setup as setup_utils
+    from cogs.reels import setup as setup_reels
 
     setup_general(context)
     await context.services_manager.logging_service.info("✓ Loaded cogs.general")
@@ -155,6 +156,14 @@ async def load_cogs(context: Context):
 
     setup_utils(context)
     await context.services_manager.logging_service.info("✓ Loaded cogs.utils")
+
+    reels_cog = setup_reels(context)
+    await context.services_manager.logging_service.info("✓ Loaded cogs.reels")
+    message_event_handler.register_handler(
+        filter_func=reels_cog.filter_message,
+        handler_func=reels_cog.handle_message,
+        pass_through=True,
+    )
 
     # Load chat cog and register its message handler
     chat_cog = setup_chat(context)

@@ -49,6 +49,7 @@ class GPUJobType(enum.Enum):
     SUMMARIZATION = "summarization"
     CHATBOT = "chatbot"
     VECTOR_RERANKER = "vector_reranker"
+    MISC_CHAT_JOB = "misc_chat_job"
 
 
 class GPUResourceManager(Manager):
@@ -80,12 +81,14 @@ class GPUResourceManager(Manager):
         self._summarization_queue: asyncio.Queue[asyncio.Event] = asyncio.Queue()
         self._chatbot_queue: asyncio.Queue[asyncio.Event] = asyncio.Queue()
         self._vector_reranker_queue: asyncio.Queue[asyncio.Event] = asyncio.Queue()
+        self._misc_chat_queue: asyncio.Queue[asyncio.Event] = asyncio.Queue()
 
         # Scheduler state
         self._consecutive_transcription_count = 0
         self._consecutive_text_embedding_count = 0
         self._consecutive_summarization_count = 0
         self._consecutive_vector_reranker_count = 0
+        self._consecutive_misc_chat_count = 0
         # Note: chatbot has no consecutive limit (can run infinite in a row)
         self._last_job_type: GPUJobType | None = None
         self._scheduler_running = False
@@ -94,20 +97,23 @@ class GPUResourceManager(Manager):
         # Scheduling parameters
         self.MAX_CONSECUTIVE_TRANSCRIPTION = 2
         self.MAX_CONSECUTIVE_TEXT_EMBEDDING = 2  # Updated to 2
-        self.MAX_CONSECUTIVE_SUMMARIZATION = 1
-        self.MAX_CONSECUTIVE_VECTOR_RERANKER = 2  # New: max 2 in a row
+        self.MAX_CONSECUTIVE_MISC_CHAT = 1  # Low priority
         # Chatbot has no limit (infinite)
 
-        self.TRANSCRIPTION_PROBABILITY = 0.20  # 20% chance
-        self.TEXT_EMBEDDING_PROBABILITY = 0.20  # 20% chance
-        self.SUMMARIZATION_PROBABILITY = 0.20  # 20% chance
-        self.CHATBOT_PROBABILITY = 0.20  # 20% chance
-        self.VECTOR_RERANKER_PROBABILITY = 0.20  # 20% chance
+        self.TRANSCRIPTION_PROBABILITY = 0.20
+        self.TEXT_EMBEDDING_PROBABILITY = 0.20
+        self.SUMMARIZATION_PROBABILITY = 0.15
+        self.CHATBOT_PROBABILITY = 0.20
+        self.VECTOR_RERANKER_PROBABILITY = 0.15
+        self.MISC_CHAT_PROBABILITY = 0.10
 
         # Statistics
         self._total_transcription_locks = 0
         self._total_text_embedding_locks = 0
         self._total_summarization_locks = 0
+        self._total_chatbot_locks = 0
+        self._total_vector_reranker_locks = 0
+        self._total_misc_chatocks = 0
         self._total_chatbot_locks = 0
         self._total_vector_reranker_locks = 0
 
@@ -156,7 +162,7 @@ class GPUResourceManager(Manager):
                 job_type = GPUJobType(job_type.lower())
             except ValueError:
                 raise ValueError(
-                    f"Invalid job_type: {job_type}. Must be one of: transcription, text_embedding, summarization, chatbot, vector_reranker"
+                    f"Invalid job_type: {job_type}. Must be one of: transcription, text_embedding, summarization, chatbot, vector_reranker, misc_chat_job"
                 )
 
         return _GPULockContext(self, job_type, job_id, metadata or {})
@@ -184,6 +190,8 @@ class GPUResourceManager(Manager):
             await self._summarization_queue.put(ready_event)
         elif job_type == GPUJobType.VECTOR_RERANKER:
             await self._vector_reranker_queue.put(ready_event)
+        elif job_type == GPUJobType.MISC_CHAT_JOB:
+            await self._misc_chat_queue.put(ready_event)
 
         if self.services:
             await self.services.logging_service.info(
@@ -207,6 +215,8 @@ class GPUResourceManager(Manager):
             self._total_chatbot_locks += 1
         elif job_type == GPUJobType.VECTOR_RERANKER:
             self._total_vector_reranker_locks += 1
+        elif job_type == GPUJobType.MISC_CHAT_JOB:
+            self._total_misc_chat_locks += 1
 
         if self.services:
             await self.services.logging_service.info(
@@ -241,6 +251,7 @@ class GPUResourceManager(Manager):
             self._consecutive_text_embedding_count = 0
             self._consecutive_summarization_count = 0
             self._consecutive_vector_reranker_count = 0
+            self._consecutive_misc_chat_count = 0
 
         elif job_type == GPUJobType.TEXT_EMBEDDING:
             if self._last_job_type == GPUJobType.TEXT_EMBEDDING:
@@ -250,6 +261,7 @@ class GPUResourceManager(Manager):
             self._consecutive_transcription_count = 0
             self._consecutive_summarization_count = 0
             self._consecutive_vector_reranker_count = 0
+            self._consecutive_misc_chat_count = 0
 
         elif job_type == GPUJobType.SUMMARIZATION:
             if self._last_job_type == GPUJobType.SUMMARIZATION:
@@ -259,6 +271,7 @@ class GPUResourceManager(Manager):
             self._consecutive_transcription_count = 0
             self._consecutive_text_embedding_count = 0
             self._consecutive_vector_reranker_count = 0
+            self._consecutive_misc_chat_count = 0
 
         elif job_type == GPUJobType.VECTOR_RERANKER:
             if self._last_job_type == GPUJobType.VECTOR_RERANKER:
@@ -268,6 +281,17 @@ class GPUResourceManager(Manager):
             self._consecutive_transcription_count = 0
             self._consecutive_text_embedding_count = 0
             self._consecutive_summarization_count = 0
+            self._consecutive_misc_chat_count = 0
+
+        elif job_type == GPUJobType.MISC_CHAT_JOB:
+            if self._last_job_type == GPUJobType.MISC_CHAT_JOB:
+                self._consecutive_misc_chat_count += 1
+            else:
+                self._consecutive_misc_chat_count = 1
+            self._consecutive_transcription_count = 0
+            self._consecutive_text_embedding_count = 0
+            self._consecutive_summarization_count = 0
+            self._consecutive_vector_reranker_count = 0
 
         elif job_type == GPUJobType.CHATBOT:
             # Chatbot doesn't affect consecutive counts and doesn't reset them
@@ -332,7 +356,46 @@ class GPUResourceManager(Manager):
                 # If no chatbot requests, use round-robin for transcription/embedding/summarization/reranker
                 next_job_type = self._select_next_job_type()
 
-                if next_job_type == GPUJobType.TRANSCRIPTION:
+                # Try to schedule the selected job type first
+                scheduled = False
+
+                if (
+                    next_job_type == GPUJobType.TRANSCRIPTION
+                    and not self._transcription_queue.empty()
+                ):
+                    ready_event = await self._transcription_queue.get()
+                    ready_event.set()
+                    scheduled = True
+                elif (
+                    next_job_type == GPUJobType.TEXT_EMBEDDING
+                    and not self._text_embedding_queue.empty()
+                ):
+                    ready_event = await self._text_embedding_queue.get()
+                    ready_event.set()
+                    scheduled = True
+                elif (
+                    next_job_type == GPUJobType.SUMMARIZATION
+                    and not self._summarization_queue.empty()
+                ):
+                    ready_event = await self._summarization_queue.get()
+                    ready_event.set()
+                    scheduled = True
+                elif (
+                    next_job_type == GPUJobType.VECTOR_RERANKER
+                    and not self._vector_reranker_queue.empty()
+                ):
+                    ready_event = await self._vector_reranker_queue.get()
+                    ready_event.set()
+                    scheduled = True
+                elif (
+                    next_job_type == GPUJobType.MISC_CHAT_JOB and not self._misc_chat_queue.empty()
+                ):
+                    ready_event = await self._misc_chat_queue.get()
+                    ready_event.set()
+                    scheduled = True
+
+                if not scheduled:
+                    # If preferred type is empty, look for ANY work
                     if not self._transcription_queue.empty():
                         ready_event = await self._transcription_queue.get()
                         ready_event.set()
@@ -345,47 +408,8 @@ class GPUResourceManager(Manager):
                     elif not self._vector_reranker_queue.empty():
                         ready_event = await self._vector_reranker_queue.get()
                         ready_event.set()
-
-                elif next_job_type == GPUJobType.TEXT_EMBEDDING:
-                    if not self._text_embedding_queue.empty():
-                        ready_event = await self._text_embedding_queue.get()
-                        ready_event.set()
-                    elif not self._transcription_queue.empty():
-                        ready_event = await self._transcription_queue.get()
-                        ready_event.set()
-                    elif not self._summarization_queue.empty():
-                        ready_event = await self._summarization_queue.get()
-                        ready_event.set()
-                    elif not self._vector_reranker_queue.empty():
-                        ready_event = await self._vector_reranker_queue.get()
-                        ready_event.set()
-
-                elif next_job_type == GPUJobType.SUMMARIZATION:
-                    if not self._summarization_queue.empty():
-                        ready_event = await self._summarization_queue.get()
-                        ready_event.set()
-                    elif not self._text_embedding_queue.empty():
-                        ready_event = await self._text_embedding_queue.get()
-                        ready_event.set()
-                    elif not self._transcription_queue.empty():
-                        ready_event = await self._transcription_queue.get()
-                        ready_event.set()
-                    elif not self._vector_reranker_queue.empty():
-                        ready_event = await self._vector_reranker_queue.get()
-                        ready_event.set()
-
-                elif next_job_type == GPUJobType.VECTOR_RERANKER:
-                    if not self._vector_reranker_queue.empty():
-                        ready_event = await self._vector_reranker_queue.get()
-                        ready_event.set()
-                    elif not self._text_embedding_queue.empty():
-                        ready_event = await self._text_embedding_queue.get()
-                        ready_event.set()
-                    elif not self._transcription_queue.empty():
-                        ready_event = await self._transcription_queue.get()
-                        ready_event.set()
-                    elif not self._summarization_queue.empty():
-                        ready_event = await self._summarization_queue.get()
+                    elif not self._misc_chat_queue.empty():
+                        ready_event = await self._misc_chat_queue.get()
                         ready_event.set()
 
             except asyncio.CancelledError:
@@ -407,71 +431,80 @@ class GPUResourceManager(Manager):
         - If we've done MAX_CONSECUTIVE_TEXT_EMBEDDING in a row, force switch away from text embedding
         - If we've done MAX_CONSECUTIVE_SUMMARIZATION in a row, force switch away from summarization
         - If we've done MAX_CONSECUTIVE_VECTOR_RERANKER in a row, force switch away from vector reranker
-        - Otherwise, use probability-based selection (20% each for all job types)
+        - If we've done MAX_CONSECUTIVE_MISC_CHAT in a row, force switch away from misc chat
+        - Otherwise, use probability-based selection
         """
+        # Helper for random choice among remaining types (5 types remaining out of 6)
+        # We can just pick random.choice from the list of OTHER types
+        candidates = []
+
         # Check if we need to force a switch due to consecutive limits
         if (
             self._last_job_type == GPUJobType.TRANSCRIPTION
             and self._consecutive_transcription_count >= self.MAX_CONSECUTIVE_TRANSCRIPTION
         ):
-            # Switch away from transcription - equal probability among remaining types
-            rand_val = random.random()
-            if rand_val < 0.25:
-                return GPUJobType.TEXT_EMBEDDING
-            elif rand_val < 0.5:
-                return GPUJobType.SUMMARIZATION
-            elif rand_val < 0.75:
-                return GPUJobType.VECTOR_RERANKER
-            else:
-                return GPUJobType.CHATBOT
+            candidates = [
+                GPUJobType.TEXT_EMBEDDING,
+                GPUJobType.SUMMARIZATION,
+                GPUJobType.VECTOR_RERANKER,
+                GPUJobType.MISC_CHAT_JOB,
+                GPUJobType.CHATBOT,
+            ]
+            return random.choice(candidates)
 
         if (
             self._last_job_type == GPUJobType.TEXT_EMBEDDING
             and self._consecutive_text_embedding_count >= self.MAX_CONSECUTIVE_TEXT_EMBEDDING
         ):
-            # Switch away from text embedding - equal probability among remaining types
-            rand_val = random.random()
-            if rand_val < 0.25:
-                return GPUJobType.TRANSCRIPTION
-            elif rand_val < 0.5:
-                return GPUJobType.SUMMARIZATION
-            elif rand_val < 0.75:
-                return GPUJobType.VECTOR_RERANKER
-            else:
-                return GPUJobType.CHATBOT
+            candidates = [
+                GPUJobType.TRANSCRIPTION,
+                GPUJobType.SUMMARIZATION,
+                GPUJobType.VECTOR_RERANKER,
+                GPUJobType.MISC_CHAT_JOB,
+                GPUJobType.CHATBOT,
+            ]
+            return random.choice(candidates)
 
         if (
             self._last_job_type == GPUJobType.SUMMARIZATION
             and self._consecutive_summarization_count >= self.MAX_CONSECUTIVE_SUMMARIZATION
         ):
-            # Switch away from summarization - equal probability among remaining types
-            rand_val = random.random()
-            if rand_val < 0.25:
-                return GPUJobType.TRANSCRIPTION
-            elif rand_val < 0.5:
-                return GPUJobType.TEXT_EMBEDDING
-            elif rand_val < 0.75:
-                return GPUJobType.VECTOR_RERANKER
-            else:
-                return GPUJobType.CHATBOT
+            candidates = [
+                GPUJobType.TRANSCRIPTION,
+                GPUJobType.TEXT_EMBEDDING,
+                GPUJobType.VECTOR_RERANKER,
+                GPUJobType.MISC_CHAT_JOB,
+                GPUJobType.CHATBOT,
+            ]
+            return random.choice(candidates)
 
         if (
             self._last_job_type == GPUJobType.VECTOR_RERANKER
             and self._consecutive_vector_reranker_count >= self.MAX_CONSECUTIVE_VECTOR_RERANKER
         ):
-            # Switch away from vector reranker - equal probability among remaining types
-            rand_val = random.random()
-            if rand_val < 0.25:
-                return GPUJobType.TRANSCRIPTION
-            elif rand_val < 0.5:
-                return GPUJobType.TEXT_EMBEDDING
-            elif rand_val < 0.75:
-                return GPUJobType.SUMMARIZATION
-            else:
-                return GPUJobType.CHATBOT
+            candidates = [
+                GPUJobType.TRANSCRIPTION,
+                GPUJobType.TEXT_EMBEDDING,
+                GPUJobType.SUMMARIZATION,
+                GPUJobType.MISC_CHAT_JOB,
+                GPUJobType.CHATBOT,
+            ]
+            return random.choice(candidates)
+
+        if (
+            self._last_job_type == GPUJobType.MISC_CHAT_JOB
+            and self._consecutive_misc_chat_count >= self.MAX_CONSECUTIVE_MISC_CHAT
+        ):
+            candidates = [
+                GPUJobType.TRANSCRIPTION,
+                GPUJobType.TEXT_EMBEDDING,
+                GPUJobType.SUMMARIZATION,
+                GPUJobType.VECTOR_RERANKER,
+                GPUJobType.CHATBOT,
+            ]
+            return random.choice(candidates)
 
         # Use probability-based selection
-        # Total probability allocated: 20% * 5 = 100%
         rand_val = random.random()
 
         if rand_val < self.TRANSCRIPTION_PROBABILITY:
@@ -493,6 +526,15 @@ class GPUResourceManager(Manager):
             + self.VECTOR_RERANKER_PROBABILITY
         ):
             return GPUJobType.VECTOR_RERANKER
+        elif (
+            rand_val
+            < self.TRANSCRIPTION_PROBABILITY
+            + self.TEXT_EMBEDDING_PROBABILITY
+            + self.SUMMARIZATION_PROBABILITY
+            + self.VECTOR_RERANKER_PROBABILITY
+            + self.MISC_CHAT_PROBABILITY
+        ):
+            return GPUJobType.MISC_CHAT_JOB
         else:
             return GPUJobType.CHATBOT
 
@@ -516,6 +558,7 @@ class GPUResourceManager(Manager):
                 "summarization": self._summarization_queue.qsize(),
                 "chatbot": self._chatbot_queue.qsize(),
                 "vector_reranker": self._vector_reranker_queue.qsize(),
+                "misc_chat": self._misc_chat_queue.qsize(),
             },
             "stats": {
                 "total_transcription_locks": self._total_transcription_locks,
@@ -523,10 +566,12 @@ class GPUResourceManager(Manager):
                 "total_summarization_locks": self._total_summarization_locks,
                 "total_chatbot_locks": self._total_chatbot_locks,
                 "total_vector_reranker_locks": self._total_vector_reranker_locks,
+                "total_misc_chat_locks": self._total_misc_chat_locks,
                 "consecutive_transcription": self._consecutive_transcription_count,
                 "consecutive_text_embedding": self._consecutive_text_embedding_count,
                 "consecutive_summarization": self._consecutive_summarization_count,
                 "consecutive_vector_reranker": self._consecutive_vector_reranker_count,
+                "consecutive_misc_chat": self._consecutive_misc_chat_count,
                 "last_job_type": (self._last_job_type.value if self._last_job_type else None),
             },
         }
