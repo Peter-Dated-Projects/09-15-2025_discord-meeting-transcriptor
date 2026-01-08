@@ -90,7 +90,7 @@ class BaseSubroutine:
                 f"The 'on_step_end' callback function must accept one argument (step_info)."
             )
 
-    def add_node(self, name: str, node_callable: Callable[[SubroutineState], Dict]):
+    def add_node(self, name: str, node_callable: Callable[[Any], Dict]):
         """
         Adds a node to the graph, wrapping it to support callbacks and async execution.
 
@@ -99,7 +99,7 @@ class BaseSubroutine:
             node_callable (Callable): The function for this node.
         """
 
-        async def wrapper(state: SubroutineState) -> Dict:
+        async def wrapper(state: Any) -> Dict:
             # 1. Execute the actual node logic
             if inspect.iscoroutinefunction(node_callable):
                 result = await node_callable(state)

@@ -149,10 +149,17 @@ def inference():
                 502,
             )
 
+        # Handle different response formats
+        if response_format in ["text", "vtt", "srt"]:
+            # For text-based formats, return the content directly
+            logger.info(f"Received {response_format} response from whisper server")
+            return response.text, 200
+
+        # For JSON formats (json, verbose_json), parse and sanitaze
         # Get raw response from whisper-server
         try:
             raw = response.json()
-        except ValueError as e:
+        except (ValueError, requests.exceptions.JSONDecodeError) as e:
             logger.error(
                 f"Failed to decode JSON from whisper server. Response content: {response.text!r}"
             )

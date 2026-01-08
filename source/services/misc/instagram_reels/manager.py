@@ -183,46 +183,33 @@ class InstagramReelsManager:
                 audio_path=audio_path,
                 word_timestamps=False,
                 temperature="0.0",
-                response_format="text",
-            )
-            transcript_text = (
-                transcript_response
-                if isinstance(transcript_response, str)
-                else str(transcript_response)
+                response_format="json",
             )
 
-        # 3. Extraction
-        prompt = f"""You are a data extraction API. Output valid JSON only. No markdown formatting.
-Analyze the following Instagram Reel description and transcript.
-Extract these fields:
+            # Extract text from JSON response
+            if isinstance(transcript_response, dict):
+                transcript_text = transcript_response.get("text", "")
+            else:
+                transcript_text = str(transcript_response)
 
-{{
-  "topic": "String (Short topic summary)",
-  "category": "String (e.g., 'Educational', 'Comedy', 'News')",
-  "entities": {{
-    "products": ["List", "of", "items"],
-    "locations": ["List", "of", "places"],
-    "monetary_values": ["List", "of", "prices"]
-  }},
-  "summary_points": ["List", "of", "key", "takeaways"],
-  "is_promotional": Boolean (True if it's an ad)
-}}
-
-Input Description: {description}
-Input Transcript: {transcript_text}"""
-
+        # 3. Extraction using LangGraph Subroutine
         # Acquire GPU lock for LLM
         async with self.services.gpu_resource_manager.acquire_lock(
             "misc_chat_job", job_id=f"reels-llm-{job_id_suffix}"
         ):
-            llm_response = await self.services.ollama_request_manager.query(
-                model="ministral-3:3b",
-                messages=[{"role": "user", "content": prompt}],
-                format="json",
+            from source.services.misc.instagram_reels.subroutine import (
+                InstagramReelsAnalysisSubroutine,
             )
 
-        response_content = llm_response.get("message", {}).get("content", "{}")
-        return json.loads(response_content)
+            subroutine = InstagramReelsAnalysisSubroutine(
+                ollama_request_manager=self.services.ollama_request_manager, model="ministral-3:8b"
+            )
+
+            result = await subroutine.ainvoke(
+                {"description": description, "transcript": transcript_text}
+            )
+
+            return result
 
     async def shutdown(self):
         self.save_config()
