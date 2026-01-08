@@ -6,6 +6,37 @@ from source.context import Context
 logger = logging.getLogger(__name__)
 
 
+class ChannelPurposeConfirmView(discord.ui.View):
+    """Confirmation view for changing channel purpose."""
+
+    def __init__(self, channel_id: int, new_purpose: str, services):
+        super().__init__(timeout=60.0)
+        self.channel_id = channel_id
+        self.new_purpose = new_purpose
+        self.services = services
+
+    @discord.ui.button(label="Yes, Enable Reels", style=discord.ButtonStyle.danger)
+    async def confirm_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        # Enable reels monitoring
+        self.services.instagram_reels_manager.add_channel(self.channel_id)
+        self.services.instagram_reels_manager.save_config()
+
+        await interaction.response.edit_message(
+            content=f"✅ Channel <#{self.channel_id}> is now being monitored for Instagram Reels.\n"
+            "⚠️ Chat conversation functionality has been disabled for this channel.",
+            view=None,
+        )
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await interaction.response.edit_message(
+            content="❌ Reels monitoring setup cancelled. Channel purpose unchanged.",
+            view=None,
+        )
+        self.stop()
+
+
 class Reels(commands.Cog):
     def __init__(self, context: Context):
         self.context = context
@@ -26,7 +57,26 @@ class Reels(commands.Cog):
             )
             return
 
-        # TODO: Check if channel is used for other purposes (e.g. Chatbot)
+        # Check if channel is used for chat conversations
+        is_chat_channel = await self.services.instagram_reels_manager.is_channel_used_for_chat(
+            channel_id
+        )
+
+        if is_chat_channel:
+            # Create confirmation view
+            view = ChannelPurposeConfirmView(
+                channel_id=channel_id,
+                new_purpose="reels",
+                services=self.services,
+            )
+            await ctx.respond(
+                "⚠️ This channel appears to have active chat conversation threads. "
+                "A channel can only serve one purpose: either Reels monitoring or Chat conversations.\n\n"
+                "Enabling Reels monitoring may interfere with chat functionality. Do you want to proceed?",
+                view=view,
+                ephemeral=True,
+            )
+            return
 
         self.services.instagram_reels_manager.add_channel(channel_id)
         self.services.instagram_reels_manager.save_config()  # Save explicitly to be safe

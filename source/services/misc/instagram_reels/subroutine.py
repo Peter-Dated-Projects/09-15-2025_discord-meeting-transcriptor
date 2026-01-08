@@ -134,7 +134,7 @@ class InstagramReelsAnalysisSubroutine(BaseSubroutine):
         ollama_messages = []
 
         # Add system prompt
-        ollama_messages.append({"role": "system", "content": SYSTEM_PROMPT})
+        ollama_messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
 
         for msg in messages:
             role = "user"
