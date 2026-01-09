@@ -126,6 +126,9 @@ class Reels(commands.Cog):
                 url, job_id_suffix=str(message.id)
             )
 
+            # Log Generated Data from Reel Analysis
+            logger.info(f"Reel analysis result: {json.dumps(data, indent=2)}")
+
             # Extract the summary from the LLM's tool call response
             summary = data.get("summary", "No summary generated")
 

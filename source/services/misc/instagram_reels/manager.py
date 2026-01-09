@@ -220,6 +220,9 @@ class InstagramReelsManager:
             else:
                 transcript_text = str(transcript_response)
 
+        # log transcript data
+        logger.info(f"Transcript for reel {url}: {transcript_text}")
+
         # 3. Extraction using LangGraph Subroutine
         # Acquire GPU lock for LLM
         async with self.services.gpu_resource_manager.acquire_lock(

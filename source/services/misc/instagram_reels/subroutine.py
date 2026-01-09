@@ -94,6 +94,7 @@ class InstagramReelsAnalysisSubroutine(BaseSubroutine):
         self.add_node("entry", self._entry_node)
         self.add_node("agent", self._agent_node)
         self.add_node("tool_node", self._tool_node)
+        self.add_node("extract_results", self._extract_results_node)
 
         self.set_entry_point("entry")
 
@@ -104,11 +105,12 @@ class InstagramReelsAnalysisSubroutine(BaseSubroutine):
             self._router,
             {
                 "continue": "tool_node",
-                "end": END,
+                "extract": "extract_results",
             },
         )
 
         self.add_edge("tool_node", "agent")
+        self.add_edge("extract_results", END)
 
     async def _entry_node(self, state: ReelsSubroutineState) -> Dict[str, Any]:
         """Prepare the initial prompt."""
@@ -184,7 +186,7 @@ class InstagramReelsAnalysisSubroutine(BaseSubroutine):
 
         return {"messages": [ai_message]}
 
-    def _router(self, state: ReelsSubroutineState) -> Literal["continue", "end"]:
+    def _router(self, state: ReelsSubroutineState) -> Literal["continue", "extract"]:
         """Decide next step."""
         messages = state["messages"]
         last_message = messages[-1]
@@ -193,27 +195,30 @@ class InstagramReelsAnalysisSubroutine(BaseSubroutine):
             # Check if it's the finishing tool
             for tool_call in last_message.tool_calls:
                 if tool_call["name"] == "return_summary":
-                    # We are done!
-                    # Parse the result and set it as output
+                    return "extract"
+
+            return "continue"
+
+        return "continue"
+
+    async def _extract_results_node(self, state: ReelsSubroutineState) -> Dict[str, Any]:
+        """Extract the final results from the tool call and persist to outputs."""
+        messages = state["messages"]
+        last_message = messages[-1]
+
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+            for tool_call in last_message.tool_calls:
+                if tool_call["name"] == "return_summary":
                     try:
                         args = tool_call["args"]
                         if isinstance(args, str):
                             args = json.loads(args)
 
-                        # Set the final output
-                        state["outputs"] = args
-                        return "end"
+                        return {"outputs": args}
                     except Exception:
-                        # If args are bad, we might want to loop back with an error?
-                        # For now, let's treat it as a tool execution that will fail in the tool node if we were to execute it.
-                        # But wait, if we return "end", the graph stops.
-                        # If parsing fails, we should probably go to tool_node to report error.
-                        return "continue"
+                        return {"outputs": {}}
 
-            # If it's another tool (not expected here), or if we want to handle the return_summary logic as a "tool execution" that returns the final result
-            return "continue"
-
-        return "continue"
+        return {"outputs": {}}
 
     async def _tool_node(self, state: ReelsSubroutineState) -> Dict[str, Any]:
         """Execute tools (or handle missing/bad tools)."""
@@ -270,9 +275,12 @@ class InstagramReelsAnalysisSubroutine(BaseSubroutine):
             real_initial_state = {
                 "inputs": initial_state,
                 "messages": initial_state.get("messages", []),
+                "outputs": {},  # Initialize outputs
             }
         else:
             real_initial_state = initial_state
+            if "outputs" not in real_initial_state:
+                real_initial_state["outputs"] = {}  # Initialize outputs
 
         final_state = await self._compiled_graph.ainvoke(real_initial_state, config=config)
 
