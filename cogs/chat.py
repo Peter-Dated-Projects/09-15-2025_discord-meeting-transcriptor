@@ -425,6 +425,104 @@ class Chat(commands.Cog):
             )
             return None
 
+    # -------------------------------------------------------------- #
+    # Slash Commands
+    # -------------------------------------------------------------- #
+
+    @commands.slash_command(
+        name="stop-monitoring-channel",
+        description="Stop the bot from monitoring this conversation thread",
+    )
+    async def stop_monitoring_channel(self, ctx: discord.ApplicationContext):
+        """Stop monitoring the current conversation thread.
+
+        The bot will no longer respond to messages in this thread unless
+        it is mentioned again. This is useful when the user is done with
+        the conversation and wants to end the interaction.
+        """
+        # Log command invocation
+        await self.services.logging_service.info(
+            f"User {ctx.author.id} ({ctx.author.name}) requested stop-monitoring-channel in channel {ctx.channel_id}"
+        )
+
+        # Defer response
+        await ctx.defer(ephemeral=True)
+
+        try:
+            # Check if we're in a thread
+            if not isinstance(ctx.channel, discord.Thread):
+                embed = discord.Embed(
+                    title="❌ Not in a Thread",
+                    description="This command can only be used in a conversation thread.",
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+                return
+
+            thread_id = str(ctx.channel.id)
+
+            # Check if this thread has a conversation (in memory or SQL)
+            has_conversation = self.services.conversation_manager.is_conversation_thread(
+                thread_id
+            ) or self.services.conversation_manager.is_known_thread(thread_id)
+
+            if not has_conversation:
+                embed = discord.Embed(
+                    title="❌ No Conversation Found",
+                    description="This thread does not have an active conversation to stop monitoring.",
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+                return
+
+            # Check if already stopped
+            if self.services.conversation_manager.is_monitoring_stopped(thread_id):
+                embed = discord.Embed(
+                    title="ℹ️ Already Stopped",
+                    description="Monitoring for this thread is already stopped. Mention the bot to resume.",
+                    color=discord.Color.blue(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+                return
+
+            # Stop monitoring
+            was_monitoring = self.services.conversation_manager.stop_monitoring(
+                thread_id, self.services.conversations_sql_manager
+            )
+
+            if was_monitoring:
+                await self.services.logging_service.info(
+                    f"Stopped monitoring thread {thread_id} via command by user {ctx.author.id}"
+                )
+
+                embed = discord.Embed(
+                    title="✅ Monitoring Stopped",
+                    description=(
+                        "The bot will no longer respond to messages in this thread.\n\n"
+                        "To resume the conversation, simply mention the bot."
+                    ),
+                    color=discord.Color.green(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+            else:
+                embed = discord.Embed(
+                    title="❌ Failed to Stop Monitoring",
+                    description="This thread was not being monitored or does not exist.",
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Error in stop-monitoring-channel command: {e}", exc_info=True
+            )
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"An error occurred while stopping monitoring: {str(e)}",
+                color=discord.Color.red(),
+            )
+            await ctx.followup.send(embed=embed, ephemeral=True)
+
 
 def setup(context: Context):
     """Setup function for the Chat cog.
