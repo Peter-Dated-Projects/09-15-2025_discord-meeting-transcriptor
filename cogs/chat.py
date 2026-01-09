@@ -69,7 +69,9 @@ class Chat(commands.Cog):
                 # Only resume if bot is mentioned
                 if bot_mentioned:
                     # Resume monitoring
-                    self.services.conversation_manager.resume_monitoring(thread_id)
+                    self.services.conversation_manager.resume_monitoring(
+                        thread_id, self.services.conversations_sql_manager
+                    )
                     await self.services.logging_service.info(
                         f"Resumed monitoring thread {thread_id} due to bot mention"
                     )

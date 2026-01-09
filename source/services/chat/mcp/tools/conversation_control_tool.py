@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from source.request_context import get_request_context
+from source.request_context import current_thread_id
 
 if TYPE_CHECKING:
     from source.context import Context
@@ -39,15 +39,13 @@ async def stop_conversation_monitoring(context: Context) -> dict:
     """
     try:
         # Get the request context to find out which thread we're in
-        request_ctx = get_request_context()
+        thread_id = current_thread_id.get()
 
-        if not request_ctx or not request_ctx.thread_id:
+        if not thread_id:
             return {
                 "success": False,
                 "error": "Could not determine the current thread. This tool must be called within a conversation thread.",
             }
-
-        thread_id = request_ctx.thread_id
 
         # Get the conversation manager from context
         if not context or not context.services_manager:
@@ -64,8 +62,11 @@ async def stop_conversation_monitoring(context: Context) -> dict:
                 "error": "Conversation manager not available",
             }
 
+        # Get SQL manager for persistence
+        conversations_sql_manager = context.services_manager.conversations_sql_manager
+
         # Stop monitoring this thread
-        was_monitoring = conversation_manager.stop_monitoring(thread_id)
+        was_monitoring = conversation_manager.stop_monitoring(thread_id, conversations_sql_manager)
 
         # Log the action
         if context.services_manager.logging_service:

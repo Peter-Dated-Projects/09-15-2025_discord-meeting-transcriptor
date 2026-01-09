@@ -466,6 +466,12 @@ async def main():
         )
         await logger.info(f"[OK] Loaded {thread_count} thread IDs into conversation cache.")
 
+        # Load stopped threads from database
+        stopped_count = await services_manager.conversation_manager.load_stopped_threads_from_db(
+            services_manager.conversations_sql_manager
+        )
+        await logger.info(f"[OK] Loaded {stopped_count} stopped threads into conversation manager.")
+
     # Set bot instance on context
     context.set_bot(bot)
 
