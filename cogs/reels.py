@@ -117,6 +117,7 @@ class Reels(commands.Cog):
                 await generate_and_store_reel_embeddings(
                     services=self.services,
                     summary_text=summary,
+                    description=data.get("description", ""),
                     reel_url=url,
                     guild_id=str(message.guild.id) if message.guild else "DM",
                     message_id=str(message.id),

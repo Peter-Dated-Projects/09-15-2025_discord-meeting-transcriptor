@@ -272,6 +272,7 @@ def partition_reel_summary(
 async def generate_and_store_reel_embeddings(
     services: "ServicesManager",
     summary_text: str,
+    description: str,
     reel_url: str,
     guild_id: str,
     message_id: str,
@@ -284,13 +285,14 @@ async def generate_and_store_reel_embeddings(
     Generate embeddings for reel summary and store in ChromaDB.
 
     This function:
-    1. Partitions the summary into 500-1000 token segments
+    1. Creates a single embedding for the entire reel (no segmentation)
     2. Generates embeddings with GPU lock
     3. Stores in guild-specific collection: reels_{guild_id}
 
     Args:
         services: ServicesManager instance for accessing resources
         summary_text: The reel summary to embed and store
+        description: The original reel description from Instagram
         reel_url: URL of the Instagram reel
         guild_id: Discord guild ID
         message_id: Discord message ID
@@ -309,30 +311,13 @@ async def generate_and_store_reel_embeddings(
         f"Starting reel embedding storage for URL: {reel_url} in guild: {guild_id}"
     )
 
-    # Step 1: Partition the summary
-    partitions = partition_reel_summary(
-        summary_text=summary_text,
-        reel_url=reel_url,
-        guild_id=guild_id,
-        message_id=message_id,
-        message_content=message_content,
-        user_id=user_id,
-        channel_id=channel_id,
-        timestamp=timestamp,
-        max_tokens=768,  # Good balance for reels (shorter than meeting transcripts)
-    )
-
-    if not partitions:
+    if not summary_text or not summary_text.strip():
         await services.logging_service.warning(
-            f"No partitions created for reel {reel_url}, skipping storage"
+            f"Empty summary for reel {reel_url}, skipping storage"
         )
         return
 
-    await services.logging_service.info(f"Created {len(partitions)} partition(s) for reel summary")
-
-    # Step 2: Generate embeddings with GPU lock
-    embeddings = []
-
+    # Step 2: Generate embedding with GPU lock (single embedding, no segmentation)
     async with services.gpu_resource_manager.acquire_lock(
         job_type="misc_chat_job", job_id=f"reels-embedding-{message_id}"
     ):
@@ -349,18 +334,13 @@ async def generate_and_store_reel_embeddings(
 
             await services.logging_service.info("Embedding model loaded for reel storage")
 
-            # Extract texts from partitions
-            texts = [p["text"] for p in partitions]
-
-            # Generate embeddings (synchronous operation, run in executor)
-            embeddings = await asyncio.get_event_loop().run_in_executor(
+            # Generate embedding for the summary text only (no segmentation)
+            embedding = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: handler.encode(texts, batch_size=min(32, len(texts))),
+                lambda: handler.encode([summary_text], batch_size=1)[0],
             )
 
-            await services.logging_service.info(
-                f"Generated {len(embeddings)} embedding(s) for reel"
-            )
+            await services.logging_service.info("Generated embedding for reel")
 
         finally:
             # Always offload model
@@ -371,7 +351,7 @@ async def generate_and_store_reel_embeddings(
     vector_db_client = services.server.vector_db_client
     collection_name = f"reels_{guild_id}"
 
-    await services.logging_service.info(f"Storing embeddings in collection: {collection_name}")
+    await services.logging_service.info(f"Storing embedding in collection: {collection_name}")
 
     # Get or create collection (synchronous ChromaDB operation)
     loop = asyncio.get_event_loop()
@@ -380,33 +360,33 @@ async def generate_and_store_reel_embeddings(
         lambda: vector_db_client.get_or_create_collection(collection_name),
     )
 
-    # Prepare data for batch upsert
-    ids = []
-    documents = []
-    metadatas = []
-    embedding_vectors = []
+    # Prepare metadata with all reel data
+    metadata = {
+        "reel_url": reel_url,
+        "guild_id": guild_id,
+        "message_id": message_id,
+        "message_content": message_content,
+        "user_id": user_id,
+        "channel_id": channel_id,
+        "timestamp": timestamp,
+        "summary": summary_text,
+        "description": description,
+    }
 
-    for partition, embedding in zip(partitions, embeddings):
-        # Create unique ID: message_id + segment_index
-        segment_index = partition["segment_index"]
-        doc_id = f"{message_id}_{segment_index}"
-
-        ids.append(doc_id)
-        documents.append(partition["text"])
-        metadatas.append(partition["metadata"])
-        embedding_vectors.append(embedding)
+    # Single document ID (no segmentation)
+    doc_id = message_id
 
     # Upsert to collection (handles both insert and update)
     await loop.run_in_executor(
         None,
         lambda: collection.upsert(
-            ids=ids,
-            documents=documents,
-            metadatas=metadatas,
-            embeddings=embedding_vectors,
+            ids=[doc_id],
+            documents=[summary_text],
+            metadatas=[metadata],
+            embeddings=[embedding],
         ),
     )
 
     await services.logging_service.info(
-        f"Successfully stored {len(ids)} reel embedding(s) in collection {collection_name}"
+        f"Successfully stored reel embedding in collection {collection_name}"
     )

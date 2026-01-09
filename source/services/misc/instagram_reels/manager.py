@@ -111,17 +111,30 @@ class InstagramReelsManager:
             except Exception as e:
                 logger.error(f"Failed to delete {file}: {e}")
 
-    async def process_reel(self, reel_url: str) -> Dict[str, Any]:
+    async def process_reel(self, reel_url: str, job_id_suffix: str = None) -> Dict[str, Any]:
         """
         Download audio and extract description from a Reel URL.
         Returns a dictionary with 'audio_path' and 'description'.
+        
+        Args:
+            reel_url: The Instagram reel URL to process
+            job_id_suffix: Optional suffix to make filename unique (e.g., message_id)
         """
         # Run in executor because yt_dlp is blocking
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._process_reel_sync, reel_url)
+        return await loop.run_in_executor(None, self._process_reel_sync, reel_url, job_id_suffix)
 
-    def _process_reel_sync(self, reel_url: str) -> Dict[str, Any]:
-        output_template = str(self.reels_dir / "%(title)s.%(ext)s")
+    def _process_reel_sync(self, reel_url: str, job_id_suffix: str = None) -> Dict[str, Any]:
+        import time
+        
+        # Create unique filename using timestamp and optional suffix to prevent conflicts
+        timestamp = int(time.time() * 1000)  # milliseconds
+        if job_id_suffix:
+            unique_id = f"{timestamp}_{job_id_suffix}"
+        else:
+            unique_id = str(timestamp)
+        
+        output_template = str(self.reels_dir / f"reel_{unique_id}.%(ext)s")
 
         ydl_opts = {
             "format": "bestaudio/best",
@@ -184,8 +197,8 @@ class InstagramReelsManager:
         """
         Run the full analysis workflow: Download -> Transcribe -> LLM Extraction.
         """
-        # 1. Download
-        reel_data = await self.process_reel(url)
+        # 1. Download (pass job_id_suffix to ensure unique filenames)
+        reel_data = await self.process_reel(url, job_id_suffix=job_id_suffix)
         audio_path = reel_data["audio_path"]
         description = reel_data["description"]
 
@@ -227,6 +240,10 @@ class InstagramReelsManager:
             result = await subroutine.ainvoke(
                 {"description": description, "transcript": transcript_text}
             )
+
+            # Include description and transcript in the result for storage
+            result["description"] = description
+            result["transcript"] = transcript_text
 
             return result
 
