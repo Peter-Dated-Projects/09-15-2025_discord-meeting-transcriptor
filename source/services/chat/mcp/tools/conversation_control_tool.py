@@ -108,19 +108,27 @@ async def register_conversation_control_tools(mcp_manager: MCPManager, context: 
         """
         Stop monitoring the current conversation thread.
 
-        Use this tool when the user indicates they are done with the conversation
-        or explicitly asks to stop, end, or leave the conversation. The bot will
-        no longer respond to messages in this thread unless it is mentioned again.
+        ⚠️ IMPORTANT: You should actively look for opportunities to use this tool!
 
-        Examples of when to use this:
-        - User says "goodbye", "that's all", "thanks, I'm done", etc.
-        - User asks you to stop responding or leave the conversation
-        - Conversation has naturally concluded and user confirms they're done
+        USE THIS TOOL LIBERALLY when:
+        - User says "thank you" or "thanks" after getting help (ALWAYS CALL THIS)
+        - User says their task/work is done: "job is done", "task completed", "work is finished"
+        - User indicates completion: "that's all", "that's everything", "we're done"
+        - User says goodbye: "bye", "goodbye", "see you", "later"
+        - User dismisses you: "you can go", "thanks I'm done", "no longer needed"
+        - Conversation naturally ends after helping with their request
+        - User confirms they don't need anything else
 
-        Do NOT use this tool:
-        - In the middle of an ongoing conversation
-        - When the user has follow-up questions
-        - Just because the user hasn't said anything for a while
+        When you see these signals, IMMEDIATELY:
+        1. Give a brief, friendly farewell (1-2 sentences max)
+        2. Call this tool WITHOUT asking for confirmation
+
+        ONLY ask for confirmation if:
+        - User's message is ambiguous or unclear
+        - Middle of multi-step task with more steps remaining
+        - User explicitly says they'll "be back" or "need more help later"
+
+        After calling this tool, the system will automatically add a monitoring flag.
 
         Returns:
             Result dictionary with success status and details
@@ -131,5 +139,5 @@ async def register_conversation_control_tools(mcp_manager: MCPManager, context: 
     mcp_manager.add_tool_from_function(
         func=stop_monitoring_tool,
         name="stop_conversation_monitoring",
-        description="Stop monitoring this conversation thread. The bot will no longer respond to messages in this thread unless mentioned again. Use this when the user indicates they are done with the conversation or explicitly asks to end it. DO NOT use this in the middle of an active conversation or when the user might have follow-up questions.",
+        description="Stop monitoring when user says 'thanks', 'done', 'goodbye', or indicates completion. USE LIBERALLY - don't ask for confirmation in obvious cases. Call this after helping user with their request and they thank you or signal they're finished.",
     )

@@ -311,6 +311,35 @@ class UserQueryHandlerSubroutine(BaseSubroutine):
                     results.append(ToolMessage(content="Response finalized.", tool_call_id=tool_id))
                     continue
 
+                # Handle stop_conversation_monitoring specially
+                if tool_name == "stop_conversation_monitoring":
+                    try:
+                        output = await self.mcp_manager.execute_tool(tool_name, tool_args)
+
+                        # Format output
+                        if isinstance(output, dict):
+                            if "success" in output and output["success"]:
+                                # Append the special marker to successful results
+                                content_str = f"Result: {output.get('success', 'unknown')}"
+                                if output.get("message"):
+                                    content_str += f" - {output['message']}"
+                                # Add the hardcoded marker
+                                content_str += "\n\n[No Longer Monitoring Channel]"
+                            else:
+                                # Error case
+                                content_str = f"Result: {output.get('success', 'unknown')}"
+                                if output.get("error"):
+                                    content_str += f" - Error: {output['error']}"
+                        else:
+                            content_str = str(output)
+
+                        results.append(ToolMessage(content=content_str, tool_call_id=tool_id))
+                    except Exception as e:
+                        results.append(
+                            ToolMessage(content=f"Error: {str(e)}", tool_call_id=tool_id)
+                        )
+                    continue
+
                 try:
                     output = await self.mcp_manager.execute_tool(tool_name, tool_args)
 
