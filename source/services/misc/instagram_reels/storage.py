@@ -22,6 +22,68 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+async def check_reel_exists(
+    services: "ServicesManager",
+    reel_url: str,
+    guild_id: str,
+) -> bool:
+    """
+    Check if a reel URL already exists in the database.
+
+    Args:
+        services: ServicesManager instance for accessing resources
+        reel_url: URL of the Instagram reel to check
+        guild_id: Discord guild ID
+
+    Returns:
+        True if the reel exists, False otherwise
+    """
+    try:
+        vector_db_client = services.server.vector_db_client
+        collection_name = f"reels_{guild_id}"
+
+        # Check if collection exists
+        collection_exists = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: vector_db_client.collection_exists(collection_name)
+        )
+
+        if not collection_exists:
+            # No collection means no reels stored yet
+            return False
+
+        # Get collection
+        collection = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: vector_db_client.get_or_create_collection(collection_name)
+        )
+
+        # Query for documents with this reel_url
+        # We use get() instead of query() to filter by metadata
+        results = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: collection.get(
+                where={"reel_url": reel_url},
+                limit=1,  # We only need to know if at least one exists
+            ),
+        )
+
+        # If we got any results, the reel exists
+        exists = results and results.get("ids") and len(results["ids"]) > 0
+
+        if exists:
+            await services.logging_service.info(
+                f"[Reel Storage] Reel already exists in database: {reel_url}"
+            )
+
+        return exists
+
+    except Exception as e:
+        await services.logging_service.error(
+            f"[Reel Storage] Error checking if reel exists: {e}", exc_info=True
+        )
+        # On error, assume it doesn't exist to allow processing
+        return False
+
+
 def estimate_token_count(text: str) -> int:
     """
     Estimate the number of tokens in a text string.
