@@ -74,7 +74,7 @@ Output ONLY the refined query, no explanations."""
             model="ministral-3:3b",
             messages=messages,
             temperature=0.3,  # Low temperature for consistent refinement
-            max_tokens=100,  # Queries should be short
+            num_predict=100,  # Queries should be short
         )
 
         refined_query = response.content.strip()
