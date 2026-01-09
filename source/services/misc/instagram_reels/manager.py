@@ -115,7 +115,7 @@ class InstagramReelsManager:
         """
         Download audio and extract description from a Reel URL.
         Returns a dictionary with 'audio_path' and 'description'.
-        
+
         Args:
             reel_url: The Instagram reel URL to process
             job_id_suffix: Optional suffix to make filename unique (e.g., message_id)
@@ -126,14 +126,14 @@ class InstagramReelsManager:
 
     def _process_reel_sync(self, reel_url: str, job_id_suffix: str = None) -> Dict[str, Any]:
         import time
-        
+
         # Create unique filename using timestamp and optional suffix to prevent conflicts
         timestamp = int(time.time() * 1000)  # milliseconds
         if job_id_suffix:
             unique_id = f"{timestamp}_{job_id_suffix}"
         else:
             unique_id = str(timestamp)
-        
+
         output_template = str(self.reels_dir / f"reel_{unique_id}.%(ext)s")
 
         ydl_opts = {
