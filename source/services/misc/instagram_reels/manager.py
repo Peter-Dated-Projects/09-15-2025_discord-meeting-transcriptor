@@ -17,6 +17,9 @@ class InstagramReelsManager:
         self.config_path = config_path
         self.reels_dir = Path(reels_dir)
         self.monitoring_channels: Set[int] = set()
+        # Track processed reel URLs per guild to prevent duplicates
+        # Format: {guild_id: {reel_url1, reel_url2, ...}}
+        self._processed_reels: Dict[str, Set[str]] = {}
         self._load_config()
         self._ensure_directories()
 
@@ -75,6 +78,19 @@ class InstagramReelsManager:
 
     def is_channel_monitored(self, channel_id: int) -> bool:
         return channel_id in self.monitoring_channels
+
+    def is_reel_processed(self, reel_url: str, guild_id: str) -> bool:
+        """Check if a reel URL has already been processed for this guild."""
+        if guild_id not in self._processed_reels:
+            return False
+        return reel_url in self._processed_reels[guild_id]
+
+    def mark_reel_processed(self, reel_url: str, guild_id: str) -> None:
+        """Mark a reel URL as processed for this guild."""
+        if guild_id not in self._processed_reels:
+            self._processed_reels[guild_id] = set()
+        self._processed_reels[guild_id].add(reel_url)
+        logger.info(f"Marked reel as processed: {reel_url} in guild {guild_id}")
 
     async def _periodic_cleanup(self):
         while True:

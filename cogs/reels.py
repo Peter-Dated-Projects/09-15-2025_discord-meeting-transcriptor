@@ -67,32 +67,19 @@ class Reels(commands.Cog):
         url = url_match.group(1)
         logger.info(f"Reel detected: {url}")
 
-        # Check if this reel has already been processed
-        try:
-            from source.services.misc.instagram_reels.storage import check_reel_exists
-
-            guild_id = str(message.guild.id) if message.guild else "DM"
-            reel_exists = await check_reel_exists(
-                services=self.services, reel_url=url, guild_id=guild_id
+        # Check if this reel has already been processed (simple in-memory check)
+        guild_id = str(message.guild.id) if message.guild else "DM"
+        if self.services.instagram_reels_manager.is_reel_processed(url, guild_id):
+            # Reel already processed, inform user
+            embed = discord.Embed(
+                title="📱 Reel Already Processed",
+                description="This reel has already been analyzed and stored in the database. You can search for it using the chatbot!",
+                color=discord.Color.orange(),
+                url=url,
             )
-
-            if reel_exists:
-                # Reel already processed, inform user
-                embed = discord.Embed(
-                    title="📱 Reel Already Processed",
-                    description="This reel has already been analyzed and stored in the database. You can search for it using the chatbot!",
-                    color=discord.Color.orange(),
-                    url=url,
-                )
-                await message.reply(embed=embed, mention_author=False)
-                logger.info(f"Skipping already-processed reel: {url}")
-                return
-
-        except Exception as check_error:
-            # If check fails, proceed with processing (better to duplicate than skip)
-            logger.warning(
-                f"Failed to check if reel exists, proceeding with processing: {check_error}"
-            )
+            await message.reply(embed=embed, mention_author=False)
+            logger.info(f"Skipping already-processed reel: {url}")
+            return
 
         status_msg = await message.reply("🔄 Processing Instagram Reel...", mention_author=False)
 
@@ -136,6 +123,8 @@ class Reels(commands.Cog):
                     timestamp=message.created_at.isoformat(),
                 )
 
+                # Mark as processed after successful storage
+                self.services.instagram_reels_manager.mark_reel_processed(url, guild_id)
                 logger.info(f"Successfully stored reel embeddings for {url}")
 
             except Exception as storage_error:
