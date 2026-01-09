@@ -43,10 +43,12 @@ Rules:
 2.  Keep messages that contain important facts, user preferences, or ongoing tasks.
 3.  Exclude simple acknowledgments (e.g., "Okay", "Thanks"), repetitive greetings, or resolved clarifications.
 4.  Exclude intermediate "thinking" or "tool call" messages if they don't add value to the final result.
-5.  Use the `exclude_message(index)` tool to remove a message from context.
-6.  Use the `include_message(index)` tool to explicitly keep a message (if it was previously excluded or to be safe).
-7.  Use the `summarize_messages(message_uuids)` tool to replace a group of messages with a concise summary. This is useful for older parts of the conversation.
-8.  When you are finished optimizing the context and have reached the target size (10-15 messages), call the `finished()` tool.
+5.  IMPORTANT: Exclude messages where users tell the bot to leave/stop/goodbye/thanks for dismissal (e.g., "you can go", "thanks bye", "stop monitoring"), 
+    AND exclude the AI's corresponding farewell responses to those messages. These are conversation-ending messages that don't need to be preserved.
+6.  Use the `exclude_message(index)` tool to remove a message from context.
+7.  Use the `include_message(index)` tool to explicitly keep a message (if it was previously excluded or to be safe).
+8.  Use the `summarize_messages(message_uuids)` tool to replace a group of messages with a concise summary. This is useful for older parts of the conversation.
+9.  When you are finished optimizing the context and have reached the target size (10-15 messages), call the `finished()` tool.
 
 You must iterate through the messages and make decisions. You can process multiple messages in one turn by calling tools multiple times.
 """

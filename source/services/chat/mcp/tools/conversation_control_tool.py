@@ -7,6 +7,7 @@ prevents the bot from responding to messages until it's mentioned again.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from source.request_context import current_thread_id
@@ -14,6 +15,9 @@ from source.request_context import current_thread_id
 if TYPE_CHECKING:
     from source.context import Context
     from source.services.chat.mcp import MCPManager
+
+# Get the context cleaner model from environment
+OLLAMA_CONTEXT_CLEANER_MODEL = os.getenv("OLLAMA_CONTEXT_CLEANER_MODEL", "gemma3:12b")
 
 
 async def stop_conversation_monitoring(context: Context) -> dict:
@@ -75,6 +79,44 @@ async def stop_conversation_monitoring(context: Context) -> dict:
             )
 
         if was_monitoring:
+            # Run context cleaning workflow to remove goodbye/farewell messages
+            try:
+                conversation = conversation_manager.get_conversation(thread_id)
+                if conversation:
+                    # Import here to avoid circular imports
+                    from source.services.chat.mcp.subroutine_manager.subroutines.context_cleaning import (
+                        ContextCleaningSubroutine,
+                    )
+
+                    if context.services_manager.logging_service:
+                        await context.services_manager.logging_service.info(
+                            f"[CONVERSATION_CONTROL] Running context cleaning for thread {thread_id} after stopping monitoring"
+                        )
+
+                    # Create and run the context cleaning subroutine
+                    subroutine = ContextCleaningSubroutine(
+                        ollama_request_manager=context.services_manager.ollama_request_manager,
+                        conversation=conversation,
+                        model=OLLAMA_CONTEXT_CLEANER_MODEL,
+                        logging_service=context.services_manager.logging_service,
+                    )
+
+                    await subroutine.ainvoke({"messages": []})
+
+                    # Save the updated conversation
+                    await conversation.save_conversation()
+
+                    if context.services_manager.logging_service:
+                        await context.services_manager.logging_service.info(
+                            f"[CONVERSATION_CONTROL] Context cleaning completed for thread {thread_id}"
+                        )
+            except Exception as e:
+                # Log the error but don't fail the stop monitoring operation
+                if context.services_manager.logging_service:
+                    await context.services_manager.logging_service.error(
+                        f"[CONVERSATION_CONTROL] Failed to run context cleaning: {str(e)}"
+                    )
+
             return {
                 "success": True,
                 "thread_id": thread_id,
