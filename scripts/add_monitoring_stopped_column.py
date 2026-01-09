@@ -40,12 +40,14 @@ async def migrate_conversations_table():
 
     try:
         # Check if table exists
-        query = text("""
+        query = text(
+            """
             SELECT COUNT(*) as count
             FROM information_schema.tables
             WHERE table_schema = DATABASE()
             AND table_name = 'conversations'
-        """)
+        """
+        )
         result = await sql_client.execute(query)
 
         if not result or result[0]["count"] == 0:
@@ -56,13 +58,15 @@ async def migrate_conversations_table():
         print("✓ Table 'conversations' exists")
 
         # Check if monitoring_stopped column exists
-        query = text("""
+        query = text(
+            """
             SELECT COUNT(*) as count
             FROM information_schema.columns
             WHERE table_schema = DATABASE()
             AND table_name = 'conversations'
             AND column_name = 'monitoring_stopped'
-        """)
+        """
+        )
         result = await sql_client.execute(query)
 
         if result and result[0]["count"] > 0:
@@ -83,13 +87,15 @@ async def migrate_conversations_table():
 
         # Verify the column was added
         result = await sql_client.execute(
-            text("""
+            text(
+                """
             SELECT COUNT(*) as count
             FROM information_schema.columns
             WHERE table_schema = DATABASE()
             AND table_name = 'conversations'
             AND column_name = 'monitoring_stopped'
-        """)
+        """
+            )
         )
 
         if result and result[0]["count"] > 0:
