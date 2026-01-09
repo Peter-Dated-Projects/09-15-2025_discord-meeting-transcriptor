@@ -20,15 +20,15 @@ class Reels(commands.Cog):
     )
     @commands.has_permissions(administrator=True)
     async def monitor_reels(self, ctx: discord.ApplicationContext):
-        # Get the actual channel ID (parent channel if in thread)
+        # Monitor the specific channel or thread the user is typing in
         channel_id = ctx.channel.id
-        if isinstance(ctx.channel, discord.Thread):
-            channel_id = ctx.channel.parent_id
+        channel_type = "thread" if isinstance(ctx.channel, discord.Thread) else "channel"
 
         # Check if already monitored
         if self.services.instagram_reels_manager.is_channel_monitored(channel_id):
             await ctx.respond(
-                "This channel is already being monitored for Instagram Reels.", ephemeral=True
+                f"This {channel_type} is already being monitored for Instagram Reels.",
+                ephemeral=True,
             )
             return
 
@@ -36,7 +36,7 @@ class Reels(commands.Cog):
         self.services.instagram_reels_manager.save_config()  # Save explicitly to be safe
 
         await ctx.respond(
-            f"✅ Channel <#{channel_id}> is now being monitored for Instagram Reels.",
+            f"✅ This {channel_type} (<#{channel_id}>) is now being monitored for Instagram Reels.",
             ephemeral=False,
         )
 
@@ -46,15 +46,15 @@ class Reels(commands.Cog):
     )
     @commands.has_permissions(administrator=True)
     async def disable_reels_monitoring(self, ctx: discord.ApplicationContext):
-        # Get the actual channel ID (parent channel if in thread)
+        # Disable monitoring for the specific channel or thread the user is typing in
         channel_id = ctx.channel.id
-        if isinstance(ctx.channel, discord.Thread):
-            channel_id = ctx.channel.parent_id
+        channel_type = "thread" if isinstance(ctx.channel, discord.Thread) else "channel"
 
         # Check if channel is being monitored
         if not self.services.instagram_reels_manager.is_channel_monitored(channel_id):
             await ctx.respond(
-                "This channel is not currently being monitored for Instagram Reels.", ephemeral=True
+                f"This {channel_type} is not currently being monitored for Instagram Reels.",
+                ephemeral=True,
             )
             return
 
@@ -62,16 +62,14 @@ class Reels(commands.Cog):
         self.services.instagram_reels_manager.save_config()  # Save explicitly to be safe
 
         await ctx.respond(
-            f"✅ Instagram Reels monitoring has been disabled for <#{channel_id}>.",
+            f"✅ Instagram Reels monitoring has been disabled for this {channel_type} (<#{channel_id}>).",
             ephemeral=False,
         )
 
     # Message handler logic
     async def filter_message(self, message: discord.Message) -> bool:
-        # Get the actual channel ID (parent channel if in thread)
+        # Check if the specific channel or thread is being monitored
         channel_id = message.channel.id
-        if isinstance(message.channel, discord.Thread):
-            channel_id = message.channel.parent_id
 
         # Check if channel is monitored
         if not self.services.instagram_reels_manager.is_channel_monitored(channel_id):

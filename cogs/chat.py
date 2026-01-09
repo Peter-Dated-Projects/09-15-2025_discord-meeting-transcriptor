@@ -69,10 +69,9 @@ class Chat(commands.Cog):
         if isinstance(message.channel, discord.Thread):
             thread_id = str(message.channel.id)
 
-            # Check if parent channel is monitoring reels
-            # Block ALL LLM queries in reel-monitored channels, even in existing threads
-            parent_channel_id = message.channel.parent_id
-            if self.services.instagram_reels_manager.is_channel_monitored(parent_channel_id):
+            # Check if this specific thread is monitoring reels
+            # Block ALL LLM queries in reel-monitored threads
+            if self.services.instagram_reels_manager.is_channel_monitored(message.channel.id):
                 return False
 
             # If monitoring is stopped for this thread
@@ -115,10 +114,9 @@ class Chat(commands.Cog):
                         f"Failed to load conversation for thread {thread_id}: {e}"
                     )
 
-        # Block bot mentions in reel-monitored channels (main channel, not threads)
-        else:
-            if self.services.instagram_reels_manager.is_channel_monitored(message.channel.id):
-                return False
+        # Block bot mentions in reel-monitored channels or threads
+        if self.services.instagram_reels_manager.is_channel_monitored(message.channel.id):
+            return False
 
         # Check if the bot is mentioned
         if not bot_mentioned:
