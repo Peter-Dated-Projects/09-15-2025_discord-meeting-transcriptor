@@ -7,7 +7,6 @@ prevents the bot from responding to messages until it's mentioned again.
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
 from source.request_context import current_thread_id
@@ -15,9 +14,6 @@ from source.request_context import current_thread_id
 if TYPE_CHECKING:
     from source.context import Context
     from source.services.chat.mcp import MCPManager
-
-# Get the context cleaner model from environment
-OLLAMA_CONTEXT_CLEANER_MODEL = os.getenv("OLLAMA_CONTEXT_CLEANER_MODEL", "gemma3:12b")
 
 
 async def stop_conversation_monitoring(context: Context) -> dict:
@@ -79,13 +75,10 @@ async def stop_conversation_monitoring(context: Context) -> dict:
             )
 
         if was_monitoring:
-            # Note: Context cleaning will be triggered later after the confirmation message is sent
-            # This happens in the chat job manager after processing the tool result
             return {
                 "success": True,
                 "thread_id": thread_id,
                 "message": "Successfully stopped monitoring this conversation. The bot will no longer respond to messages in this thread unless mentioned again.",
-                "_trigger_context_cleaning": True,  # Flag for later processing
             }
         else:
             return {
