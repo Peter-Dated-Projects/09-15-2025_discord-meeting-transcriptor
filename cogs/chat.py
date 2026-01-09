@@ -1,4 +1,5 @@
 import logging
+import os
 
 import discord
 from discord.ext import commands
@@ -12,6 +13,9 @@ from source.services.chat.conversation_manager.in_memory_cache import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Get the context cleaner model from environment
+OLLAMA_CONTEXT_CLEANER_MODEL = os.getenv("OLLAMA_CONTEXT_CLEANER_MODEL", "gemma3:12b")
 
 
 # -------------------------------------------------------------- #
@@ -495,6 +499,7 @@ class Chat(commands.Cog):
                     f"Stopped monitoring thread {thread_id} via command by user {ctx.author.id}"
                 )
 
+                # Send confirmation message FIRST
                 embed = discord.Embed(
                     title="✅ Monitoring Stopped",
                     description=(
@@ -504,6 +509,41 @@ class Chat(commands.Cog):
                     color=discord.Color.green(),
                 )
                 await ctx.followup.send(embed=embed, ephemeral=True)
+
+                # Run context cleaning workflow AFTER sending confirmation
+                try:
+                    conversation = self.services.conversation_manager.get_conversation(thread_id)
+                    if conversation:
+                        # Import here to avoid circular imports
+                        from source.services.chat.mcp.subroutine_manager.subroutines.context_cleaning import (
+                            ContextCleaningSubroutine,
+                        )
+
+                        await self.services.logging_service.info(
+                            f"Running context cleaning for thread {thread_id} after stopping monitoring via command"
+                        )
+
+                        # Create and run the context cleaning subroutine
+                        subroutine = ContextCleaningSubroutine(
+                            ollama_request_manager=self.services.ollama_request_manager,
+                            conversation=conversation,
+                            model=OLLAMA_CONTEXT_CLEANER_MODEL,
+                            logging_service=self.services.logging_service,
+                        )
+
+                        await subroutine.ainvoke({"messages": []})
+
+                        # Save the updated conversation
+                        await conversation.save_conversation()
+
+                        await self.services.logging_service.info(
+                            f"Context cleaning completed for thread {thread_id}"
+                        )
+                except Exception as e:
+                    # Log the error but don't fail the stop monitoring operation
+                    await self.services.logging_service.error(
+                        f"Failed to run context cleaning after stop-monitoring-channel: {str(e)}"
+                    )
             else:
                 embed = discord.Embed(
                     title="❌ Failed to Stop Monitoring",

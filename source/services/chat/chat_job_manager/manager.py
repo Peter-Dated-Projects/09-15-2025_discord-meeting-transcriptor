@@ -456,6 +456,39 @@ class ChatJob(Job):
                         # Send the hardcoded flag message to Discord
                         await self._send_discord_message("\n[No Longer Monitoring Channel]")
 
+                        # Now run context cleaning AFTER sending the confirmation message
+                        try:
+                            # Import here to avoid circular imports
+                            from source.services.chat.mcp.subroutine_manager.subroutines.context_cleaning import (
+                                ContextCleaningSubroutine,
+                            )
+
+                            await self.services.logging_service.info(
+                                f"[CHAT_JOB] Running context cleaning for thread {self.thread_id} after stop monitoring confirmation sent"
+                            )
+
+                            # Create and run the context cleaning subroutine
+                            subroutine = ContextCleaningSubroutine(
+                                ollama_request_manager=self.services.ollama_request_manager,
+                                conversation=conversation,
+                                model=OLLAMA_CONTEXT_CLEANER_MODEL,
+                                logging_service=self.services.logging_service,
+                            )
+
+                            await subroutine.ainvoke({"messages": []})
+
+                            # Save the updated conversation
+                            await conversation.save_conversation()
+
+                            await self.services.logging_service.info(
+                                f"[CHAT_JOB] Context cleaning completed for thread {self.thread_id}"
+                            )
+                        except Exception as e:
+                            # Log the error but don't fail the job
+                            await self.services.logging_service.error(
+                                f"[CHAT_JOB] Failed to run context cleaning after stop monitoring: {str(e)}"
+                            )
+
             # Save conversation
             await conversation.save_conversation()
             await self.services.conversations_sql_manager.update_conversation_timestamp(

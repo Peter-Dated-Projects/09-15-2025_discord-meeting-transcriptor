@@ -79,48 +79,13 @@ async def stop_conversation_monitoring(context: Context) -> dict:
             )
 
         if was_monitoring:
-            # Run context cleaning workflow to remove goodbye/farewell messages
-            try:
-                conversation = conversation_manager.get_conversation(thread_id)
-                if conversation:
-                    # Import here to avoid circular imports
-                    from source.services.chat.mcp.subroutine_manager.subroutines.context_cleaning import (
-                        ContextCleaningSubroutine,
-                    )
-
-                    if context.services_manager.logging_service:
-                        await context.services_manager.logging_service.info(
-                            f"[CONVERSATION_CONTROL] Running context cleaning for thread {thread_id} after stopping monitoring"
-                        )
-
-                    # Create and run the context cleaning subroutine
-                    subroutine = ContextCleaningSubroutine(
-                        ollama_request_manager=context.services_manager.ollama_request_manager,
-                        conversation=conversation,
-                        model=OLLAMA_CONTEXT_CLEANER_MODEL,
-                        logging_service=context.services_manager.logging_service,
-                    )
-
-                    await subroutine.ainvoke({"messages": []})
-
-                    # Save the updated conversation
-                    await conversation.save_conversation()
-
-                    if context.services_manager.logging_service:
-                        await context.services_manager.logging_service.info(
-                            f"[CONVERSATION_CONTROL] Context cleaning completed for thread {thread_id}"
-                        )
-            except Exception as e:
-                # Log the error but don't fail the stop monitoring operation
-                if context.services_manager.logging_service:
-                    await context.services_manager.logging_service.error(
-                        f"[CONVERSATION_CONTROL] Failed to run context cleaning: {str(e)}"
-                    )
-
+            # Note: Context cleaning will be triggered later after the confirmation message is sent
+            # This happens in the chat job manager after processing the tool result
             return {
                 "success": True,
                 "thread_id": thread_id,
                 "message": "Successfully stopped monitoring this conversation. The bot will no longer respond to messages in this thread unless mentioned again.",
+                "_trigger_context_cleaning": True,  # Flag for later processing
             }
         else:
             return {
