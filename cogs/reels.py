@@ -6,37 +6,6 @@ from source.context import Context
 logger = logging.getLogger(__name__)
 
 
-class ChannelPurposeConfirmView(discord.ui.View):
-    """Confirmation view for changing channel purpose."""
-
-    def __init__(self, channel_id: int, new_purpose: str, services):
-        super().__init__(timeout=60.0)
-        self.channel_id = channel_id
-        self.new_purpose = new_purpose
-        self.services = services
-
-    @discord.ui.button(label="Yes, Enable Reels", style=discord.ButtonStyle.danger)
-    async def confirm_button(self, button: discord.ui.Button, interaction: discord.Interaction):
-        # Enable reels monitoring
-        self.services.instagram_reels_manager.add_channel(self.channel_id)
-        self.services.instagram_reels_manager.save_config()
-
-        await interaction.response.edit_message(
-            content=f"✅ Channel <#{self.channel_id}> is now being monitored for Instagram Reels.\n"
-            "⚠️ Chat conversation functionality has been disabled for this channel.",
-            view=None,
-        )
-        self.stop()
-
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel_button(self, button: discord.ui.Button, interaction: discord.Interaction):
-        await interaction.response.edit_message(
-            content="❌ Reels monitoring setup cancelled. Channel purpose unchanged.",
-            view=None,
-        )
-        self.stop()
-
-
 class Reels(commands.Cog):
     def __init__(self, context: Context):
         self.context = context
@@ -54,27 +23,6 @@ class Reels(commands.Cog):
         if self.services.instagram_reels_manager.is_channel_monitored(channel_id):
             await ctx.respond(
                 "This channel is already being monitored for Instagram Reels.", ephemeral=True
-            )
-            return
-
-        # Check if channel is used for chat conversations
-        is_chat_channel = await self.services.instagram_reels_manager.is_channel_used_for_chat(
-            channel_id
-        )
-
-        if is_chat_channel:
-            # Create confirmation view
-            view = ChannelPurposeConfirmView(
-                channel_id=channel_id,
-                new_purpose="reels",
-                services=self.services,
-            )
-            await ctx.respond(
-                "⚠️ This channel appears to have active chat conversation threads. "
-                "A channel can only serve one purpose: either Reels monitoring or Chat conversations.\n\n"
-                "Enabling Reels monitoring may interfere with chat functionality. Do you want to proceed?",
-                view=view,
-                ephemeral=True,
             )
             return
 
@@ -106,6 +54,7 @@ class Reels(commands.Cog):
         # "run ministral-3:3b with the verification cool to check if the message has an instragram reel URL"
         import re
         import json
+        from datetime import datetime
 
         content = message.content
         # Basic check to avoid processing every message
@@ -117,6 +66,23 @@ class Reels(commands.Cog):
 
         url = url_match.group(1)
         logger.info(f"Reel detected: {url}")
+
+        # Check if this reel has already been processed (simple in-memory check)
+        guild_id = str(message.guild.id) if message.guild else "DM"
+        if self.services.instagram_reels_manager.is_reel_processed(url, guild_id):
+            # Reel already processed, inform user
+            embed = discord.Embed(
+                title="📱 Reel Already Processed",
+                description="This reel has already been analyzed and stored in the database. You can search for it using the chatbot!",
+                color=discord.Color.orange(),
+                url=url,
+            )
+            await message.reply(embed=embed, mention_author=False)
+            logger.info(f"Skipping already-processed reel: {url}")
+            return
+
+        # Mark as processing immediately to prevent race conditions
+        self.services.instagram_reels_manager.mark_reel_processed(url, guild_id)
 
         status_msg = await message.reply("🔄 Processing Instagram Reel...", mention_author=False)
 
@@ -141,6 +107,32 @@ class Reels(commands.Cog):
             )
 
             await status_msg.edit(content="", embed=embed)
+
+            # Store reel summary in vectordb for future retrieval
+            try:
+                from source.services.misc.instagram_reels.storage import (
+                    generate_and_store_reel_embeddings,
+                )
+
+                await generate_and_store_reel_embeddings(
+                    services=self.services,
+                    summary_text=summary,
+                    reel_url=url,
+                    guild_id=str(message.guild.id) if message.guild else "DM",
+                    message_id=str(message.id),
+                    message_content=message.content,
+                    user_id=str(message.author.id),
+                    channel_id=str(message.channel.id),
+                    timestamp=message.created_at.isoformat(),
+                )
+
+                logger.info(f"Successfully stored reel embeddings for {url}")
+
+            except Exception as storage_error:
+                # Don't fail the whole operation if storage fails
+                logger.error(
+                    f"Failed to store reel embeddings for {url}: {storage_error}", exc_info=True
+                )
 
         except Exception as e:
             logger.error(f"Error processing reel: {e}", exc_info=True)
