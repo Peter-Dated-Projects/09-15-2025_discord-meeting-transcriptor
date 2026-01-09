@@ -126,32 +126,16 @@ class Reels(commands.Cog):
                 url, job_id_suffix=str(message.id)
             )
 
-            # Create Embed
+            # Extract the summary from the LLM's tool call response
+            summary = data.get("summary", "No summary generated")
+
+            # Create simple embed with just the summary
             embed = discord.Embed(
-                title="Reel Summary",
-                description=data.get("topic", "No Topic Processed"),
-                color=discord.Color.green(),
+                title="📱 Reel Summary",
+                description=summary,
+                color=discord.Color.blue(),
                 url=url,
             )
-
-            embed.add_field(name="Category", value=data.get("category", "N/A"), inline=True)
-
-            if data.get("is_promotional"):
-                embed.add_field(name="Type", value="⚠️ Promotional", inline=True)
-
-            summary_points = data.get("summary_points", [])
-            if summary_points:
-                embed.add_field(
-                    name="Key Takeaways",
-                    value="\n".join([f"• {p}" for p in summary_points]),
-                    inline=False,
-                )
-
-            entities = data.get("entities", {})
-            if entities.get("products"):
-                embed.add_field(
-                    name="Products", value=", ".join(entities["products"]), inline=False
-                )
 
             await status_msg.edit(content="", embed=embed)
 
