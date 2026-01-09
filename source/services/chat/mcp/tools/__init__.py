@@ -13,6 +13,7 @@ from source.services.chat.mcp.tools.meeting_search_by_summary_tool import (
 from source.services.chat.mcp.tools.meeting_search_by_transcription_tool import (
     register_meeting_search_by_transcription_tool,
 )
+from source.services.chat.mcp.tools.reel_search_tool import register_reel_search_tool
 
 __all__ = [
     "register_discord_tools",
@@ -20,4 +21,5 @@ __all__ = [
     "register_google_tools",
     "register_meeting_search_by_summary_tool",
     "register_meeting_search_by_transcription_tool",
+    "register_reel_search_tool",
 ]

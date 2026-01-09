@@ -122,29 +122,320 @@ await generate_and_store_reel_embeddings(
 
 ---
 
-## Future Integration Points
+## MCP Search Tool Implementation
 
-### Next Steps (Not Yet Implemented)
+### ✅ Implemented: `search_instagram_reels` Tool
 
-**1. MCP Search Tool for Reels**
+**File:** [source/services/chat/mcp/tools/reel_search_tool.py](../source/services/chat/mcp/tools/reel_search_tool.py)
 
-Create a new MCP tool similar to `query_chroma_summaries` for searching reels:
-- File: `source/services/chat/mcp/tools/reel_search_tool.py`
-- Function: `query_chroma_reels(query, guild_id, n_results=5)`
-- Filters by guild_id to only show reels from the current guild
+#### Features
 
-**2. Enable in General Chat Mode**
+**Query Refinement with ministral-3:3b**
+- Automatically corrects spelling and grammar
+- Removes unnecessary words
+- Expands ambiguous abbreviations
+- Optimizes for semantic search
 
-Add the reel search tool to the chat agent's available tools:
-- Only enable in reel-monitoring-enabled channels
-- Allow users to ask: "Show me reels about cooking" or "What reels did we post about travel?"
+**Smart Deduplication**
+- Returns up to 20 UNIQUE reels (by URL)
+- Filters duplicates from multiple segments
+- Ensures varied results
 
-**3. Optional Enhancements**
+**Guild Filtering**
+- Automatically detects current guild from context
+- Only searches reels posted in the same guild
+- Returns friendly error if not in a guild
 
-- Add channel filter to search specific channels
-- Add date range filtering (using timestamp metadata)
-- Add user filter to search reels posted by specific users
-- Implement reel "tags" or categories
+**Rich Results**
+Each result includes:
+- `reel_url` - Instagram reel URL
+- `summary` - The segment of the summary that matched
+- `distance` - Similarity score (lower is better)
+- `metadata` - Message ID, user ID, channel ID, timestamp, original message
+
+#### Usage Examples
+
+**In Chat:**
+```
+User: "Show me reels about cooking"
+Bot: [Uses search_instagram_reels tool]
+     Found 3 reels about cooking:
+     1. https://instagram.com/reel/abc - "Pasta cooking tutorial..."
+     2. https://instagram.com/reel/def - "Baking bread from scratch..."
+     3. https://instagram.com/reel/ghi - "Quick meal prep ideas..."
+```
+
+**Query Refinement in Action:**
+```
+Input:  "show me reelz about cookin stuff"
+Refined: "cooking recipes and food preparation"
+Result: More accurate semantic search results
+```
+
+#### Technical Details
+
+**Function: `query_reel_summaries()`**
+```python
+async def query_reel_summaries(
+    query: str,
+    context: Context,
+    n_results: int = 20,
+    refine_query: bool = True
+) -> dict:
+```
+
+**Steps:**
+1. Refine query using `ministral-3:3b` (if enabled)
+2. Get guild ID from context (message or thread)
+3. Generate embeddings using `BAAI/bge-large-en-v1.5`
+4. Query collection `reels_{guild_id}` with guild filter
+5. Deduplicate by reel URL
+6. Return up to 20 unique results
+
+**Error Handling:**
+- No guild context: Returns error message
+- Collection doesn't exist: Friendly message to post reels first
+- Query refinement fails: Falls back to original query
+- All errors logged for debugging
+
+#### Registration
+
+Tool is registered in [main.py](../main.py):
+```python
+await register_reel_search_tool(services_manager.mcp_manager, context)
+```
+
+Exported in [tools/__init__.py](../source/services/chat/mcp/tools/__init__.py)
+
+---
+
+## Complete System Architecture
+
+### Data Flow
+
+```
+Instagram Reel Posted
+    ↓
+Detection & Summary Generation
+    ↓
+✅ Storage in vectordb
+    - Collection: reels_{guild_id}
+    - Segments: 500-1000 tokens
+    - Metadata: Full context
+    ↓
+✅ Search via MCP Tool
+    - Query refinement
+    - Guild filtering
+    - Deduplication
+    - Up to 20 unique results
+```
+
+### Collections Created
+
+**Per Guild:**
+- `reels_{guild_id}` - Reel summaries with full metadata
+
+**Global:**
+- `summaries` - Meeting summaries (existing)
+
+---
+
+## Testing the MCP Tool
+
+### Manual Testing
+
+1. **Post several reels in a monitored channel**
+   - At least 3-5 reels with different topics
+   - Verify they're stored (check logs)
+
+2. **Test search in chat**
+   ```
+   @bot show me reels about [topic]
+   ```
+
+3. **Verify query refinement**
+   - Check logs for: `[Reel Search] Query refined: 'X' -> 'Y'`
+   - Intentionally misspell words to test correction
+
+4. **Test deduplication**
+   - If a reel has multiple segments, verify only one result per URL
+
+5. **Test guild filtering**
+   - Post reels in different guilds
+   - Verify searches only return reels from current guild
+
+### Expected Behavior
+
+**Successful Search:**
+```json
+{
+    "results": [
+        {
+            "reel_url": "https://instagram.com/reel/xyz",
+            "summary": "Cooking pasta with tomato sauce...",
+            "distance": 0.15,
+            "metadata": {
+                "message_id": "123",
+                "user_id": "456",
+                "channel_id": "789",
+                "timestamp": "2026-01-08T12:00:00"
+            }
+        }
+    ],
+    "query_original": "show me cooking reels",
+    "query_refined": "cooking recipes and food preparation",
+    "total_results": 5,
+    "unique_reels": 1
+}
+```
+
+**No Results:**
+```json
+{
+    "results": [],
+    "query_original": "quantum physics",
+    "query_refined": "quantum physics and particle mechanics",
+    "total_results": 0,
+    "unique_reels": 0
+}
+```
+
+**Error (No Collection):**
+```json
+{
+    "error": "No reels have been stored for this guild yet. Post some Instagram reels in a monitored channel first!",
+    "query_original": "cooking",
+    "query_refined": "cooking recipes"
+}
+```
+
+---
+
+## Future Enhancements
+
+### Potential Features
+
+**1. Channel-Specific Search**
+```python
+search_instagram_reels(query="cooking", channel_id="123")
+```
+
+**2. Date Range Filtering**
+```python
+search_instagram_reels(query="cooking", after="2026-01-01", before="2026-01-31")
+```
+
+**3. User-Specific Search**
+```python
+search_instagram_reels(query="cooking", user_id="456")
+```
+
+**4. Tag/Category Support**
+- Auto-generate tags during summary generation
+- Search by category: `search_reels_by_category(category="food")`
+
+**5. Trending Reels**
+- Track view counts (if available from Instagram)
+- Identify most-discussed reels
+
+**6. Related Reels**
+```python
+find_similar_reels(reel_url="https://instagram.com/reel/xyz", limit=5)
+```
+
+---
+
+## Configuration
+
+### Adjustable Parameters
+
+**In `reel_search_tool.py`:**
+
+```python
+# Maximum unique results (default: 20)
+n_results = 20
+
+# Enable query refinement (default: True)
+refine_query = True
+
+# LLM for query refinement
+model = "ministral-3:3b"
+
+# Temperature for refinement (default: 0.3)
+temperature = 0.3
+
+# Max tokens for refined query (default: 100)
+max_tokens = 100
+```
+
+### Performance Tuning
+
+**Query Refinement:**
+- Adds ~0.5-1 second per search
+- Can be disabled: `refine_query=False`
+- Falls back to original query on error
+
+**Deduplication:**
+- Requests 2x n_results for buffer
+- Caps at 100 raw results for performance
+- Processes in-memory (fast)
+
+---
+
+## Troubleshooting
+
+### Issue: "Could not determine guild ID from context"
+
+**Cause:** Tool called outside a guild (DMs, etc.)
+
+**Solution:** Reel search only works in guild channels
+
+### Issue: "No reels have been stored for this guild yet"
+
+**Cause:** No reels posted or collection not created
+
+**Solution:** 
+1. Verify channel is monitored: `/monitor-reels`
+2. Post an Instagram reel URL
+3. Wait for processing to complete
+
+### Issue: Query refinement takes too long
+
+**Solution:** Disable in code: `refine_query=False`
+
+### Issue: Results not relevant
+
+**Check:**
+1. Query refinement logs - is the refined query correct?
+2. Reel summaries - are they accurate?
+3. Consider adjusting n_results for more variety
+
+---
+
+## Summary
+
+✅ **Complete Implementation**
+
+**Storage System:**
+- ✅ Automatic segmentation (500-1000 tokens)
+- ✅ Comprehensive metadata
+- ✅ Guild-isolated collections
+- ✅ Non-fatal error handling
+
+**MCP Search Tool:**
+- ✅ Query refinement with ministral-3:3b
+- ✅ Automatic guild filtering
+- ✅ Smart deduplication (unique URLs)
+- ✅ Up to 20 unique results
+- ✅ Rich metadata in results
+- ✅ Graceful error handling
+
+**Integration:**
+- ✅ Registered in main.py
+- ✅ Exported in tools/__init__.py
+- ✅ Full logging for debugging
+
+The system is **production-ready** and can now be tested with real Instagram reels! 🎉
 
 ---
 

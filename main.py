@@ -444,6 +444,7 @@ async def main():
             register_google_tools,
             register_meeting_search_by_summary_tool,
             register_meeting_search_by_transcription_tool,
+            register_reel_search_tool,
         )
 
         await register_discord_tools(services_manager.mcp_manager, context)
@@ -451,8 +452,9 @@ async def main():
         await register_google_tools(services_manager.mcp_manager, context)
         await register_meeting_search_by_summary_tool(services_manager.mcp_manager, context)
         await register_meeting_search_by_transcription_tool(services_manager.mcp_manager, context)
+        await register_reel_search_tool(services_manager.mcp_manager, context)
         await logger.info(
-            "[OK] Registered Discord, Discord Info, Google, Meeting Search by Summary, and Meeting Search by Transcription tools with MCP manager."
+            "[OK] Registered Discord, Discord Info, Google, Meeting Search, and Reel Search tools with MCP manager."
         )
 
     # Initialize conversation manager thread ID cache
