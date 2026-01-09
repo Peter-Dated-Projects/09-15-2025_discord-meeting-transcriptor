@@ -20,7 +20,10 @@ class Reels(commands.Cog):
     )
     @commands.has_permissions(administrator=True)
     async def monitor_reels(self, ctx: discord.ApplicationContext):
+        # Get the actual channel ID (parent channel if in thread)
         channel_id = ctx.channel.id
+        if isinstance(ctx.channel, discord.Thread):
+            channel_id = ctx.channel.parent_id
 
         # Check if already monitored
         if self.services.instagram_reels_manager.is_channel_monitored(channel_id):
@@ -33,7 +36,7 @@ class Reels(commands.Cog):
         self.services.instagram_reels_manager.save_config()  # Save explicitly to be safe
 
         await ctx.respond(
-            f"✅ Channel {ctx.channel.mention} is now being monitored for Instagram Reels.",
+            f"✅ Channel <#{channel_id}> is now being monitored for Instagram Reels.",
             ephemeral=False,
         )
 
@@ -43,7 +46,10 @@ class Reels(commands.Cog):
     )
     @commands.has_permissions(administrator=True)
     async def disable_reels_monitoring(self, ctx: discord.ApplicationContext):
+        # Get the actual channel ID (parent channel if in thread)
         channel_id = ctx.channel.id
+        if isinstance(ctx.channel, discord.Thread):
+            channel_id = ctx.channel.parent_id
 
         # Check if channel is being monitored
         if not self.services.instagram_reels_manager.is_channel_monitored(channel_id):
@@ -56,35 +62,25 @@ class Reels(commands.Cog):
         self.services.instagram_reels_manager.save_config()  # Save explicitly to be safe
 
         await ctx.respond(
-            f"✅ Instagram Reels monitoring has been disabled for {ctx.channel.mention}.",
+            f"✅ Instagram Reels monitoring has been disabled for <#{channel_id}>.",
             ephemeral=False,
         )
 
     # Message handler logic
     async def filter_message(self, message: discord.Message) -> bool:
+        # Get the actual channel ID (parent channel if in thread)
+        channel_id = message.channel.id
+        if isinstance(message.channel, discord.Thread):
+            channel_id = message.channel.parent_id
+
         # Check if channel is monitored
-        if not self.services.instagram_reels_manager.is_channel_monitored(message.channel.id):
+        if not self.services.instagram_reels_manager.is_channel_monitored(channel_id):
             return False
 
         if message.author.bot:
             return False
 
-        # Skip if this message would be handled by the chat cog
-        # (bot mention or in conversation thread)
-        # This prevents double-processing - let the LLM handle it via tool
-        if isinstance(message.channel, discord.Thread):
-            thread_id = str(message.channel.id)
-            if self.services.conversation_manager.is_conversation_thread(thread_id):
-                return False
-            if self.services.conversation_manager.is_known_thread(thread_id):
-                return False
-
-        # Skip if bot is mentioned (chat cog will handle it)
-        if self.bot.user in message.mentions:
-            return False
-
         # Only process if it has a reel URL
-        # Basic check, detailed check later
         if "instagram.com" in message.content:
             return True
 
@@ -184,7 +180,6 @@ class Reels(commands.Cog):
         import re
 
         content = message.content
-        # Basic check to avoid processing every message
         # Regex for Instagram Reel URL
         url_match = re.search(r"(https?://www\.instagram\.com/(?:reel|p)/[\w-]+)", content)
 

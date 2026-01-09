@@ -46,6 +46,7 @@ class Chat(commands.Cog):
         - In a guild (not DMs)
         - From a non-bot user
         - Thread monitoring is not stopped (unless bot is mentioned to re-enable)
+        - Channel is not monitoring reels (reels channels don't accept general LLM queries)
 
         Args:
             message: The Discord message object
@@ -61,12 +62,23 @@ class Chat(commands.Cog):
         if not message.guild:
             return False
 
-        # Check if bot is mentioned (this always takes priority)
+        # Check if bot is mentioned (this always takes priority for some checks)
         bot_mentioned = self.bot.user in message.mentions
 
         # Check if message is in a thread
         if isinstance(message.channel, discord.Thread):
             thread_id = str(message.channel.id)
+
+            # Check if parent channel is monitoring reels
+            # Allow threads with active conversations, but block new conversations
+            parent_channel_id = message.channel.parent_id
+            if self.services.instagram_reels_manager.is_channel_monitored(parent_channel_id):
+                # Only allow if this thread already has an active conversation
+                has_conversation = self.services.conversation_manager.is_conversation_thread(
+                    thread_id
+                ) or self.services.conversation_manager.is_known_thread(thread_id)
+                if not has_conversation:
+                    return False
 
             # If monitoring is stopped for this thread
             if self.services.conversation_manager.is_monitoring_stopped(thread_id):
@@ -107,6 +119,11 @@ class Chat(commands.Cog):
                     await self.services.logging_service.error(
                         f"Failed to load conversation for thread {thread_id}: {e}"
                     )
+
+        # Block bot mentions in reel-monitored channels (main channel, not threads)
+        else:
+            if self.services.instagram_reels_manager.is_channel_monitored(message.channel.id):
+                return False
 
         # Check if the bot is mentioned
         if not bot_mentioned:
