@@ -41,6 +41,7 @@ class Chat(commands.Cog):
         - The message is in a thread with an active conversation (in-memory or SQL)
         - In a guild (not DMs)
         - From a non-bot user
+        - Thread monitoring is not stopped (unless bot is mentioned to re-enable)
 
         Args:
             message: The Discord message object
@@ -56,9 +57,26 @@ class Chat(commands.Cog):
         if not message.guild:
             return False
 
+        # Check if bot is mentioned (this always takes priority)
+        bot_mentioned = self.bot.user in message.mentions
+
         # Check if message is in a thread
         if isinstance(message.channel, discord.Thread):
             thread_id = str(message.channel.id)
+
+            # If monitoring is stopped for this thread
+            if self.services.conversation_manager.is_monitoring_stopped(thread_id):
+                # Only resume if bot is mentioned
+                if bot_mentioned:
+                    # Resume monitoring
+                    self.services.conversation_manager.resume_monitoring(thread_id)
+                    await self.services.logging_service.info(
+                        f"Resumed monitoring thread {thread_id} due to bot mention"
+                    )
+                    return True
+                else:
+                    # Don't respond - monitoring is stopped
+                    return False
 
             # Check if conversation is already in memory
             if self.services.conversation_manager.is_conversation_thread(thread_id):
@@ -85,7 +103,7 @@ class Chat(commands.Cog):
                     )
 
         # Check if the bot is mentioned
-        if self.bot.user not in message.mentions:
+        if not bot_mentioned:
             return False
 
         return True

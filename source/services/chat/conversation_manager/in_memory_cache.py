@@ -333,6 +333,7 @@ class InMemoryConversationManager:
         conversations: Dictionary mapping thread IDs to Conversation objects
         cleanup_tasks: Dictionary mapping thread IDs to cleanup task handles
         known_thread_ids: Set of all thread IDs that exist in SQL (for fast lookup)
+        stopped_threads: Set of thread IDs where monitoring has been stopped
     """
 
     # 5 minutes in seconds
@@ -351,6 +352,7 @@ class InMemoryConversationManager:
         self.cleanup_tasks: dict[str, asyncio.Task] = {}
         self.conversation_file_manager = conversation_file_manager
         self.known_thread_ids: set[str] = set()
+        self.stopped_threads: set[str] = set()
 
     def create_conversation(
         self,
@@ -703,3 +705,37 @@ class InMemoryConversationManager:
             task.cancel()
 
         self.cleanup_tasks.clear()
+
+    def stop_monitoring(self, thread_id: str) -> bool:
+        """Stop monitoring a thread. The bot will not respond to messages in this thread
+        unless it's mentioned again.
+
+        Args:
+            thread_id: Discord thread ID to stop monitoring
+
+        Returns:
+            True if the thread was being monitored and is now stopped, False otherwise
+        """
+        if thread_id in self.conversations or thread_id in self.known_thread_ids:
+            self.stopped_threads.add(thread_id)
+            return True
+        return False
+
+    def resume_monitoring(self, thread_id: str) -> None:
+        """Resume monitoring a thread that was previously stopped.
+
+        Args:
+            thread_id: Discord thread ID to resume monitoring
+        """
+        self.stopped_threads.discard(thread_id)
+
+    def is_monitoring_stopped(self, thread_id: str) -> bool:
+        """Check if monitoring is stopped for a thread.
+
+        Args:
+            thread_id: Discord thread ID
+
+        Returns:
+            True if monitoring is stopped, False otherwise
+        """
+        return thread_id in self.stopped_threads
