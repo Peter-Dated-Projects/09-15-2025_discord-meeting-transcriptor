@@ -41,6 +41,7 @@ class Chat(commands.Cog):
         - The message is in a thread with an active conversation (in-memory or SQL)
         - In a guild (not DMs)
         - From a non-bot user
+        - NOT in a channel designated for Reels monitoring
 
         Args:
             message: The Discord message object
@@ -54,6 +55,10 @@ class Chat(commands.Cog):
 
         # Only respond in guilds (not DMs)
         if not message.guild:
+            return False
+
+        # Check if channel is used for Reels monitoring (single-purpose enforcement)
+        if self.services.instagram_reels_manager.is_channel_monitored(message.channel.id):
             return False
 
         # Check if message is in a thread

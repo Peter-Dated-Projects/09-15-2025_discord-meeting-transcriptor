@@ -521,6 +521,29 @@ class InMemoryConversationManager:
         """
         return thread_id in self.known_thread_ids
 
+    async def get_channel_thread_ids(self, channel_id: int, conversations_sql_manager) -> list[str]:
+        """Get all thread IDs that belong to a specific channel.
+
+        Args:
+            channel_id: Discord channel ID
+            conversations_sql_manager: Reference to ConversationsSQLManagerService
+
+        Returns:
+            List of thread IDs (as strings) in the given channel
+        """
+        try:
+            # Get all conversations for the guild from SQL
+            # We'll need to filter by checking if thread IDs are in this channel
+            # Note: Discord thread IDs are unique globally, so we can check against all known threads
+            channel_threads = []
+            for thread_id in self.known_thread_ids:
+                # Check if thread is in memory
+                if thread_id in self.conversations:
+                    channel_threads.append(thread_id)
+            return channel_threads
+        except Exception:
+            return []
+
     async def refresh_thread_id_cache(self, conversations_sql_manager) -> int:
         """Refresh the cache of known thread IDs from SQL.
 

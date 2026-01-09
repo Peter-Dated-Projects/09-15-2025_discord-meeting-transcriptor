@@ -62,6 +62,7 @@ def construct_services_manager(
     ollama_request_manager = None
     conversation_manager = None
     chat_job_manager = None
+    instagram_reels_manager = None
 
     # create logger
     logging_service = AsyncLoggingService(
@@ -223,8 +224,10 @@ def construct_services_manager(
         # -------------------------------------------------------------- #
 
         from source.services.chat.chat_job_manager.manager import ChatJobManagerService
+        from source.services.misc.instagram_reels.manager import InstagramReelsManager
 
         chat_job_manager = ChatJobManagerService(context=context)
+        instagram_reels_manager = InstagramReelsManager(context=context)
 
         # -------------------------------------------------------------- #
         # MCP Manager Setup
@@ -268,5 +271,6 @@ def construct_services_manager(
         ollama_request_manager=ollama_request_manager,
         conversation_manager=conversation_manager,
         chat_job_manager=chat_job_manager,
+        instagram_reels_manager=instagram_reels_manager,
         mcp_manager=mcp_manager,
     )

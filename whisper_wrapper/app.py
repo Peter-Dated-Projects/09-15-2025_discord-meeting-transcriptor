@@ -149,8 +149,34 @@ def inference():
                 502,
             )
 
+        # Handle different response formats
+        if response_format in ["text", "vtt", "srt"]:
+            # For text-based formats, return the content directly
+            logger.info(f"Received {response_format} response from whisper server")
+            return response.text, 200
+
+        # For JSON formats (json, verbose_json), parse and sanitaze
         # Get raw response from whisper-server
-        raw = response.json()
+        try:
+            raw = response.json()
+        except (ValueError, requests.exceptions.JSONDecodeError) as e:
+            logger.error(
+                f"Failed to decode JSON from whisper server. Response content: {response.text!r}"
+            )
+            # If the response is empty or just whitespace, it might be an empty transcription result
+            if not response.text.strip():
+                # Construct a valid empty response based on the format
+                if response_format == "verbose_json":
+                    raw = {"text": "", "segments": []}
+                else:
+                    raw = {"text": ""}
+                logger.warning(
+                    "Received empty response from whisper server, treating as empty transcription"
+                )
+            else:
+                raise RuntimeError(
+                    f"Invalid JSON response from whisper server: {response.text!r}"
+                ) from e
 
         # Sanitize timestamps to fix whisper-cpp bugs with long audio files
         try:

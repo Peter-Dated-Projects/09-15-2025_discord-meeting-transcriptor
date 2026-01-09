@@ -40,6 +40,7 @@ class ServicesManager:
         conversation_manager: Any | None = None,
         chat_job_manager: Any | None = None,
         mcp_manager: Any | None = None,
+        instagram_reels_manager: Any | None = None,
     ):
         self.context = context
         # Backward compatibility - keep server reference
@@ -93,6 +94,9 @@ class ServicesManager:
 
         # MCP manager
         self.mcp_manager = mcp_manager
+
+        # Instagram Reels manager
+        self.instagram_reels_manager = instagram_reels_manager
 
     async def initialize_all(self) -> None:
         """Initialize all service managers."""
