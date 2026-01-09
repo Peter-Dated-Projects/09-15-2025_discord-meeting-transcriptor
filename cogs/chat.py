@@ -1,4 +1,5 @@
 import logging
+import os
 
 import discord
 from discord.ext import commands
@@ -12,6 +13,9 @@ from source.services.chat.conversation_manager.in_memory_cache import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Get the context cleaner model from environment
+OLLAMA_CONTEXT_CLEANER_MODEL = os.getenv("OLLAMA_CONTEXT_CLEANER_MODEL", "gemma3:12b")
 
 
 # -------------------------------------------------------------- #
@@ -41,6 +45,7 @@ class Chat(commands.Cog):
         - The message is in a thread with an active conversation (in-memory or SQL)
         - In a guild (not DMs)
         - From a non-bot user
+        - Thread monitoring is not stopped (unless bot is mentioned to re-enable)
 
         Args:
             message: The Discord message object
@@ -56,9 +61,28 @@ class Chat(commands.Cog):
         if not message.guild:
             return False
 
+        # Check if bot is mentioned (this always takes priority)
+        bot_mentioned = self.bot.user in message.mentions
+
         # Check if message is in a thread
         if isinstance(message.channel, discord.Thread):
             thread_id = str(message.channel.id)
+
+            # If monitoring is stopped for this thread
+            if self.services.conversation_manager.is_monitoring_stopped(thread_id):
+                # Only resume if bot is mentioned
+                if bot_mentioned:
+                    # Resume monitoring
+                    self.services.conversation_manager.resume_monitoring(
+                        thread_id, self.services.conversations_sql_manager
+                    )
+                    await self.services.logging_service.info(
+                        f"Resumed monitoring thread {thread_id} due to bot mention"
+                    )
+                    return True
+                else:
+                    # Don't respond - monitoring is stopped
+                    return False
 
             # Check if conversation is already in memory
             if self.services.conversation_manager.is_conversation_thread(thread_id):
@@ -85,7 +109,7 @@ class Chat(commands.Cog):
                     )
 
         # Check if the bot is mentioned
-        if self.bot.user not in message.mentions:
+        if not bot_mentioned:
             return False
 
         return True
@@ -404,6 +428,140 @@ class Chat(commands.Cog):
                 f"Failed to get conversation ID for thread {thread_id}: {e}"
             )
             return None
+
+    # -------------------------------------------------------------- #
+    # Slash Commands
+    # -------------------------------------------------------------- #
+
+    @commands.slash_command(
+        name="stop-monitoring-channel",
+        description="Stop the bot from monitoring this conversation thread",
+    )
+    async def stop_monitoring_channel(self, ctx: discord.ApplicationContext):
+        """Stop monitoring the current conversation thread.
+
+        The bot will no longer respond to messages in this thread unless
+        it is mentioned again. This is useful when the user is done with
+        the conversation and wants to end the interaction.
+        """
+        # Log command invocation
+        await self.services.logging_service.info(
+            f"User {ctx.author.id} ({ctx.author.name}) requested stop-monitoring-channel in channel {ctx.channel_id}"
+        )
+
+        # Defer response
+        await ctx.defer(ephemeral=True)
+
+        try:
+            # Check if we're in a thread
+            if not isinstance(ctx.channel, discord.Thread):
+                embed = discord.Embed(
+                    title="❌ Not in a Thread",
+                    description="This command can only be used in a conversation thread.",
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+                return
+
+            thread_id = str(ctx.channel.id)
+
+            # Check if this thread has a conversation (in memory or SQL)
+            has_conversation = self.services.conversation_manager.is_conversation_thread(
+                thread_id
+            ) or self.services.conversation_manager.is_known_thread(thread_id)
+
+            if not has_conversation:
+                embed = discord.Embed(
+                    title="❌ No Conversation Found",
+                    description="This thread does not have an active conversation to stop monitoring.",
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+                return
+
+            # Check if already stopped
+            if self.services.conversation_manager.is_monitoring_stopped(thread_id):
+                embed = discord.Embed(
+                    title="ℹ️ Already Stopped",
+                    description="Monitoring for this thread is already stopped. Mention the bot to resume.",
+                    color=discord.Color.blue(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+                return
+
+            # Stop monitoring
+            was_monitoring = self.services.conversation_manager.stop_monitoring(
+                thread_id, self.services.conversations_sql_manager
+            )
+
+            if was_monitoring:
+                await self.services.logging_service.info(
+                    f"Stopped monitoring thread {thread_id} via command by user {ctx.author.id}"
+                )
+
+                # Send confirmation message FIRST
+                embed = discord.Embed(
+                    title="✅ Monitoring Stopped",
+                    description=(
+                        "The bot will no longer respond to messages in this thread.\n\n"
+                        "To resume the conversation, simply mention the bot."
+                    ),
+                    color=discord.Color.green(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+
+                # Run context cleaning workflow AFTER sending confirmation
+                try:
+                    conversation = self.services.conversation_manager.get_conversation(thread_id)
+                    if conversation:
+                        # Import here to avoid circular imports
+                        from source.services.chat.mcp.subroutine_manager.subroutines.context_cleaning import (
+                            ContextCleaningSubroutine,
+                        )
+
+                        await self.services.logging_service.info(
+                            f"Running context cleaning for thread {thread_id} after stopping monitoring via command"
+                        )
+
+                        # Create and run the context cleaning subroutine
+                        subroutine = ContextCleaningSubroutine(
+                            ollama_request_manager=self.services.ollama_request_manager,
+                            conversation=conversation,
+                            model=OLLAMA_CONTEXT_CLEANER_MODEL,
+                            logging_service=self.services.logging_service,
+                        )
+
+                        await subroutine.ainvoke({"messages": []})
+
+                        # Save the updated conversation
+                        await conversation.save_conversation()
+
+                        await self.services.logging_service.info(
+                            f"Context cleaning completed for thread {thread_id}"
+                        )
+                except Exception as e:
+                    # Log the error but don't fail the stop monitoring operation
+                    await self.services.logging_service.error(
+                        f"Failed to run context cleaning after stop-monitoring-channel: {str(e)}"
+                    )
+            else:
+                embed = discord.Embed(
+                    title="❌ Failed to Stop Monitoring",
+                    description="This thread was not being monitored or does not exist.",
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Error in stop-monitoring-channel command: {e}", exc_info=True
+            )
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"An error occurred while stopping monitoring: {str(e)}",
+                color=discord.Color.red(),
+            )
+            await ctx.followup.send(embed=embed, ephemeral=True)
 
 
 def setup(context: Context):

@@ -276,6 +276,7 @@ class ConversationsModel(Base):
     Chat Meta = JSON metadata for the conversation (stored as empty JSON by default)
     Discord Requester ID = Discord User ID of the user who initiated the conversation
     Discord Guild ID = Discord Guild (Server) ID of the conversation
+    Monitoring Stopped = Boolean indicating if monitoring is stopped for this conversation
     """
 
     __tablename__ = "conversations"
@@ -287,6 +288,7 @@ class ConversationsModel(Base):
     chat_meta = Column(JSON, nullable=False, default=dict)
     discord_requester_id = Column(String(20), nullable=False, index=True)
     discord_guild_id = Column(String(20), nullable=False, index=True)
+    monitoring_stopped = Column(Integer, nullable=False, default=0, server_default="0")
 
 
 class ConversationsStoreModel(Base):

@@ -81,6 +81,7 @@ class ConversationsSQLManagerService(Manager):
             "chat_meta": chat_meta if chat_meta is not None else {},
             "discord_requester_id": discord_requester_id,
             "discord_guild_id": discord_guild_id,
+            "monitoring_stopped": 0,
         }
 
         # Build and execute insert statement
@@ -225,6 +226,60 @@ class ConversationsSQLManagerService(Manager):
             f"Found {len(results)} conversations for requester: {discord_requester_id}"
         )
         return results if isinstance(results, list) else []
+
+    async def update_monitoring_stopped(
+        self, discord_thread_id: str, monitoring_stopped: bool
+    ) -> bool:
+        """Update the monitoring_stopped status for a conversation.
+
+        Args:
+            discord_thread_id: Discord Thread ID
+            monitoring_stopped: True to stop monitoring, False to resume
+
+        Returns:
+            True if update was successful, False if conversation not found
+        """
+        if not discord_thread_id or len(discord_thread_id) < 16:
+            raise ValueError("discord_thread_id must be at least 16 characters long")
+
+        # Convert boolean to integer (0 or 1) for SQLite
+        monitoring_value = 1 if monitoring_stopped else 0
+
+        # Build update query
+        stmt = (
+            update(ConversationsModel)
+            .where(ConversationsModel.discord_thread_id == discord_thread_id)
+            .values(monitoring_stopped=monitoring_value, updated_at=get_current_timestamp_est())
+        )
+
+        # Execute update
+        await self.server.sql_client.execute(stmt)
+        await self.services.logging_service.info(
+            f"Updated monitoring_stopped={monitoring_stopped} for thread {discord_thread_id}"
+        )
+        return True
+
+    async def get_all_stopped_thread_ids(self) -> list[str]:
+        """Retrieve all thread IDs that have monitoring stopped.
+
+        Returns:
+            List of Discord thread IDs with monitoring stopped
+        """
+        # Build select query for threads with monitoring_stopped = 1
+        query = select(ConversationsModel.discord_thread_id).where(
+            ConversationsModel.monitoring_stopped == 1
+        )
+
+        # Execute query
+        results = await self.server.sql_client.execute(query)
+
+        # Extract thread IDs from results
+        thread_ids = [row["discord_thread_id"] for row in results] if results else []
+
+        await self.services.logging_service.debug(
+            f"Found {len(thread_ids)} threads with monitoring stopped"
+        )
+        return thread_ids
 
     async def retrieve_conversations_by_guild_id(self, discord_guild_id: str) -> list[dict]:
         """
