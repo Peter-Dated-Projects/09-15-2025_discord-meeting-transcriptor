@@ -34,6 +34,29 @@ class Reels(commands.Cog):
             ephemeral=False,
         )
 
+    @discord.slash_command(
+        name="disable-reels-monitoring",
+        description="Disable Instagram Reels monitoring for the current channel",
+    )
+    @commands.has_permissions(administrator=True)
+    async def disable_reels_monitoring(self, ctx: discord.ApplicationContext):
+        channel_id = ctx.channel.id
+
+        # Check if channel is being monitored
+        if not self.services.instagram_reels_manager.is_channel_monitored(channel_id):
+            await ctx.respond(
+                "This channel is not currently being monitored for Instagram Reels.", ephemeral=True
+            )
+            return
+
+        self.services.instagram_reels_manager.remove_channel(channel_id)
+        self.services.instagram_reels_manager.save_config()  # Save explicitly to be safe
+
+        await ctx.respond(
+            f"✅ Instagram Reels monitoring has been disabled for {ctx.channel.mention}.",
+            ephemeral=False,
+        )
+
     # Message handler logic
     async def filter_message(self, message: discord.Message) -> bool:
         # Check if channel is monitored
