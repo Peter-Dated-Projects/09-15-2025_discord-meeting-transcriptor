@@ -17,6 +17,7 @@ from source.services.chat.mcp.tools.meeting_search_by_transcription_tool import 
     register_meeting_search_by_transcription_tool,
 )
 from source.services.chat.mcp.tools.reel_search_tool import register_reel_search_tool
+from source.services.chat.mcp.tools.reel_process_tool import register_reel_process_tool
 
 __all__ = [
     "register_conversation_control_tools",
@@ -26,4 +27,5 @@ __all__ = [
     "register_meeting_search_by_summary_tool",
     "register_meeting_search_by_transcription_tool",
     "register_reel_search_tool",
+    "register_reel_process_tool",
 ]

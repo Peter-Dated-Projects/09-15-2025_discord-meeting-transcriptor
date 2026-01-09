@@ -262,7 +262,11 @@ class Conversation:
         Returns:
             Conversation instance
         """
-        history = [Message.from_json(msg_data) for msg_data in data.get("history", [])]
+        # Load all messages from history
+        all_messages = [Message.from_json(msg_data) for msg_data in data.get("history", [])]
+
+        # Only include messages with is_context=True to avoid loading cleaned-out context
+        history = [msg for msg in all_messages if msg.is_context]
 
         return cls(
             thread_id=thread_id,

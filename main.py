@@ -446,6 +446,7 @@ async def main():
             register_meeting_search_by_summary_tool,
             register_meeting_search_by_transcription_tool,
             register_reel_search_tool,
+            register_reel_process_tool,
         )
 
         await register_conversation_control_tools(services_manager.mcp_manager, context)
@@ -455,6 +456,7 @@ async def main():
         await register_meeting_search_by_summary_tool(services_manager.mcp_manager, context)
         await register_meeting_search_by_transcription_tool(services_manager.mcp_manager, context)
         await register_reel_search_tool(services_manager.mcp_manager, context)
+        register_reel_process_tool(services_manager.mcp_manager, context)
         await logger.info(
             "[OK] Registered Conversation Control, Discord, Discord Info, Google, Meeting Search, and Reel Search tools with MCP manager."
         )

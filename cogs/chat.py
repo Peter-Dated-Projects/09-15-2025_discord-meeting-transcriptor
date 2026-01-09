@@ -46,6 +46,7 @@ class Chat(commands.Cog):
         - In a guild (not DMs)
         - From a non-bot user
         - Thread monitoring is not stopped (unless bot is mentioned to re-enable)
+        - Channel is not monitoring reels (reels channels don't accept general LLM queries)
 
         Args:
             message: The Discord message object
@@ -61,12 +62,18 @@ class Chat(commands.Cog):
         if not message.guild:
             return False
 
-        # Check if bot is mentioned (this always takes priority)
+        # Check if bot is mentioned (this always takes priority for some checks)
         bot_mentioned = self.bot.user in message.mentions
 
         # Check if message is in a thread
         if isinstance(message.channel, discord.Thread):
             thread_id = str(message.channel.id)
+
+            # Check if parent channel is monitoring reels
+            # Block ALL LLM queries in reel-monitored channels, even in existing threads
+            parent_channel_id = message.channel.parent_id
+            if self.services.instagram_reels_manager.is_channel_monitored(parent_channel_id):
+                return False
 
             # If monitoring is stopped for this thread
             if self.services.conversation_manager.is_monitoring_stopped(thread_id):
@@ -108,6 +115,11 @@ class Chat(commands.Cog):
                         f"Failed to load conversation for thread {thread_id}: {e}"
                     )
 
+        # Block bot mentions in reel-monitored channels (main channel, not threads)
+        else:
+            if self.services.instagram_reels_manager.is_channel_monitored(message.channel.id):
+                return False
+
         # Check if the bot is mentioned
         if not bot_mentioned:
             return False
@@ -144,6 +156,10 @@ class Chat(commands.Cog):
         """
 
         try:
+            # Note: Reel-monitored channel filtering is handled in filter_message()
+            # Messages that reach handle_message have already passed all filters
+            # No need for redundant checks here
+
             # Gather message and guild information
             guild_id = str(message.guild.id)
             guild_name = message.guild.name
@@ -205,6 +221,7 @@ class Chat(commands.Cog):
                                 user_id=author_id,
                                 attachments=attachments if attachments else None,
                                 guild_id=guild_id,
+                                discord_message=message,
                             )
                             await self.services.logging_service.info(
                                 f"Created chat job {job_id} for existing thread {thread_id}"
@@ -288,6 +305,7 @@ class Chat(commands.Cog):
                                 user_id=author_id,
                                 attachments=attachments if attachments else None,
                                 guild_id=guild_id,
+                                discord_message=message,
                             )
 
                             await self.services.logging_service.info(
@@ -376,6 +394,7 @@ class Chat(commands.Cog):
                 user_id=author_id,
                 attachments=attachments if attachments else None,
                 guild_id=guild_id,
+                discord_message=message,
             )
 
             await self.services.logging_service.info(

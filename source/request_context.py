@@ -8,18 +8,20 @@ every function call.
 """
 
 from contextvars import ContextVar
-from typing import Optional
+from typing import Any, Optional
 
 # Context variables for request-scoped data
 current_guild_id: ContextVar[Optional[str]] = ContextVar("current_guild_id", default=None)
 current_thread_id: ContextVar[Optional[str]] = ContextVar("current_thread_id", default=None)
 current_user_id: ContextVar[Optional[str]] = ContextVar("current_user_id", default=None)
+current_message: ContextVar[Optional[Any]] = ContextVar("current_message", default=None)
 
 
 def set_request_context(
     guild_id: Optional[str] = None,
     thread_id: Optional[str] = None,
     user_id: Optional[str] = None,
+    message: Optional[Any] = None,
 ) -> None:
     """
     Set the current request context variables.
@@ -28,6 +30,7 @@ def set_request_context(
         guild_id: The ID of the current guild
         thread_id: The ID of the current thread
         user_id: The ID of the current user
+        message: The current Discord message object
     """
     if guild_id is not None:
         current_guild_id.set(guild_id)
@@ -35,6 +38,8 @@ def set_request_context(
         current_thread_id.set(thread_id)
     if user_id is not None:
         current_user_id.set(user_id)
+    if message is not None:
+        current_message.set(message)
 
 
 def clear_request_context() -> None:
@@ -44,3 +49,4 @@ def clear_request_context() -> None:
     current_guild_id.set(None)
     current_thread_id.set(None)
     current_user_id.set(None)
+    current_message.set(None)
