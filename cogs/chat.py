@@ -70,15 +70,10 @@ class Chat(commands.Cog):
             thread_id = str(message.channel.id)
 
             # Check if parent channel is monitoring reels
-            # Allow threads with active conversations, but block new conversations
+            # Block ALL LLM queries in reel-monitored channels, even in existing threads
             parent_channel_id = message.channel.parent_id
             if self.services.instagram_reels_manager.is_channel_monitored(parent_channel_id):
-                # Only allow if this thread already has an active conversation
-                has_conversation = self.services.conversation_manager.is_conversation_thread(
-                    thread_id
-                ) or self.services.conversation_manager.is_known_thread(thread_id)
-                if not has_conversation:
-                    return False
+                return False
 
             # If monitoring is stopped for this thread
             if self.services.conversation_manager.is_monitoring_stopped(thread_id):
@@ -161,6 +156,10 @@ class Chat(commands.Cog):
         """
 
         try:
+            # Note: Reel-monitored channel filtering is handled in filter_message()
+            # Messages that reach handle_message have already passed all filters
+            # No need for redundant checks here
+
             # Gather message and guild information
             guild_id = str(message.guild.id)
             guild_name = message.guild.name
