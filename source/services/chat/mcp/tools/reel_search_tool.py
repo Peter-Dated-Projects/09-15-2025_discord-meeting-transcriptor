@@ -12,6 +12,8 @@ import asyncio
 import json
 from typing import TYPE_CHECKING, Any, Dict, List
 
+from source.request_context import current_guild_id
+
 if TYPE_CHECKING:
     from source.context import Context
     from source.services.chat.mcp import MCPManager
@@ -145,12 +147,8 @@ async def query_reel_summaries(
     vector_db_client = services.server.vector_db_client
     logging_service = services.logging_service
 
-    # Get current guild ID from context
-    guild_id = None
-    if context.message and hasattr(context.message, "guild") and context.message.guild:
-        guild_id = str(context.message.guild.id)
-    elif context.thread and hasattr(context.thread, "guild") and context.thread.guild:
-        guild_id = str(context.thread.guild.id)
+    # Get current guild ID from request context
+    guild_id = current_guild_id.get()
 
     if not guild_id:
         return {
