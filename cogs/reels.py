@@ -81,6 +81,9 @@ class Reels(commands.Cog):
             logger.info(f"Skipping already-processed reel: {url}")
             return
 
+        # Mark as processing immediately to prevent race conditions
+        self.services.instagram_reels_manager.mark_reel_processed(url, guild_id)
+
         status_msg = await message.reply("🔄 Processing Instagram Reel...", mention_author=False)
 
         try:
@@ -123,8 +126,6 @@ class Reels(commands.Cog):
                     timestamp=message.created_at.isoformat(),
                 )
 
-                # Mark as processed after successful storage
-                self.services.instagram_reels_manager.mark_reel_processed(url, guild_id)
                 logger.info(f"Successfully stored reel embeddings for {url}")
 
             except Exception as storage_error:
