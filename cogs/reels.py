@@ -54,6 +54,7 @@ class Reels(commands.Cog):
         # "run ministral-3:3b with the verification cool to check if the message has an instragram reel URL"
         import re
         import json
+        from datetime import datetime
 
         content = message.content
         # Basic check to avoid processing every message
@@ -89,6 +90,32 @@ class Reels(commands.Cog):
             )
 
             await status_msg.edit(content="", embed=embed)
+
+            # Store reel summary in vectordb for future retrieval
+            try:
+                from source.services.misc.instagram_reels.storage import (
+                    generate_and_store_reel_embeddings,
+                )
+
+                await generate_and_store_reel_embeddings(
+                    services=self.services,
+                    summary_text=summary,
+                    reel_url=url,
+                    guild_id=str(message.guild.id) if message.guild else "DM",
+                    message_id=str(message.id),
+                    message_content=message.content,
+                    user_id=str(message.author.id),
+                    channel_id=str(message.channel.id),
+                    timestamp=message.created_at.isoformat(),
+                )
+
+                logger.info(f"Successfully stored reel embeddings for {url}")
+
+            except Exception as storage_error:
+                # Don't fail the whole operation if storage fails
+                logger.error(
+                    f"Failed to store reel embeddings for {url}: {storage_error}", exc_info=True
+                )
 
         except Exception as e:
             logger.error(f"Error processing reel: {e}", exc_info=True)
