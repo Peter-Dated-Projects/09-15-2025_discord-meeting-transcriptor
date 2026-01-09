@@ -333,6 +333,7 @@ class InMemoryConversationManager:
         conversations: Dictionary mapping thread IDs to Conversation objects
         cleanup_tasks: Dictionary mapping thread IDs to cleanup task handles
         known_thread_ids: Set of all thread IDs that exist in SQL (for fast lookup)
+        stopped_threads: Set of thread IDs where monitoring has been stopped
     """
 
     # 5 minutes in seconds
@@ -351,6 +352,7 @@ class InMemoryConversationManager:
         self.cleanup_tasks: dict[str, asyncio.Task] = {}
         self.conversation_file_manager = conversation_file_manager
         self.known_thread_ids: set[str] = set()
+        self.stopped_threads: set[str] = set()
 
     def create_conversation(
         self,
@@ -703,3 +705,85 @@ class InMemoryConversationManager:
             task.cancel()
 
         self.cleanup_tasks.clear()
+
+    def stop_monitoring(self, thread_id: str, conversations_sql_manager=None) -> bool:
+        """Stop monitoring a thread. The bot will not respond to messages in this thread
+        unless it's mentioned again.
+
+        Args:
+            thread_id: Discord thread ID to stop monitoring
+            conversations_sql_manager: Optional SQL manager to persist the state
+
+        Returns:
+            True if the thread was being monitored and is now stopped, False otherwise
+        """
+        if thread_id in self.conversations or thread_id in self.known_thread_ids:
+            self.stopped_threads.add(thread_id)
+
+            # Persist to database if SQL manager is provided
+            if conversations_sql_manager:
+                import asyncio
+
+                try:
+                    # Run the async update in a background task
+                    asyncio.create_task(
+                        conversations_sql_manager.update_monitoring_stopped(thread_id, True)
+                    )
+                except Exception:
+                    # Silently fail - the in-memory state is still updated
+                    pass
+
+            return True
+        return False
+
+    def resume_monitoring(self, thread_id: str, conversations_sql_manager=None) -> None:
+        """Resume monitoring a thread that was previously stopped.
+
+        Args:
+            thread_id: Discord thread ID to resume monitoring
+            conversations_sql_manager: Optional SQL manager to persist the state
+        """
+        self.stopped_threads.discard(thread_id)
+
+        # Persist to database if SQL manager is provided
+        if conversations_sql_manager:
+            import asyncio
+
+            try:
+                # Run the async update in a background task
+                asyncio.create_task(
+                    conversations_sql_manager.update_monitoring_stopped(thread_id, False)
+                )
+            except Exception:
+                # Silently fail - the in-memory state is still updated
+                pass
+
+    def is_monitoring_stopped(self, thread_id: str) -> bool:
+        """Check if monitoring is stopped for a thread.
+
+        Args:
+            thread_id: Discord thread ID
+
+        Returns:
+            True if monitoring is stopped, False otherwise
+        """
+        return thread_id in self.stopped_threads
+
+    async def load_stopped_threads_from_db(self, conversations_sql_manager) -> int:
+        """Load all stopped thread IDs from the database into memory.
+
+        This should be called during bot startup to restore the monitoring states.
+
+        Args:
+            conversations_sql_manager: SQL manager to query stopped threads
+
+        Returns:
+            Number of stopped threads loaded
+        """
+        try:
+            stopped_thread_ids = await conversations_sql_manager.get_all_stopped_thread_ids()
+            self.stopped_threads.update(stopped_thread_ids)
+            return len(stopped_thread_ids)
+        except Exception:
+            # Return 0 if loading fails
+            return 0

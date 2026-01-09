@@ -451,6 +451,11 @@ class ChatJob(Job):
                         )
                     )
 
+                    # Check if this is a stop_conversation_monitoring tool result
+                    if "[No Longer Monitoring Channel]" in msg.content:
+                        # Send the hardcoded flag message to Discord
+                        await self._send_discord_message("\n[No Longer Monitoring Channel]")
+
             # Save conversation
             await conversation.save_conversation()
             await self.services.conversations_sql_manager.update_conversation_timestamp(
