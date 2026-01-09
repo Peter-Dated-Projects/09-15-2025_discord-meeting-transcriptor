@@ -221,6 +221,7 @@ class Chat(commands.Cog):
                                 user_id=author_id,
                                 attachments=attachments if attachments else None,
                                 guild_id=guild_id,
+                                discord_message=message,
                             )
                             await self.services.logging_service.info(
                                 f"Created chat job {job_id} for existing thread {thread_id}"
@@ -304,6 +305,7 @@ class Chat(commands.Cog):
                                 user_id=author_id,
                                 attachments=attachments if attachments else None,
                                 guild_id=guild_id,
+                                discord_message=message,
                             )
 
                             await self.services.logging_service.info(
@@ -392,6 +394,7 @@ class Chat(commands.Cog):
                 user_id=author_id,
                 attachments=attachments if attachments else None,
                 guild_id=guild_id,
+                discord_message=message,
             )
 
             await self.services.logging_service.info(

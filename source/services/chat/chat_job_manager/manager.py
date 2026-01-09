@@ -119,7 +119,7 @@ class ChatJob(Job):
     services: ServicesManager = None  # type: ignore
     message_queue: deque[QueuedUserMessage] = field(default_factory=deque)
     guild_id: str | None = None
-    _downloaded_attachments: list[dict] = field(default_factory=list)  # Track for cleanup
+    discord_message: any = None  # Discord Message object for context
     _downloaded_attachments: list[dict] = field(default_factory=list)  # Track for cleanup
 
     # -------------------------------------------------------------- #
@@ -167,7 +167,7 @@ class ChatJob(Job):
                 pass
 
         set_request_context(
-            guild_id=guild_id, thread_id=self.thread_id, user_id=self.initial_user_id
+            guild_id=guild_id, thread_id=self.thread_id, user_id=self.initial_user_id, message=self.discord_message
         )
 
         try:
@@ -1561,6 +1561,7 @@ class ChatJobManagerService(Manager):
         user_id: str,
         attachments: list[dict] | None = None,
         guild_id: str | None = None,
+        discord_message: any = None,
     ) -> str:
         """
         Create and queue a new chat job.
@@ -1586,6 +1587,7 @@ class ChatJobManagerService(Manager):
             initial_message=message,
             initial_user_id=user_id,
             guild_id=guild_id,
+            discord_message=discord_message,
         )
         chat_job.services = self.services
 
