@@ -707,24 +707,54 @@ class General(commands.Cog):
                     inline=False,
                 )
 
-            # Add footer note about thread
-            embed.set_footer(text="📋 Detailed analysis will be posted in the thread below...")
+            # Check if threads are supported in this channel type
+            can_create_threads = (
+                hasattr(ctx.channel, "create_thread")
+                and isinstance(ctx.channel, (discord.TextChannel, discord.VoiceChannel))
+                and not isinstance(ctx.channel, (discord.DMChannel, discord.GroupChannel))
+            )
+
+            # Only mention thread if we can create one
+            if can_create_threads:
+                embed.set_footer(text="📋 Detailed analysis will be posted in the thread below...")
+            else:
+                embed.set_footer(
+                    text="📋 Detailed analysis will be posted as follow-up messages..."
+                )
 
             # Send initial embed
             webhook_message = await ctx.followup.send(embed=embed)
 
-            # Fetch the actual message from the channel to get guild info
-            # WebhookMessage doesn't have guild info, so we need to fetch it
-            initial_message = await ctx.channel.fetch_message(webhook_message.id)
+            # Try to create a thread for detailed analysis if supported
+            thread = None
+            if can_create_threads:
+                try:
+                    # Fetch the actual message from the channel to get guild info
+                    # WebhookMessage doesn't have guild info, so we need to fetch it
+                    initial_message = await ctx.channel.fetch_message(webhook_message.id)
 
-            # Create a thread for detailed analysis
-            thread = await initial_message.create_thread(
-                name=f"Deep Analysis: {meeting_id}", auto_archive_duration=1440  # 24 hours
-            )
+                    # Create a thread for detailed analysis
+                    thread = await initial_message.create_thread(
+                        name=f"Deep Analysis: {meeting_id}", auto_archive_duration=1440  # 24 hours
+                    )
 
-            await self.services.logging_service.info(
-                f"[DEEPINFO] Created thread {thread.id} for meeting {meeting_id} analysis"
-            )
+                    await self.services.logging_service.info(
+                        f"[DEEPINFO] Created thread {thread.id} for meeting {meeting_id} analysis"
+                    )
+                except discord.HTTPException as e:
+                    # If thread creation fails, log and continue without thread
+                    await self.services.logging_service.warning(
+                        f"[DEEPINFO] Could not create thread for meeting {meeting_id}: {str(e)}. Posting in channel instead."
+                    )
+                    thread = None
+
+            # Helper function to send messages to thread or channel
+            async def send_embed(embed):
+                """Send an embed to the thread if available, otherwise to the channel."""
+                if thread:
+                    await thread.send(embed=embed)
+                else:
+                    await ctx.followup.send(embed=embed)
 
             # ============================================
             # 2. Verify and display recording data
@@ -811,7 +841,7 @@ class General(commands.Cog):
                     inline=False,
                 )
 
-            await thread.send(embed=recordings_embed)
+            await send_embed(recordings_embed)
 
             # ============================================
             # 3. Verify and display transcription data
@@ -879,7 +909,7 @@ class General(commands.Cog):
                     inline=False,
                 )
 
-            await thread.send(embed=transcripts_embed)
+            await send_embed(transcripts_embed)
 
             # ============================================
             # 4. Display all summary layers
@@ -982,7 +1012,7 @@ class General(commands.Cog):
                                 inline=False,
                             )
 
-                        await thread.send(embed=summary_embed)
+                        await send_embed(summary_embed)
 
                         # Send full summary in separate messages if requested
                         if main_summary:
@@ -1005,7 +1035,7 @@ class General(commands.Cog):
                                     color=discord.Color.blue(),
                                 )
                                 chunk_embed.set_footer(text=f"Meeting ID: {meeting_id}")
-                                await thread.send(embed=chunk_embed)
+                                await send_embed(chunk_embed)
 
                             # Send summary layers if they exist
                             if summary_layers:
@@ -1023,7 +1053,7 @@ class General(commands.Cog):
                                                 color=discord.Color.teal(),
                                             )
                                             layer_embed.set_footer(text=f"Meeting ID: {meeting_id}")
-                                            await thread.send(embed=layer_embed)
+                                            await send_embed(layer_embed)
 
                     except json.JSONDecodeError as e:
                         await self.services.logging_service.warning(
@@ -1034,7 +1064,7 @@ class General(commands.Cog):
                             description="Compiled transcript file is malformed.",
                             color=discord.Color.red(),
                         )
-                        await thread.send(embed=error_embed)
+                        await send_embed(error_embed)
                     except Exception as e:
                         await self.services.logging_service.error(
                             f"[DEEPINFO] Error reading compiled transcript file for meeting {meeting_id}: {str(e)}"
@@ -1044,7 +1074,7 @@ class General(commands.Cog):
                             description="Error reading compiled transcript file.",
                             color=discord.Color.red(),
                         )
-                        await thread.send(embed=error_embed)
+                        await send_embed(error_embed)
                 else:
                     # File not found
                     await self.services.logging_service.warning(
@@ -1055,7 +1085,7 @@ class General(commands.Cog):
                         description="Compiled transcript file not found on disk.",
                         color=discord.Color.orange(),
                     )
-                    await thread.send(embed=error_embed)
+                    await send_embed(error_embed)
             else:
                 # No compiled transcript
                 await self.services.logging_service.info(
@@ -1066,7 +1096,7 @@ class General(commands.Cog):
                     description="Compiled transcript not yet available. Transcription may still be in progress.",
                     color=discord.Color.orange(),
                 )
-                await thread.send(embed=error_embed)
+                await send_embed(error_embed)
 
             # ============================================
             # 5. Final completion message
@@ -1084,7 +1114,7 @@ class General(commands.Cog):
                 text=f"Requested by {ctx.author.name}",
                 icon_url=ctx.author.avatar.url if ctx.author.avatar else None,
             )
-            await thread.send(embed=final_embed)
+            await send_embed(final_embed)
 
         except ValueError as e:
             # Meeting not found or invalid ID

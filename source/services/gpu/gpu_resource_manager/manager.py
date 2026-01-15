@@ -97,6 +97,8 @@ class GPUResourceManager(Manager):
         # Scheduling parameters
         self.MAX_CONSECUTIVE_TRANSCRIPTION = 2
         self.MAX_CONSECUTIVE_TEXT_EMBEDDING = 2  # Updated to 2
+        self.MAX_CONSECUTIVE_SUMMARIZATION = 2
+        self.MAX_CONSECUTIVE_VECTOR_RERANKER = 2
         self.MAX_CONSECUTIVE_MISC_CHAT = 1  # Low priority
         # Chatbot has no limit (infinite)
 

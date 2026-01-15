@@ -184,9 +184,7 @@ async def query_reel_summaries(
         collection_name = f"reels_{guild_id}"
 
         # Check if collection exists
-        collection_exists = await asyncio.to_thread(
-            lambda: vector_db_client.collection_exists(collection_name)
-        )
+        collection_exists = await vector_db_client.collection_exists(collection_name)
 
         if not collection_exists:
             return {

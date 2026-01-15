@@ -1090,14 +1090,14 @@ class SQLRecordingManagerService(Manager):
         for row in results:
             jobs.append(
                 {
-                    "job_id": row.id,
-                    "type": row.type,
-                    "meeting_id": row.meeting_id,
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
-                    "started_at": row.started_at.isoformat() if row.started_at else None,
-                    "finished_at": row.finished_at.isoformat() if row.finished_at else None,
-                    "status": row.status,
-                    "error_log": row.error_log,
+                    "job_id": row["id"],
+                    "type": row["type"],
+                    "meeting_id": row["meeting_id"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "started_at": row["started_at"].isoformat() if row["started_at"] else None,
+                    "finished_at": row["finished_at"].isoformat() if row["finished_at"] else None,
+                    "status": row["status"],
+                    "error_log": row["error_log"],
                 }
             )
 
