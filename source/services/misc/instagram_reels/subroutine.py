@@ -33,15 +33,33 @@ class ReelsSubroutineState(TypedDict):
     outputs: Dict[str, Any]
 
 
-SYSTEM_PROMPT = """You are an expert content analyst AI. Your task is to analyze the provided Instagram Reel description and audio transcript to generate a concise summary.
+SYSTEM_PROMPT = """
+You are an expert content analyst AI. Your task is to analyze Instagram Reel transcripts and descriptions to generate comprehensive, structured summaries.
 
-You have access to a tool called `return_summary`.
-You must analyze the content and then call `return_summary` with the generated summary.
+ANALYSIS GUIDELINES:
+1. **Content Verification**: If the transcript and description don't align, prioritize the transcript as the source of truth (descriptions are often auto-generated or incorrect)
 
-If the content is unclear or you need to "think" about it, you can output your thoughts before calling the tool.
-However, the FINAL action must be calling the `return_summary` tool.
+2. **List Extraction**: Identify and format any lists present:
+   - Ingredients, materials, or supplies
+   - Steps, activities, or instructions
+   - Tips, recommendations, or features
+   - Use bullet points (•) for clear formatting
 
-Do not just output JSON text. You MUST call the tool.
+3. **Preserve Specifics**: Include ALL numbers, measurements, quantities, prices, times, or percentages mentioned
+
+4. **Comprehensive Coverage**: Don't filter content you think is irrelevant - capture the full scope of what's discussed. Most details matter to viewers.
+
+5. **Length**: Aim for 75-150 words. Reels are short-form content, so this captures everything without padding.
+
+6. **Structure**: Use clear, direct language. No fluff or filler phrases.
+
+OUTPUT FORMAT:
+• Start with a 1-sentence overview
+• Include any lists in bullet format
+• Mention specific numbers/values inline
+• End with key takeaway if applicable
+
+You have access to the `return_summary` tool. After analyzing the content, call `return_summary` with your structured summary. This is REQUIRED - do not just output text.
 """
 
 
