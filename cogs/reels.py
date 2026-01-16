@@ -89,14 +89,25 @@ class Reels(commands.Cog):
         Paginates through messages in batches of 100, going back in time from now,
         until either max_reels are found or all messages have been checked.
         """
+        channel = ctx.channel
+        channel_id = channel.id
+        channel_type = "thread" if isinstance(channel, discord.Thread) else "channel"
+
+        # Check if this channel is being monitored
+        if not self.services.instagram_reels_manager.is_channel_monitored(channel_id):
+            await ctx.respond(
+                f"❌ This {channel_type} is not currently being monitored for Instagram Reels.\n"
+                f"Use `/monitor-reels` first to enable monitoring for this {channel_type}.",
+                ephemeral=True,
+            )
+            return
+
         await ctx.defer()
 
         import re
 
-        channel = ctx.channel
-        channel_type = "thread" if isinstance(channel, discord.Thread) else "channel"
         guild_id = str(ctx.guild.id) if ctx.guild else "DM"
-
+        
         # Track progress
         reels_found = 0
         reels_processed = 0
