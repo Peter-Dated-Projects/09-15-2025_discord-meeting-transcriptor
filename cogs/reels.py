@@ -66,6 +66,171 @@ class Reels(commands.Cog):
             ephemeral=False,
         )
 
+    @discord.slash_command(
+        name="reel-process-past",
+        description="Process past Instagram Reels from channel history",
+    )
+    @commands.has_permissions(administrator=True)
+    async def reel_process_past(
+        self,
+        ctx: discord.ApplicationContext,
+        max_reels: discord.Option(
+            int,
+            description="Maximum number of reels to process (default: 20)",
+            required=False,
+            default=20,
+            min_value=1,
+            max_value=500,
+        ) = 20,
+    ):
+        """
+        Process past Instagram Reels from channel history.
+
+        Paginates through messages in batches of 100, going back in time from now,
+        until either max_reels are found or all messages have been checked.
+        """
+        await ctx.defer()
+
+        import re
+
+        channel = ctx.channel
+        channel_type = "thread" if isinstance(channel, discord.Thread) else "channel"
+        guild_id = str(ctx.guild.id) if ctx.guild else "DM"
+
+        # Track progress
+        reels_found = 0
+        reels_processed = 0
+        reels_skipped = 0
+        messages_checked = 0
+        batch_size = 100
+
+        # Regex for Instagram Reel URL
+        reel_pattern = re.compile(r"(https?://www\.instagram\.com/(?:reel|p)/[\w-]+)")
+
+        # Send initial status
+        status_msg = await ctx.followup.send(
+            f"🔍 Scanning {channel_type} history for Instagram Reels...\n"
+            f"Target: {max_reels} reels\n"
+            f"Messages checked: 0\n"
+            f"Reels found: 0",
+        )
+
+        try:
+            # Paginate through message history
+            async for message in channel.history(limit=None, oldest_first=False):
+                messages_checked += 1
+
+                # Update status every 100 messages
+                if messages_checked % 100 == 0:
+                    await status_msg.edit(
+                        content=f"🔍 Scanning {channel_type} history...\n"
+                        f"Target: {max_reels} reels | Found: {reels_found} | Processed: {reels_processed} | Skipped: {reels_skipped}\n"
+                        f"Messages checked: {messages_checked}",
+                    )
+
+                # Skip bot messages
+                if message.author.bot:
+                    continue
+
+                # Check for reel URLs
+                url_match = reel_pattern.search(message.content)
+                if not url_match:
+                    continue
+
+                url = url_match.group(1)
+                reels_found += 1
+
+                # Check if already processed (in-memory cache)
+                if self.services.instagram_reels_manager.is_reel_processed(url, guild_id):
+                    reels_skipped += 1
+                    logger.info(f"Skipping already-processed reel (in-memory): {url}")
+                    continue
+
+                # Check if already exists in database (persistent check)
+                from source.services.misc.instagram_reels.storage import check_reel_exists
+
+                if await check_reel_exists(self.services, url, guild_id):
+                    reels_skipped += 1
+                    # Mark in memory too to avoid redundant DB checks
+                    self.services.instagram_reels_manager.mark_reel_processed(url, guild_id)
+                    logger.info(f"Skipping already-processed reel (database): {url}")
+                    continue
+
+                # Mark as processing
+                self.services.instagram_reels_manager.mark_reel_processed(url, guild_id)
+
+                # Process the reel
+                try:
+                    # Update status
+                    await status_msg.edit(
+                        content=f"🔄 Processing reel {reels_processed + 1}/{max_reels}...\n"
+                        f"Messages checked: {messages_checked} | Found: {reels_found} | Skipped: {reels_skipped}",
+                    )
+
+                    # Run full analysis via manager
+                    data = await self.services.instagram_reels_manager.run_analysis_workflow(
+                        url, job_id_suffix=f"past_{message.id}"
+                    )
+
+                    # Extract the summary
+                    summary = data.get("summary", "No summary generated")
+
+                    # Store in vectordb
+                    try:
+                        from source.services.misc.instagram_reels.storage import (
+                            generate_and_store_reel_embeddings,
+                        )
+
+                        await generate_and_store_reel_embeddings(
+                            services=self.services,
+                            summary_text=summary,
+                            description=data.get("description", ""),
+                            reel_url=url,
+                            guild_id=guild_id,
+                            message_id=str(message.id),
+                            message_content=message.content,
+                            user_id=str(message.author.id),
+                            channel_id=str(message.channel.id),
+                            timestamp=message.created_at.isoformat(),
+                        )
+
+                        reels_processed += 1
+                        logger.info(f"Successfully processed and stored reel: {url}")
+
+                    except Exception as storage_error:
+                        logger.error(
+                            f"Failed to store reel embeddings for {url}: {storage_error}",
+                            exc_info=True,
+                        )
+                        # Still count as processed even if storage fails
+                        reels_processed += 1
+
+                except Exception as e:
+                    logger.error(f"Error processing reel {url}: {e}", exc_info=True)
+                    # Continue to next reel
+                    continue
+
+                # Check if we've hit our target
+                if reels_processed >= max_reels:
+                    break
+
+            # Final status update
+            await status_msg.edit(
+                content=f"✅ **Scan Complete**\n"
+                f"Messages checked: {messages_checked}\n"
+                f"Reels found: {reels_found}\n"
+                f"Reels processed: {reels_processed}\n"
+                f"Reels skipped (already processed): {reels_skipped}",
+            )
+
+        except Exception as e:
+            logger.error(f"Error during reel-process-past: {e}", exc_info=True)
+            await status_msg.edit(
+                content=f"❌ Error during scan: {str(e)}\n"
+                f"Messages checked: {messages_checked}\n"
+                f"Reels processed: {reels_processed}",
+            )
+
     # Message handler logic
     async def filter_message(self, message: discord.Message) -> bool:
         # Check if the specific channel or thread is being monitored
