@@ -329,3 +329,20 @@ class SubscriptionsModel(Base):
         nullable=False,
         default=SubscriptionType.FREE.value,
     )
+
+
+class EchoChannelsModel(Base):
+    """
+    Tracks channels where echo bot interaction is enabled.
+    Echo bot allows conversational interaction without creating threads.
+
+    Channel ID = Discord Channel ID (Primary Key, not for threads)
+    Guild ID = Discord Guild (Server) ID
+    Enabled At = Timestamp when echo was enabled for this channel
+    """
+
+    __tablename__ = "echo_channels"
+
+    channel_id = Column(String(20), primary_key=True, index=True)
+    guild_id = Column(String(20), nullable=False, index=True)
+    enabled_at = Column(DateTime(timezone=True), nullable=False)

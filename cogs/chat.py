@@ -43,6 +43,7 @@ class Chat(commands.Cog):
         This cog handles messages where:
         - The bot is mentioned, OR
         - The message is in a thread with an active conversation (in-memory or SQL)
+        - The message is in an echo-enabled channel/thread
         - In a guild (not DMs)
         - From a non-bot user
         - Thread monitoring is not stopped (unless bot is mentioned to re-enable)
@@ -65,6 +66,9 @@ class Chat(commands.Cog):
         # Check if bot is mentioned (this always takes priority for some checks)
         bot_mentioned = self.bot.user in message.mentions
 
+        # Get channel ID for echo check
+        channel_id = str(message.channel.id)
+
         # Check if message is in a thread
         if isinstance(message.channel, discord.Thread):
             thread_id = str(message.channel.id)
@@ -73,6 +77,10 @@ class Chat(commands.Cog):
             # Block ALL LLM queries in reel-monitored threads
             if self.services.instagram_reels_manager.is_channel_monitored(message.channel.id):
                 return False
+
+            # Check if this thread is echo-enabled (auto-respond to all messages)
+            if self.services.echo_manager.is_echo_enabled(thread_id):
+                return True
 
             # If monitoring is stopped for this thread
             if self.services.conversation_manager.is_monitoring_stopped(thread_id):
@@ -113,6 +121,11 @@ class Chat(commands.Cog):
                     await self.services.logging_service.error(
                         f"Failed to load conversation for thread {thread_id}: {e}"
                     )
+
+        # Check if this channel is echo-enabled (not a thread, regular channel)
+        # This allows responding to all messages in echo-enabled channels
+        if self.services.echo_manager.is_echo_enabled(channel_id):
+            return True
 
         # Block bot mentions in reel-monitored channels or threads
         if self.services.instagram_reels_manager.is_channel_monitored(message.channel.id):
@@ -247,6 +260,151 @@ class Chat(commands.Cog):
 
                     return True
 
+            # Check if this is an echo-enabled channel (not a thread)
+            # Echo-enabled channels allow messages without bot mentions
+            if not isinstance(message.channel, discord.Thread):
+                channel_id_str = str(channel_id)
+                if self.services.echo_manager.is_echo_enabled(channel_id_str):
+                    await self.services.logging_service.info(
+                        f"Echo-enabled channel message in #{channel_name} ({channel_id_str}) "
+                        f"by {author_name} ({author_id})"
+                    )
+
+                    # Check if we have an active conversation for this channel
+                    conversation = self.services.conversation_manager.get_conversation(
+                        channel_id_str
+                    )
+
+                    if conversation:
+                        # Existing conversation for this channel
+                        await self.services.logging_service.info(
+                            f"Processing message in echo-enabled channel with existing conversation"
+                        )
+
+                        # Check conversation status
+                        if conversation.status == ConversationStatus.IDLE:
+                            # Create new chat job
+                            conversation_id = await self._get_conversation_id_from_thread(
+                                channel_id_str
+                            )
+                            if conversation_id:
+                                # Send thinking message
+                                await message.channel.send("*Echo is thinking...*")
+
+                                job_id = (
+                                    await self.services.chat_job_manager.create_and_queue_chat_job(
+                                        thread_id=channel_id_str,
+                                        conversation_id=conversation_id,
+                                        message=message_content,
+                                        user_id=author_id,
+                                        attachments=attachments if attachments else None,
+                                        guild_id=guild_id,
+                                        discord_message=message,
+                                    )
+                                )
+                                await self.services.logging_service.info(
+                                    f"Created chat job {job_id} for echo-enabled channel {channel_id_str}"
+                                )
+                            else:
+                                await self.services.logging_service.error(
+                                    f"Failed to get conversation ID for echo-enabled channel {channel_id_str}"
+                                )
+                        else:
+                            # AI is thinking or processing queue - add to message queue
+                            queued = await self.services.chat_job_manager.queue_user_message(
+                                thread_id=channel_id_str,
+                                message=message_content,
+                                user_id=author_id,
+                                attachments=attachments if attachments else None,
+                            )
+                            if queued:
+                                await self.services.logging_service.info(
+                                    f"Queued message from {author_id} in echo-enabled channel {channel_id_str}"
+                                )
+                            else:
+                                await self.services.logging_service.warning(
+                                    f"Failed to queue message - no active job for channel {channel_id_str}"
+                                )
+
+                        return True
+
+                    else:
+                        # No conversation yet for this echo-enabled channel - create one
+                        await self.services.logging_service.info(
+                            f"Creating new conversation for echo-enabled channel #{channel_name} ({channel_id_str})"
+                        )
+
+                        # Send thinking message
+                        await message.channel.send("*Echo is thinking...*")
+
+                        # Create a new Conversation object using channel_id as the "thread_id"
+                        conversation = self.services.conversation_manager.create_conversation(
+                            thread_id=channel_id_str,
+                            guild_id=guild_id,
+                            guild_name=guild_name,
+                            requester=author_id,
+                        )
+
+                        await self.services.logging_service.info(
+                            f"Created conversation in memory for echo-enabled channel {channel_id_str}"
+                        )
+
+                        # Save conversation to disk
+                        save_success = await conversation.save_conversation()
+                        if save_success:
+                            await self.services.logging_service.info(
+                                f"Saved conversation to disk: {conversation.filename}"
+                            )
+                        else:
+                            await self.services.logging_service.error(
+                                f"Failed to save conversation to disk for channel {channel_id_str}"
+                            )
+
+                        # Create SQL entry in conversations table
+                        conversation_id = (
+                            await self.services.conversations_sql_manager.insert_conversation(
+                                discord_thread_id=channel_id_str,
+                                discord_requester_id=author_id,
+                                discord_guild_id=guild_id,
+                                chat_meta={
+                                    "channel_name": channel_name,
+                                    "guild_name": guild_name,
+                                    "is_echo_channel": True,
+                                },
+                            )
+                        )
+
+                        await self.services.logging_service.info(
+                            f"Created conversation SQL entry: {conversation_id} for echo-enabled channel"
+                        )
+
+                        # Create SQL entry in conversation_store table
+                        store_id = await self.services.conversations_store_sql_manager.insert_conversation_store(
+                            session_id=conversation_id,
+                            filename=conversation.filename,
+                        )
+
+                        await self.services.logging_service.info(
+                            f"Created conversation_store SQL entry: {store_id} for channel {channel_id_str}"
+                        )
+
+                        # Create and queue chat job
+                        job_id = await self.services.chat_job_manager.create_and_queue_chat_job(
+                            thread_id=channel_id_str,
+                            conversation_id=conversation_id,
+                            message=message_content,
+                            user_id=author_id,
+                            attachments=attachments if attachments else None,
+                            guild_id=guild_id,
+                            discord_message=message,
+                        )
+
+                        await self.services.logging_service.info(
+                            f"Created and queued chat job {job_id} for new echo-enabled channel conversation"
+                        )
+
+                        return True
+
             # If we reach here, it's a bot mention outside of a conversation thread
             # (or in a thread without an active conversation)
 
@@ -295,6 +453,17 @@ class Chat(commands.Cog):
                                 f"Loaded existing conversation for thread {thread_id} from storage"
                             )
 
+                            # Auto-enable echo for this thread so all messages are processed
+                            if not self.services.echo_manager.is_echo_enabled(thread_id):
+                                await self.services.echo_manager.enable_echo(
+                                    channel_id=thread_id,
+                                    guild_id=guild_id,
+                                    echo_sql_manager=self.services.echo_sql_manager,
+                                )
+                                await self.services.logging_service.info(
+                                    f"Auto-enabled echo for existing thread {thread_id}"
+                                )
+
                             # Create and queue chat job with existing conversation
                             job_id = await self.services.chat_job_manager.create_and_queue_chat_job(
                                 thread_id=thread_id,
@@ -324,6 +493,17 @@ class Chat(commands.Cog):
                 await self.services.logging_service.info(
                     f"Creating new conversation in existing thread: {thread.name} ({thread_id})"
                 )
+
+                # Auto-enable echo for this existing thread so all messages are processed
+                if not self.services.echo_manager.is_echo_enabled(thread_id):
+                    await self.services.echo_manager.enable_echo(
+                        channel_id=thread_id,
+                        guild_id=guild_id,
+                        echo_sql_manager=self.services.echo_sql_manager,
+                    )
+                    await self.services.logging_service.info(
+                        f"Auto-enabled echo for existing thread {thread_id}"
+                    )
             else:
                 # Create a new thread from the message
                 thread = await message.create_thread(
@@ -332,6 +512,16 @@ class Chat(commands.Cog):
                 thread_id = str(thread.id)
                 await self.services.logging_service.info(
                     f"Created thread: {thread.name} ({thread_id})"
+                )
+
+                # Auto-enable echo for the new thread so all messages are processed
+                await self.services.echo_manager.enable_echo(
+                    channel_id=thread_id,
+                    guild_id=guild_id,
+                    echo_sql_manager=self.services.echo_sql_manager,
+                )
+                await self.services.logging_service.info(
+                    f"Auto-enabled echo for new thread {thread_id}"
                 )
 
             # Send "Echo is thinking..." message in the thread (italicized)
@@ -516,6 +706,15 @@ class Chat(commands.Cog):
                     f"Stopped monitoring thread {thread_id} via command by user {ctx.author.id}"
                 )
 
+                # Also disable echo for this thread if enabled
+                if self.services.echo_manager.is_echo_enabled(thread_id):
+                    await self.services.echo_manager.disable_echo(
+                        thread_id, self.services.echo_sql_manager
+                    )
+                    await self.services.logging_service.info(
+                        f"Disabled echo for thread {thread_id} due to stop-monitoring-channel"
+                    )
+
                 # Send confirmation message FIRST
                 embed = discord.Embed(
                     title="✅ Monitoring Stopped",
@@ -576,6 +775,187 @@ class Chat(commands.Cog):
             embed = discord.Embed(
                 title="❌ Error",
                 description=f"An error occurred while stopping monitoring: {str(e)}",
+                color=discord.Color.red(),
+            )
+            await ctx.followup.send(embed=embed, ephemeral=True)
+
+    @commands.slash_command(
+        name="echo_enable",
+        description="Enable echo bot interaction in this channel",
+    )
+    async def echo_enable(self, ctx: discord.ApplicationContext):
+        """Enable echo bot in this channel.
+
+        The bot will respond to all messages in this channel while echo is enabled.
+        Context is maintained per-channel and persists across messages.
+
+        This command can only be used in message channels, not in threads.
+        """
+        # Log command invocation
+        await self.services.logging_service.info(
+            f"User {ctx.author.id} ({ctx.author.name}) requested echo_enable in channel {ctx.channel_id}"
+        )
+
+        # Defer response
+        await ctx.defer(ephemeral=True)
+
+        try:
+            # Check if in a thread - block execution
+            if isinstance(ctx.channel, discord.Thread):
+                embed = discord.Embed(
+                    title="❌ Cannot Use in Thread",
+                    description=(
+                        "This command can only be used in message channels, not threads.\n\n"
+                        "Please run this command in a regular text channel."
+                    ),
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+                return
+
+            channel_id = str(ctx.channel.id)
+            guild_id = str(ctx.guild.id)
+
+            # Check if already enabled
+            if self.services.echo_manager.is_echo_enabled(channel_id):
+                embed = discord.Embed(
+                    title="ℹ️ Already Enabled",
+                    description=(
+                        "Echo bot is already active in this channel.\n\n"
+                        "Use `/echo_disable` to stop echo interaction."
+                    ),
+                    color=discord.Color.blue(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+                return
+
+            # Enable echo
+            success = await self.services.echo_manager.enable_echo(
+                channel_id, guild_id, self.services.echo_sql_manager
+            )
+
+            if success:
+                await self.services.logging_service.info(
+                    f"Echo enabled for channel {channel_id} in guild {guild_id} by user {ctx.author.id}"
+                )
+
+                embed = discord.Embed(
+                    title="✅ Echo Enabled",
+                    description=(
+                        "Echo bot is now active in this channel.\n\n"
+                        "The bot will respond to all messages here.\n"
+                        "Context will be maintained across messages.\n\n"
+                        "Use `/echo_disable` to stop and clear context."
+                    ),
+                    color=discord.Color.green(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+            else:
+                embed = discord.Embed(
+                    title="❌ Failed to Enable",
+                    description="Failed to enable echo for this channel.",
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Error in echo_enable command: {e}", exc_info=True
+            )
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"An error occurred while enabling echo: {str(e)}",
+                color=discord.Color.red(),
+            )
+            await ctx.followup.send(embed=embed, ephemeral=True)
+
+    @commands.slash_command(
+        name="echo_disable",
+        description="Disable echo bot interaction in this channel",
+    )
+    async def echo_disable(self, ctx: discord.ApplicationContext):
+        """Disable echo bot in this channel.
+
+        The bot will stop responding to messages in this channel.
+        All conversation context will be cleared and messages during
+        the disabled period will not be remembered.
+
+        This command can only be used in message channels, not in threads.
+        For threads, use /stop-monitoring-channel instead.
+        """
+        # Log command invocation
+        await self.services.logging_service.info(
+            f"User {ctx.author.id} ({ctx.author.name}) requested echo_disable in channel {ctx.channel_id}"
+        )
+
+        # Defer response
+        await ctx.defer(ephemeral=True)
+
+        try:
+            # Check if in a thread - block execution
+            if isinstance(ctx.channel, discord.Thread):
+                embed = discord.Embed(
+                    title="❌ Cannot Use in Thread",
+                    description=(
+                        "This command can only be used in message channels, not threads.\n\n"
+                        "To stop the bot from responding in this thread, use `/stop-monitoring-channel` instead."
+                    ),
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+                return
+
+            channel_id = str(ctx.channel.id)
+
+            # Check if echo is enabled
+            if not self.services.echo_manager.is_echo_enabled(channel_id):
+                embed = discord.Embed(
+                    title="ℹ️ Not Enabled",
+                    description=(
+                        "Echo bot is not active in this channel.\n\n"
+                        "Use `/echo_enable` to start echo interaction."
+                    ),
+                    color=discord.Color.blue(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+                return
+
+            # Disable echo (this also clears context)
+            success = await self.services.echo_manager.disable_echo(
+                channel_id, self.services.echo_sql_manager
+            )
+
+            if success:
+                await self.services.logging_service.info(
+                    f"Echo disabled for channel {channel_id} by user {ctx.author.id}"
+                )
+
+                embed = discord.Embed(
+                    title="✅ Echo Disabled",
+                    description=(
+                        "Echo bot has been disabled in this channel.\n\n"
+                        "All conversation context has been cleared.\n"
+                        "Messages during the disabled period will not be remembered.\n\n"
+                        "Use `/echo_enable` to start a new conversation."
+                    ),
+                    color=discord.Color.green(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+            else:
+                embed = discord.Embed(
+                    title="❌ Failed to Disable",
+                    description="Failed to disable echo for this channel.",
+                    color=discord.Color.red(),
+                )
+                await ctx.followup.send(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            await self.services.logging_service.error(
+                f"Error in echo_disable command: {e}", exc_info=True
+            )
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"An error occurred while disabling echo: {str(e)}",
                 color=discord.Color.red(),
             )
             await ctx.followup.send(embed=embed, ephemeral=True)

@@ -4,6 +4,7 @@ from source.server.sql_models import (
     CompiledTranscriptsModel,
     ConversationsModel,
     ConversationsStoreModel,
+    EchoChannelsModel,
     GuildAdminWhitelistModel,
     JobsModel,
     JobsStatusErrorLogModel,
@@ -32,6 +33,7 @@ SQL_DATABASE_MODELS = [
     ConversationsModel,
     SubscriptionsModel,
     ConversationsStoreModel,
+    EchoChannelsModel,
 ]
 
 
