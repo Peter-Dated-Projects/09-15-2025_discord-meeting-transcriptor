@@ -41,6 +41,8 @@ class ServicesManager:
         chat_job_manager: Any | None = None,
         mcp_manager: Any | None = None,
         instagram_reels_manager: Any | None = None,
+        echo_manager: Any | None = None,
+        echo_sql_manager: Any | None = None,
     ):
         self.context = context
         # Backward compatibility - keep server reference
@@ -97,6 +99,10 @@ class ServicesManager:
 
         # Instagram Reels manager
         self.instagram_reels_manager = instagram_reels_manager
+
+        # Echo manager and SQL manager
+        self.echo_manager = echo_manager
+        self.echo_sql_manager = echo_sql_manager
 
     async def initialize_all(self) -> None:
         """Initialize all service managers."""
@@ -166,6 +172,16 @@ class ServicesManager:
         # MCP manager
         if self.mcp_manager:
             await self.mcp_manager.on_start(self)
+
+        # Echo SQL manager (must be before Echo manager)
+        if self.echo_sql_manager:
+            await self.echo_sql_manager.on_start(self)
+
+        # Echo manager (load enabled channels from DB after SQL manager is ready)
+        if self.echo_manager:
+            await self.echo_manager.on_start(self)
+            if self.echo_sql_manager:
+                await self.echo_manager.load_enabled_channels_from_db(self.echo_sql_manager)
 
     async def shutdown_all(self, timeout: float = 60.0) -> None:
         """
@@ -284,6 +300,12 @@ class ServicesManager:
                 await self.mcp_manager.on_close()
                 await self.logging_service.info("✓ MCP manager closed")
 
+            # Phase 5.11: Shutdown Echo manager
+            await self.logging_service.info("Phase 5.11: Shutting down Echo manager...")
+            if self.echo_manager:
+                await self.echo_manager.on_close()
+                await self.logging_service.info("✓ Echo manager closed")
+
             # Phase 6: Stop FFmpeg conversions
             await self.logging_service.info("Phase 5: Stopping FFmpeg conversions...")
             await asyncio.wait_for(self.ffmpeg_service_manager.on_close(), timeout=timeout * 0.1)
@@ -304,6 +326,8 @@ class ServicesManager:
             await self.sql_logging_service_manager.on_close()
             if self.subscription_sql_manager:
                 await self.subscription_sql_manager.on_close()
+            if self.echo_sql_manager:
+                await self.echo_sql_manager.on_close()
             await self.logging_service.info("✓ Database connections closed")
 
             # Phase 8: Disconnect from all servers (SQL, Vector DB, Whisper)

@@ -63,6 +63,8 @@ def construct_services_manager(
     conversation_manager = None
     chat_job_manager = None
     instagram_reels_manager = None
+    echo_manager = None
+    echo_sql_manager = None
 
     # create logger
     logging_service = AsyncLoggingService(
@@ -125,6 +127,9 @@ def construct_services_manager(
         from source.services.chat.conversations_store_sql_manager.manager import (
             ConversationsStoreSQLManagerService,
         )
+        from source.services.chat.echo_sql_manager.manager import (
+            EchoSQLManagerService,
+        )
         from source.services.common.sql_logging_manager.manager import SQLLoggingManagerService
         from source.services.common.subscription_sql_manager.manager import (
             SubscriptionSQLManagerService,
@@ -136,6 +141,7 @@ def construct_services_manager(
         subscription_sql_manager = SubscriptionSQLManagerService(context=context)
         conversations_sql_manager = ConversationsSQLManagerService(context=context)
         conversations_store_sql_manager = ConversationsStoreSQLManagerService(context=context)
+        echo_sql_manager = EchoSQLManagerService(context=context)
 
         # -------------------------------------------------------------- #
         # Discord Recorder Setup
@@ -237,6 +243,14 @@ def construct_services_manager(
 
         mcp_manager = MCPManager(context=context)
 
+        # -------------------------------------------------------------- #
+        # Echo Manager Setup
+        # -------------------------------------------------------------- #
+
+        from source.services.chat.echo_manager.manager import EchoManager
+
+        echo_manager = EchoManager(context=context)
+
     # TODO: https://www.notion.so/DISC-19-create-ffmpeg-service-29c5eca3b9df805a949fdcd5850eaf5a?source=copy_link
     # # create ffmpeg service manager
     # if service_type == ServerManagerType.DEVELOPMENT:
@@ -273,4 +287,6 @@ def construct_services_manager(
         chat_job_manager=chat_job_manager,
         instagram_reels_manager=instagram_reels_manager,
         mcp_manager=mcp_manager,
+        echo_manager=echo_manager,
+        echo_sql_manager=echo_sql_manager,
     )
