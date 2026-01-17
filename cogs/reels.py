@@ -107,7 +107,7 @@ class Reels(commands.Cog):
         import re
 
         guild_id = str(ctx.guild.id) if ctx.guild else "DM"
-        
+
         # Track progress
         reels_found = 0
         reels_processed = 0
