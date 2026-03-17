@@ -3,7 +3,7 @@ name = "09-15-2025-discord-meeting-transcriptor"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "accelerate>=1.11.0",
     "aiofiles>=25.1.0",
@@ -20,7 +20,6 @@ dependencies = [
     "ninja>=1.13.0",
     "openai-harmony>=0.0.8",
     "psycopg2-binary>=2.9.11",
-    "py-cord[voice]",
     "pydantic>=2.0.0",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
@@ -47,14 +46,21 @@ dependencies = [
     "google-api-python-client>=2.187.0",
     "beautifulsoup4>=4.14.3",
     "yt-dlp>=2025.12.8",
+    "jsonpatch>=1.33",
+    "jsonpointer>=3.0.0",
+    "py-cord[voice]>=2.7.1",
+    "pynacl>=1.6.2",
 ]
+
+[install]
+link-mode = "copy"
 
 # ============================================================================
 # Build System
 # ============================================================================
-[build-system]
-requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.build_meta"
+# [build-system]
+# requires = ["setuptools>=68.0", "wheel"]
+# build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["source", "cogs"]
@@ -64,7 +70,7 @@ where = ["source", "cogs"]
 # ============================================================================
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 exclude = [".git", "__pycache__", ".venv", "build", "dist"]
 
 [tool.ruff.lint]
@@ -91,7 +97,7 @@ combine-as-imports = true
 # ============================================================================
 [tool.black]
 line-length = 100
-target-version = ["py310"]
+target-version = ["py311"]
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -130,7 +136,9 @@ known_third_party = [
 gpu-extras = ["bitsandbytes", "flash-attn"]
 
 [tool.uv.sources]
-py-cord = { git = "https://github.com/Pycord-Development/pycord" }
+# py-cord DAVE support (close code 4017 fix) landed in master, not yet on PyPI.
+# Remove this override once py-cord v2.8.0 is released.
+py-cord = { git = "https://github.com/Pycord-Development/pycord.git", rev = "master" }
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 torchaudio = { index = "pytorch-cu128" }

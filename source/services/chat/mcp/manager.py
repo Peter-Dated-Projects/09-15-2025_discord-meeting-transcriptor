@@ -68,7 +68,7 @@ class MCPManager(Manager):
         # Initialize FastMCP instance
         self._mcp = FastMCP(
             name="DiscordMeetingTranscriptor",
-            on_duplicate_tools="warn",  # Warn but allow overwriting tools
+            on_duplicate="warn",  # Warn but allow overwriting tools
         )
 
         # Track if tools have been registered
