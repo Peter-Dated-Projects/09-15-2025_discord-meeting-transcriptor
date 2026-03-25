@@ -235,6 +235,11 @@ class DiscordSessionHandler:
         # Start Pycord recording with WaveSink
         self._sink = discord.sinks.WaveSink()
 
+        # HOTFIX: Pycord 2.8.0rc1 (PR #3143) introduced an event router requiring this
+        # attribute, but neglected to initialize it upon Sink creation. 
+        if not hasattr(self._sink, "__sink_listeners__"):
+            self._sink.__sink_listeners__ = []
+
         # Start recording (callback will be triggered on stop)
         # Use sync_start=False to avoid blocking the event loop
         self.discord_voice_client.start_recording(
