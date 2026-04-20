@@ -82,6 +82,39 @@ class DiscordRecorderConstants:
 
 
 # -------------------------------------------------------------- #
+# Pycord 2.8.0rc2 Sink Compatibility Patches
+# -------------------------------------------------------------- #
+
+
+def _apply_sink_compat_patches(sink: "discord.sinks.WaveSink") -> None:
+    """Apply compatibility patches for missing Sink attributes in pycord 2.8.0rc2.
+
+    The new voice receive system (voice/receive/) expects several attributes
+    on Sink that were added to the internal API but not yet to the Sink base class:
+      - sink.__sink_listeners__  (SinkEventRouter: register/unregister listeners)
+      - sink.walk_children()     (SinkEventRouter: iterate child sinks)
+      - sink.is_opus()           (PacketDecoder: decide whether to create Opus Decoder)
+
+    This function monkey-patches safe defaults onto the instance so that
+    start_recording / stop_recording don't crash.
+    """
+    # __sink_listeners__: list of (event_name, method_name) tuples.
+    # Empty list = no custom event listeners, which is correct for our raw WaveSink usage.
+    if not hasattr(sink, "__sink_listeners__"):
+        sink.__sink_listeners__ = []
+
+    # walk_children: generator yielding child sinks.
+    # WaveSink has no children, so an empty iterator is correct.
+    if not hasattr(sink, "walk_children"):
+        sink.walk_children = lambda: iter(())
+
+    # is_opus: whether the sink expects raw opus packets (True) or decoded PCM (False).
+    # WaveSink always wants decoded PCM, so return False.
+    if not hasattr(sink, "is_opus"):
+        sink.is_opus = lambda: False
+
+
+# -------------------------------------------------------------- #
 # Discord Recorder Service Manager
 # -------------------------------------------------------------- #
 
@@ -234,11 +267,7 @@ class DiscordSessionHandler:
 
         # Start Pycord recording with WaveSink
         self._sink = discord.sinks.WaveSink()
-
-        # HOTFIX: Pycord 2.8.0rc1 (PR #3143) introduced an event router requiring this
-        # attribute, but neglected to initialize it upon Sink creation. 
-        if not hasattr(self._sink, "__sink_listeners__"):
-            self._sink.__sink_listeners__ = []
+        _apply_sink_compat_patches(self._sink)
 
         # Start recording (callback will be triggered on stop)
         # Use sync_start=False to avoid blocking the event loop
@@ -281,7 +310,7 @@ class DiscordSessionHandler:
             await self._extract_user_audio_from_sink()
 
         # Stop Pycord recording (do this AFTER extraction to preserve sink data)
-        if self.discord_voice_client.recording:
+        if self.discord_voice_client.is_recording():
             self.discord_voice_client.stop_recording()
 
         # Continue with flush if not paused
@@ -348,7 +377,7 @@ class DiscordSessionHandler:
         await self._flush_all_users(force=True)
 
         # Stop Discord recording to prevent audio collection during pause
-        if self.discord_voice_client.recording:
+        if self.discord_voice_client.is_recording():
             self.discord_voice_client.stop_recording()
             await self.services.logging_service.info(
                 f"Stopped Discord voice recording for meeting {self.meeting_id}"
@@ -434,6 +463,7 @@ class DiscordSessionHandler:
 
         # Restart Discord recording with a fresh sink
         self._sink = discord.sinks.WaveSink()
+        _apply_sink_compat_patches(self._sink)
         self.discord_voice_client.start_recording(
             self._sink, self._recording_finished_callback, sync_start=False
         )
@@ -576,20 +606,31 @@ class DiscordSessionHandler:
         current_time = get_current_timestamp_est()
         return (current_time - self.start_time).total_seconds()
 
-    async def _recording_finished_callback(self, _sink: "discord.sinks.WaveSink", *_args) -> None:
+    def _recording_finished_callback(self, error: Exception | None = None) -> None:
         """
         Callback triggered when Pycord stops recording.
 
         This is primarily for final cleanup - the periodic flush task handles
         most of the audio processing during active recording.
 
+        Note: In pycord 2.8.0rc2, AudioReader._stop() calls this synchronously
+        (not awaited), so this must be a regular function, not async.
+
         Args:
-            _sink: The WaveSink containing per-user audio data (unused - periodic flush handles this)
-            _args: Additional callback arguments (unused)
+            error: Optional exception that occurred during recording
         """
-        await self.services.logging_service.info(
-            f"Recording finished callback for meeting {self.meeting_id}"
-        )
+        # Schedule async logging on the event loop (we can't await here)
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(
+                    self.services.logging_service.info(
+                        f"Recording finished callback for meeting {self.meeting_id}"
+                        + (f" (error: {error})" if error else "")
+                    )
+                )
+        except RuntimeError:
+            pass  # No event loop available during shutdown
 
     async def _extract_user_audio_from_sink(self) -> None:
         """
