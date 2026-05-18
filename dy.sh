@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Service management script for Discord Meeting Transcriptor
-# Usage: ./dy.sh [up|down|run|restart|destroy|status|logs]
+# Usage: ./dy.sh [up|down|run|restart|destroy|status|logs|--clean]
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -354,6 +354,63 @@ show_status() {
     fi
 }
 
+# Function to clean up all PIDs and stop Docker containers
+clean_all() {
+    echo -e "${BLUE}=== Cleaning Up All Services ===${NC}"
+
+    # Kill all tracked PID file processes
+    for pid_file in "$OLLAMA_PID_FILE" "$WHISPER_PID_FILE" "$CHROMADB_ADMIN_PID_FILE"; do
+        if [ -f "$pid_file" ]; then
+            local pid
+            pid=$(cat "$pid_file")
+            local name
+            case "$pid_file" in
+                *ollama*) name="Ollama" ;;
+                *whisper*) name="Whisper Flask" ;;
+                *chromadb*) name="ChromaDB Admin Dashboard" ;;
+                *) name="Service ($pid_file)" ;;
+            esac
+            if ps -p "$pid" > /dev/null 2>&1; then
+                echo -e "${BLUE}Stopping $name (PID: $pid)...${NC}"
+                kill "$pid" 2>/dev/null
+                local count=0
+                while ps -p "$pid" > /dev/null 2>&1 && [ $count -lt 10 ]; do
+                    sleep 1
+                    count=$((count + 1))
+                done
+                if ps -p "$pid" > /dev/null 2>&1; then
+                    kill -9 "$pid" 2>/dev/null
+                fi
+                echo -e "${GREEN}✓ $name stopped${NC}"
+            else
+                echo -e "${YELLOW}$name not running (stale PID $pid)${NC}"
+            fi
+            rm -f "$pid_file"
+        fi
+    done
+
+    # Also kill any other .pid files in the project root not already tracked above
+    for pid_file in "$PROJECT_ROOT"/*.pid; do
+        [ -f "$pid_file" ] || continue
+        [[ "$pid_file" == "$OLLAMA_PID_FILE" || "$pid_file" == "$WHISPER_PID_FILE" || "$pid_file" == "$CHROMADB_ADMIN_PID_FILE" ]] && continue
+        local pid
+        pid=$(cat "$pid_file")
+        if ps -p "$pid" > /dev/null 2>&1; then
+            echo -e "${BLUE}Stopping orphaned process (PID: $pid, file: $(basename $pid_file))...${NC}"
+            kill "$pid" 2>/dev/null
+            sleep 2
+            ps -p "$pid" > /dev/null 2>&1 && kill -9 "$pid" 2>/dev/null
+            echo -e "${GREEN}✓ Stopped (PID: $pid)${NC}"
+        fi
+        rm -f "$pid_file"
+    done
+
+    echo ""
+    stop_docker_services
+    echo ""
+    echo -e "${GREEN}=== Clean complete ===${NC}"
+}
+
 # Main command handling
 case "${1:-}" in
     up)
@@ -415,6 +472,9 @@ case "${1:-}" in
         echo ""
         show_status
         ;;
+    --clean|clean)
+        clean_all
+        ;;
     status)
         show_status
         ;;
@@ -431,16 +491,17 @@ case "${1:-}" in
         echo -e "Services: mysql, chromadb"
         ;;
     *)
-        echo "Usage: $0 {up|down|run|restart|destroy|status|logs}"
+        echo "Usage: $0 {up|down|run|restart|destroy|status|logs|--clean}"
         echo ""
         echo "Commands:"
-        echo "  up      - Start all services (Docker, Ollama, Whisper Flask & ChromaDB Admin)"
-        echo "  run     - Start all services and run the application (uv run main.py)"
-        echo "  down    - Stop all services (keeps containers)"
-        echo "  restart - Restart all services"
-        echo "  destroy - Stop and remove all Docker containers"
-        echo "  status  - Show service status"
-        echo "  logs    - Show log file locations"
+        echo "  up       - Start all services (Docker, Ollama, Whisper Flask & ChromaDB Admin)"
+        echo "  run      - Start all services and run the application (uv run main.py)"
+        echo "  down     - Stop all services (keeps containers)"
+        echo "  restart  - Restart all services"
+        echo "  destroy  - Stop and remove all Docker containers"
+        echo "  status   - Show service status"
+        echo "  logs     - Show log file locations"
+        echo "  --clean  - Kill all tracked PIDs and stop Docker containers (does not remove containers)"
         echo ""
         echo "Services:"
         echo "  Docker:         MySQL, ChromaDB (via docker-compose.local.yml)"

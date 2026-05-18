@@ -135,12 +135,10 @@ known_third_party = [
 gpu-extras = ["bitsandbytes", "flash-attn"]
 
 [tool.uv.sources]
-# py-cord DAVE support (close code 4017 fix) landed in master, not yet on PyPI.
-# Remove this override once py-cord v2.8.0 is released.
-py-cord = { git = "https://github.com/Pycord-Development/pycord.git", rev = "master" }
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 torchaudio = { index = "pytorch-cu128" }
+py-cord = { git = "https://github.com/Pycord-Development/pycord", rev = "refs/pull/3159/head" }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
